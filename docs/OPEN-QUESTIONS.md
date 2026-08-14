@@ -55,6 +55,10 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   `aoe-serve`/`pl`) while still using the scaffold's build + Olve.Pipelines CD. Decide
   this early — it ripples into A3 (local HMAC makes more sense on a host), into
   persistence layout below, and is tightly coupled with **A6** (where agents run).
+- **Resolution (V0):** **host process** (systemd user unit, like `pl`/`aoe-serve`).
+  Revisit in-cluster + multi-replica only when distribution is genuinely needed — the HA
+  implications are in **A7**. A4 + A6 + A3 form one coupled cluster: *host-process ARM +
+  local agents + local HMAC* (V0) vs *in-k8s ARM + k8s-Job agents + OIDC* (distributed).
 
 ### A5. Persistence split (the big one)
 - **Context.** The scaffold's `EntityStore<T>` + snapshot persister is whole-snapshot,
@@ -72,6 +76,21 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   the persistence tier share a writer. Note the scaffold's persister safety policy
   (never overwrite good state on load failure) is exactly what ARM's restart/adoption
   reload needs — reuse it for the control-plane stores.
+- **Resolution.** One **EF Core persistence port** + a **notify port**, two impls each,
+  selected by environment:
+  - **Local (self-contained — a hard requirement):** SQLite (control-plane) + NDJSON files
+    on disk (firehose) + **in-process** notify. No daemon, no container — `arm server
+    start` and go; keeps `arm` feeling like `pl`.
+  - **Prod:** ARM **owns a private single-replica Postgres**, deployed by its own
+    `.pipelines/` (static-cred, ClusterIP, PVC) + `LISTEN/NOTIFY`. Deliberately **not** the
+    shared homelab Postgres — a private, static-cred dep avoids the shared-dependency chain
+    the self-bootstrap principle exists to kill.
+  - **Two engines, one port.** Guardrail against dialect drift: CI exercises both — SQLite
+    in-process pre-deploy, Postgres live via `test-after-beta` (see [`TESTING.md`](TESTING.md)).
+    Keep the persistence layer to the common SQL subset; PG-only bits (`NOTIFY`, JSONB)
+    live behind the notify/store port with an in-process/SQLite equivalent.
+  - SQLite is kept for local *because* self-contained local is required; it is **not**
+    carried into prod. Cross-replica/HA specifics are in **A7**.
 
 ### A6. Agent execution / hosting model
 - **Context.** The spec's V0 implies agents are **local subprocesses** of the server:
@@ -94,6 +113,15 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
      + pod logs (not PID); ARM needs RBAC to create Jobs. The memory gate/queue partly
      defer to the scheduler.
   4. **MicroVM** (Firecracker/Kata). Strongest multi-tenant isolation; overkill for V0.
+  5. **Remote subprocess over SSH** — run the agent in a folder on a registered machine ARM
+     holds an SSH key for. The executor spawns the CLI *and* runs `approved_bash`/file-ops on
+     the **target host, in the target `cwd`**, with `secretEnv` injected into the remote
+     subprocess. Requires a new **host/target registry** (`{name, ssh user@host, key ref,
+     default cwd, allowed paths}`) and a **per-session target selector** (`--target`/`--cwd`;
+     default `local`). MCP reachability via the tailnet (agent calls back to ARM) or an SSH
+     reverse tunnel. Adoption: launch under `systemd-run`/`nohup`/tmux so it survives the SSH
+     channel + an ARM restart, re-attach by tailing the remote log. Security boundary = the
+     approval/path policy, now over the remote fs. ("ARM as a dispatcher across your fleet.")
 - **Coupling.** Tied to **A4**: {ARM as host process + local/container agents} vs {ARM in
   k8s + k8s-Job agents}. Local subprocess *inside* a k8s pod is fragile — a pod restart
   kills every agent, breaking survive-and-adopt. The **adoption mechanism** (PID vs
@@ -104,6 +132,42 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   pluggable later without touching the session manager or providers (same pattern as
   `ISnapshotStore` for storage). Providers stay "*what* CLI + args"; the executor owns
   "*where/how* it runs." Consider **1b** as the near-term isolation story.
+- **Resolution.** Adopt the **`IAgentExecutor` seam** (`spawn / kill / list-running /
+  re-attach` + a uniform log stream). V0 ships **`LocalProcessExecutor`** (host process, PID
+  adoption). `KubernetesJobExecutor` when distribution is real. The **remote SSH executor**
+  (option 5) is a strong candidate feature — **open: V0 or fast-follow?** — and introduces
+  the host-registry + target-selector surface above (neither exists in the spec today).
+  `approved_bash` executes wherever the executor runs (follows the executor, not "whatever
+  replica happened to hold the call").
+
+### A7. MCP transport + approval-await under distribution / HA
+- **Context.** Approvals are a *blocking, stateful* wait: the agent's `approved_bash` MCP
+  call is held open while a human decides (defer-and-resume), then ARM executes and returns
+  stdout. On one node this is an in-memory waiter resolved by the `decide` handler in the
+  same process — correct and simple. (`approved_bash` runs as a subprocess of the ARM MCP
+  server — so "where it executes" also follows the executor, see A6.)
+- **Where it breaks with >1 replica behind an LB.** Three single-node assumptions:
+  (1) the **waiter is in-memory** — the `decide` can land on another replica; (2) the
+  **event bus + replay are per-node** — in-memory buffer + local NDJSON; (3) the **MCP call
+  is one held-open socket** — dies with its replica and fights LB idle timeouts.
+- **HA fix — uses the DB you already have, not a broker.**
+  (1) waiter → **poll the shared approvals row** / `LISTEN/NOTIFY`, not an in-memory TCS;
+  (2) fan-out + replay → shared store (the `Last-Event-ID` replay already reads a log — point
+  it at shared storage; `NOTIFY` or poll for cross-replica delivery);
+  (3) MCP → **bounded long-poll + reconnect + resume-by-`approvalToken`** (single-use,
+  HMAC-bound → idempotent; a re-poll after a replica dies lands elsewhere and reads the same
+  row). Discipline: **no authoritative wait/event state in per-replica memory or local disk.**
+- **Transport.** Keep **SSE + REST** (the spec's choice). **WebSockets do not help** —
+  cross-replica delivery is identical; the reverse channel is already REST; WS only adds
+  duplex you don't need + its own LB-affinity headaches.
+- **Load balancing.** Session affinity (pin a session's MCP + approvals to one replica) buys
+  *throughput* but not *availability* (that replica is a SPOF for its sessions). True HA =
+  stateless replicas over shared state (above); affinity then optional.
+- **When a broker (Redis/NATS) earns its place.** Only the high-rate `session.text` firehose
+  at scale — Postgres alone is fine at homelab/few-replica scale. Deferrable.
+- **Resolution.** V0 is single-node (A4 host process) → the in-memory waiter + in-process
+  bus is correct. Build it **behind the notify port (A5)** so the SQLite/in-process impl
+  becomes Postgres/`NOTIFY` when multi-replica is real. **No coordination backbone in V0.**
 
 ---
 

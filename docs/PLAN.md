@@ -23,8 +23,14 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
   - [ ] A3 — auth & token model (local HMAC vs OIDC, agent tokens, permission tiers)
   - [ ] A4 — deployment shape (host process vs k8s)
   - [ ] A5 — persistence split (control-plane store vs log/event/conversation firehose)
-  - [ ] A6 — agent execution/hosting model (local process / sandbox / container / k8s job)
+  - [ ] A6 — agent execution/hosting model (local process / sandbox / container / k8s job / SSH)
+  - [ ] A7 — MCP transport + approval-await under distribution/HA (notify port; SSE stays)
   - [ ] B1–B4 — storage layout, config location, API versioning, `queryMethod` default
+
+  Resolved directions (see [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) and [`TESTING.md`](TESTING.md)):
+  A4 host-process V0; A5 EF Core port — SQLite+NDJSON+in-process notify local / owned private
+  Postgres+`NOTIFY` prod; A6 `IAgentExecutor` seam, `LocalProcessExecutor` V0 (SSH executor
+  open: V0 vs fast-follow); A7 single-node V0 behind the notify port, no coordination backbone.
 - [ ] Write `docs/HLD.md` covering the component architecture:
   - [ ] Session manager & lifecycle state machine
   - [ ] Provider/process supervision (spawn, stream parse, PID adoption)
@@ -42,15 +48,26 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
 Establish that the scaffold produces every artifact ARM ships, before feature work.
 
 - [ ] Install/pin the .NET 10 SDK so build/test run locally (OPEN-QUESTIONS C4)
-- [ ] `dotnet build` clean; `dotnet test` green (unit + integration)
+- [ ] `dotnet build` clean; unit + in-process API tests green (SQLite + FakeProvider)
 - [ ] Docker image builds (AOT, chiseled) and runs; `/health` responds
 - [ ] Helm chart renders (ClusterIP only) with `olve-arm` names
 - [ ] OpenAPI `api.json` generates on build
 - [ ] C# (Refit) and TS (Kiota) clients generate cleanly and compile
 - [ ] Frontend builds (`dist`) and is served from `wwwroot`
 - [ ] `arm` CLI project builds and produces a distributable binary (download path like `pl`)
-- [ ] `.pipelines/` config validates; build/test/deploy scripts wire the `olve-arm` identifiers
 - [ ] Set up hosted project documentation site (mirroring the Olve.Utilities docs setup) and confirm it publishes
+
+Pipeline + testing shape (see [`TESTING.md`](TESTING.md); invoke `ovea-olve-pipelines` before editing `.pipelines/`):
+- [ ] Production (parallel): `build-and-package` + `test` (fast, no containers: build/typecheck + unit + in-process API on SQLite + FakeProvider)
+- [ ] Processing (sequential): `deploy-beta` → `test-after-beta` (live beta, LLM-free, isolated data) → `deploy`
+- [ ] Deploy ARM's **owned private Postgres** via `.pipelines/` (static-cred, ClusterIP, PVC) as part of deploy-beta/deploy
+- [ ] Drop the image-building Testcontainers path; `AppFixture` runs in base-URL mode (localhost dev / in-cluster beta Service CI)
+- [ ] `.pipelines/` scripts fetch shared `olve-lib.sh` and wire the `olve-arm` identifiers
+
+Test components to build (prerequisite for milestone testing):
+- [ ] `FakeProvider` (deterministic scripted provider; used per-push and by `test-after-beta`)
+- [ ] Record/replay LLM stub (mock endpoint in provider SSE format, seeded from recorded transcripts)
+- [ ] Verify base-URL knobs for the real CLIs (`ANTHROPIC_BASE_URL` / Codex `model_providers` base_url) via context7
 
 ## Phase 3 — Milestone breakdown
 
