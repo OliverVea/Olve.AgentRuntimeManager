@@ -46,12 +46,12 @@ at a running API:
 
 ```bash
 # against the beta pod (port-forward), matching the default proxy target:
-kubectl -n apps-beta port-forward svc/olve-agentruntimemanager 18080:80
+kubectl -n apps-beta port-forward svc/olve-arm 18080:80
 npm run dev
 
 # or against a local `dotnet run`, or the tailnet host:
 VITE_API_TARGET=http://localhost:5080 npm run dev
-VITE_API_TARGET=https://olve-agentruntimemanager-beta.ovea.pro npm run dev
+VITE_API_TARGET=https://olve-arm-beta.ovea.pro npm run dev
 ```
 
 `GET /api/messages` is anonymous, so the list loads with no auth. Creating / editing / deleting
@@ -82,15 +82,15 @@ Login is a hand-rolled, dependency-free **Authorization Code + PKCE** flow in
 The SPA authenticates as a **public** (PKCE, no secret) client, separate from the confidential
 client used for machine/CI tokens. In the homelab this is declared as an Authentik **blueprint**
 in [`Olve.Authentik`](https://github.com/OliverVea/Olve.Authentik) (GitOps — not created by hand)
-as `olve-agentruntimemanager-spa`, alongside the existing `olve-agentruntimemanager` provider. The provider:
+as `olve-arm-spa`, alongside the existing `olve-arm` provider. The provider:
 
-- **Client type:** Public. **Client ID:** `olve-agentruntimemanager-spa` (matches `Auth__Frontend__ClientId`).
+- **Client type:** Public. **Client ID:** `olve-arm-spa` (matches `Auth__Frontend__ClientId`).
 - **Redirect URIs:** `http://localhost:5173/callback` (dev) and `https://<deployed-host>/callback`.
 - **Scopes / mappings:** `openid`, `email`, `profile`, `offline_access` (the last yields a refresh token).
-- **Signing key:** the same certificate as the `olve-agentruntimemanager` provider, so the API's existing
+- **Signing key:** the same certificate as the `olve-arm` provider, so the API's existing
   JWKS validates its signatures.
 
-Its tokens carry this provider's own `iss` and an `aud` of `olve-agentruntimemanager-spa` — both different
+Its tokens carry this provider's own `iss` and an `aud` of `olve-arm-spa` — both different
 from the resource provider's. The API trusts **both** issuers and **both** audiences (the SPA is
 its own frontend), so no Authentik audience remapping is needed. See `Auth__Frontend__*` in the
 Helm values and `AuthenticationConfiguration`.

@@ -16,7 +16,7 @@ wget --no-check-certificate -qO /tmp/olve-lib.sh \
 apk add --no-cache curl
 
 HOST=oliver@bulwark-m2
-RELEASE=olve-agentruntimemanager
+RELEASE=olve-arm
 
 olve_ssh_host bulwark-m2
 
@@ -37,7 +37,7 @@ olve_helm_deploy "$HOST" "$RELEASE" apps-beta "$INPUT_DIR/helm" "$VERSION" \
 # prod does not deploy.
 echo "Waiting for beta rollout..."
 ssh -o StrictHostKeyChecking=no "$HOST" \
-  "kubectl -n apps-beta rollout status deploy/olve-agentruntimemanager --timeout=120s"
+  "kubectl -n apps-beta rollout status deploy/olve-arm --timeout=120s"
 
 # Probe the app over its private (Tailscale) host. The *-private.ovea.pro hosts resolve, via
 # external-dns, to the Tailscale IP of the in-cluster ingress — reachable on the tailnet without
@@ -46,7 +46,7 @@ ssh -o StrictHostKeyChecking=no "$HOST" \
 echo "Verifying beta /health via the private (Tailscale) host..."
 for i in 1 2 3 4 5; do
   if ssh -o StrictHostKeyChecking=no "$HOST" \
-       "curl -skf -o /dev/null https://olve-agentruntimemanager-beta.ovea.pro/health"; then
+       "curl -skf -o /dev/null https://olve-arm-beta.ovea.pro/health"; then
     echo "Beta health OK"
     exit 0
   fi

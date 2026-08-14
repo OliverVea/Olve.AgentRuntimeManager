@@ -3,11 +3,11 @@
 # via --set in deploy-beta.sh (the sloth CRD is not installed cluster-wide yet), not here.
 config:
   # Beta Authentik, used for API JWT validation (bearer tokens on protected endpoints).
-  Auth__Authority: "https://auth-beta.ovea.pro/application/o/olve-agentruntimemanager/"
-  Auth__Audience: "olve-agentruntimemanager"
+  Auth__Authority: "https://auth-beta.ovea.pro/application/o/olve-arm/"
+  Auth__Audience: "olve-arm"
   # Beta public PKCE client for the SPA login (see values.yaml for the rationale).
-  Auth__Frontend__Authority: "https://auth-beta.ovea.pro/application/o/olve-agentruntimemanager-spa/"
-  Auth__Frontend__ClientId: "olve-agentruntimemanager-spa"
+  Auth__Frontend__Authority: "https://auth-beta.ovea.pro/application/o/olve-arm-spa/"
+  Auth__Frontend__ClientId: "olve-arm-spa"
   # Debug the SPA login in beta: surface our JWT diagnostics (validated/challenge at Debug;
   # failures already log at Warning) plus the framework's own JwtBearer detail. Beta-only.
   Logging__LogLevel__Olve.AgentRuntimeManager.Auth: "Debug"

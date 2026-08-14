@@ -94,14 +94,16 @@ Ties to A1 — if we go `MapMethods("QUERY")`, confirm the default stays `"query
 
 ## C. Scaffold hygiene (generation leftovers)
 
-### C1. Deploy name is a mouthful
-The kebab transform produced `olve-agentruntimemanager` (image / helm release / auth
-authority/audience). Given we call it **ARM**, consider shortening to `arm` or `olve-arm`
-across `helm/values*.yaml` and `.pipelines/`. **Decision needed.**
+### C1. Deploy name ~~is a mouthful~~ — RESOLVED
+The kebab transform first produced `olve-agentruntimemanager`; **renamed to `olve-arm`**
+across `helm/`, `.pipelines/`, `tools/version.cs`, telemetry service name, auth
+authority/audience/client-id, frontend OIDC storage keys, and the `clients/olve-arm-client-ts`
+directory. Note: the Authentik application slugs (`olve-arm`, `olve-arm-spa`) must be created
+to match when the app is registered.
 
-### C2. `docs/DESIGN.md` is template-development docs
-The generated `docs/DESIGN.md` describes *building the Olve.Template.Api ecosystem*, not
-ARM. It's noise in this repo. **Delete, or keep as reference?**
+### C2. `docs/DESIGN.md` — RESOLVED (deleted)
+Was template-development docs (about building the Olve.Template.Api ecosystem), noise here.
+Removed.
 
 ### C3. The `Message` example feature
 The scaffold ships a `Message` CRUD example (endpoints, handlers, store, seeder, frontend

@@ -13,7 +13,7 @@ public static class TelemetryConfiguration
         var endpoint = builder.Configuration["OpenTelemetry:Endpoint"];
         if (endpoint is null) return;
 
-        var serviceName = builder.Configuration["Telemetry:ServiceName"] ?? "olve-agentruntimemanager";
+        var serviceName = builder.Configuration["Telemetry:ServiceName"] ?? "olve-arm";
         var protocol = builder.Configuration["OpenTelemetry:Protocol"];
 
         var tokenUrl = builder.Configuration["OpenTelemetry:OAuth2:TokenUrl"];

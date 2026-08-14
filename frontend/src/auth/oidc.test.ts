@@ -58,7 +58,7 @@ describe("oidc", () => {
   });
 
   it("restores a session from a persisted refresh token and exposes the user", async () => {
-    localStorage.setItem("olve-agentruntimemanager.oidc.refresh", "rt-1");
+    localStorage.setItem("olve-arm.oidc.refresh", "rt-1");
     mockFetch([
       {
         body: {
@@ -78,7 +78,7 @@ describe("oidc", () => {
   });
 
   it("proactively refreshes an access token inside the expiry skew window", async () => {
-    localStorage.setItem("olve-agentruntimemanager.oidc.refresh", "rt-1");
+    localStorage.setItem("olve-arm.oidc.refresh", "rt-1");
     mockFetch([
       { body: { access_token: "at-old", refresh_token: "rt-2", expires_in: 10 } }, // within 60s skew
       { body: { access_token: "at-new", refresh_token: "rt-3", expires_in: 3600 } },
@@ -91,13 +91,13 @@ describe("oidc", () => {
   });
 
   it("clears the session when the refresh token is rejected", async () => {
-    localStorage.setItem("olve-agentruntimemanager.oidc.refresh", "rt-expired");
+    localStorage.setItem("olve-arm.oidc.refresh", "rt-expired");
     mockFetch([{ status: 400, body: { error: "invalid_grant" } }]);
 
     await auth.init();
 
     expect(auth.isAuthenticated()).toBe(false);
-    expect(localStorage.getItem("olve-agentruntimemanager.oidc.refresh")).toBeNull();
+    expect(localStorage.getItem("olve-arm.oidc.refresh")).toBeNull();
   });
 
   it("login() stashes a PKCE verifier and redirects to the authorize endpoint with S256", async () => {
@@ -106,7 +106,7 @@ describe("oidc", () => {
 
     await auth.login();
 
-    const stash = JSON.parse(sessionStorage.getItem("olve-agentruntimemanager.oidc.pkce") ?? "{}");
+    const stash = JSON.parse(sessionStorage.getItem("olve-arm.oidc.pkce") ?? "{}");
     expect(stash.verifier).toBeTruthy();
     expect(stash.state).toBeTruthy();
 

@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: olve-agentruntimemanager
+  repository: olve-arm
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -25,14 +25,14 @@ config:
   Port: "5000"
   Logging__LogLevel__Default: "Information"
   Logging__LogLevel__Microsoft.AspNetCore: "Warning"
-  Auth__Authority: "https://auth.ovea.pro/application/o/olve-agentruntimemanager/"
-  Auth__Audience: "olve-agentruntimemanager"
+  Auth__Authority: "https://auth.ovea.pro/application/o/olve-arm/"
+  Auth__Audience: "olve-arm"
   # Public PKCE client the SPA logs in as (separate from the confidential client used for machine
   # tokens). Its tokens carry this provider's `iss` and an `aud` of its own client id, so
   # AuthenticationConfiguration trusts both issuers AND both audiences. The SPA reads these at
   # runtime from GET /api/auth-config. Defined as an Authentik blueprint in Olve.Authentik.
-  Auth__Frontend__Authority: "https://auth.ovea.pro/application/o/olve-agentruntimemanager-spa/"
-  Auth__Frontend__ClientId: "olve-agentruntimemanager-spa"
+  Auth__Frontend__Authority: "https://auth.ovea.pro/application/o/olve-arm-spa/"
+  Auth__Frontend__ClientId: "olve-arm-spa"
   OpenTelemetry__Endpoint: "https://otel.ovea.pro"
   OpenTelemetry__Protocol: "http"
   OpenTelemetry__OAuth2__TokenUrl: "https://auth.ovea.pro/application/o/token/"

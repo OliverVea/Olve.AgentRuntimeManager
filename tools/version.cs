@@ -3,7 +3,7 @@ using System.Diagnostics;
 var ci = false;
 var runNumber = 0;
 var rid = "";
-var name = "olve-agentruntimemanager";
+var name = "olve-arm";
 
 for (var i = 0; i < args.Length; i++)
 {

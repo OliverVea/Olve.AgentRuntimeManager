@@ -40,9 +40,9 @@ export interface User {
 }
 
 const CALLBACK_PATH = "/callback";
-const REFRESH_KEY = "olve-agentruntimemanager.oidc.refresh";
-const USER_KEY = "olve-agentruntimemanager.oidc.user";
-const PKCE_KEY = "olve-agentruntimemanager.oidc.pkce"; // sessionStorage: survives the redirect round-trip
+const REFRESH_KEY = "olve-arm.oidc.refresh";
+const USER_KEY = "olve-arm.oidc.user";
+const PKCE_KEY = "olve-arm.oidc.pkce"; // sessionStorage: survives the redirect round-trip
 const REFRESH_SKEW_S = 60; // refresh this many seconds before the access token actually expires
 
 let config: AuthConfig | null = null;

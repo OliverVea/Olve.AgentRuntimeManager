@@ -24,6 +24,6 @@ olve_fetch_repo "$REPO" "$BRANCH" "$CTX"
 olve_stage_artifact "$CTX/helm" /output/helm
 echo "$VERSION" > /output/version.txt
 
-olve_kaniko_build "$CTX" "olve-agentruntimemanager:$VERSION"
+olve_kaniko_build "$CTX" "olve-arm:$VERSION"
 
-echo "Build complete: olve-agentruntimemanager:$VERSION"
+echo "Build complete: olve-arm:$VERSION"

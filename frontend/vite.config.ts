@@ -4,8 +4,8 @@ import { defineConfig } from "vitest/config";
 // API paths to the real backend — no CORS, no base-URL juggling in the component.
 //
 //   VITE_API_TARGET   backend the dev proxy forwards to (default: the port-forward from
-//                     `kubectl port-forward svc/olve-agentruntimemanager 18080:80`, or a local
-//                     `dotnet run`). On the tailnet: https://olve-agentruntimemanager-beta.ovea.pro
+//                     `kubectl port-forward svc/olve-arm 18080:80`, or a local
+//                     `dotnet run`). On the tailnet: https://olve-arm-beta.ovea.pro
 //
 // In a production build the component reads VITE_API_BASE_URL (falling back to same-origin),
 // so deploy the static bundle behind the same host that serves the API, or set it explicitly.

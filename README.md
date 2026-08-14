@@ -24,7 +24,7 @@ src/Olve.AgentRuntimeManager/                          # API application (minima
 test/Olve.AgentRuntimeManager.UnitTests/               # Unit tests (TUnit + Rocks)
 test/Olve.AgentRuntimeManager.IntegrationTests/        # Integration tests (TUnit + Testcontainers)
 clients/Olve.AgentRuntimeManager.Client/               # Generated C# client (Refitter CLI + Refit)
-clients/olve-agentruntimemanager-client-ts/            # Generated TypeScript client (Kiota)
+clients/olve-arm-client-ts/            # Generated TypeScript client (Kiota)
 frontend/                                       # Vanilla Web Components + TS frontend (see frontend/README.md)
 tools/version.cs                                # CalVer versioning script
 helm/                                           # Helm chart for Kubernetes (ClusterIP Service + SLO)
@@ -106,7 +106,7 @@ Test execution is controlled by MSBuild properties:
 dotnet run --project src/Olve.AgentRuntimeManager
 
 # Kubernetes
-helm install olve-agentruntimemanager helm/
+helm install olve-arm helm/
 ```
 
 ## Deployment (GitOps)
@@ -175,7 +175,7 @@ Sources in priority order (highest wins):
 | `Host` | `localhost` | Listen address |
 | `Port` | `5000` | Listen port |
 | `Auth:Authority` | `https://auth.ovea.pro/...` | OIDC authority (Authentik) |
-| `Auth:Audience` | `olve-agentruntimemanager` | JWT audience |
+| `Auth:Audience` | `olve-arm` | JWT audience |
 | `Auth:SigningKey` | _(null)_ | Local HS256 key (bypasses OIDC, for dev) |
 | `OpenTelemetry:Endpoint` | `https://otel.ovea.pro` | OTLP endpoint (null = disabled) |
 | `Storage:Mode` | `Ephemeral` | `Ephemeral` (in-memory) or `Persistent` (snapshot to disk) |
@@ -203,7 +203,7 @@ The `clients/Olve.AgentRuntimeManager.Client/` project generates a typed [Refit]
 
 ```bash
 dotnet tool restore
-dotnet kiota generate -l typescript -d api.json -c OlveTemplateApiClient -o clients/olve-agentruntimemanager-client-ts/src -n OlveTemplateApi
+dotnet kiota generate -l typescript -d api.json -c OlveTemplateApiClient -o clients/olve-arm-client-ts/src -n OlveTemplateApi
 ```
 
 ## Frontend
@@ -244,7 +244,7 @@ dotnet run tools/version.cs -- --ci --run-number 42
 
 # With runtime identifier for artifact naming
 dotnet run tools/version.cs -- --ci --run-number 42 --rid linux-x64
-# artifact-name=olve-agentruntimemanager-2026.3.28.42+cb9a99b-linux-x64
+# artifact-name=olve-arm-2026.3.28.42+cb9a99b-linux-x64
 ```
 
 ## CI

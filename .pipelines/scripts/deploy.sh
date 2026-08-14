@@ -12,7 +12,7 @@ wget --no-check-certificate -qO /tmp/olve-lib.sh \
 . /tmp/olve-lib.sh
 
 HOST=oliver@bulwark-m2
-RELEASE=olve-agentruntimemanager
+RELEASE=olve-arm
 
 olve_ssh_host bulwark-m2
 
@@ -24,7 +24,7 @@ echo "Deploying $RELEASE:$VERSION"
 olve_image_import "$INPUT_DIR/image.tar" "$HOST"
 
 # Verify the image is visible to CRI.
-ssh -o StrictHostKeyChecking=no "$HOST" "sudo crictl images | grep olve-agentruntimemanager"
+ssh -o StrictHostKeyChecking=no "$HOST" "sudo crictl images | grep olve-arm"
 
 # slo.enabled=false: this chart defines an slo block defaulting to true, but the sloth
 # CRD is not installed cluster-wide — passed through here, not baked into the shared lib.
