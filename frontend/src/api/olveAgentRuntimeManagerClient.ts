@@ -17,11 +17,11 @@ import { MultipartSerializationWriterFactory } from '@microsoft/kiota-serializat
 import { TextParseNodeFactory, TextSerializationWriterFactory } from '@microsoft/kiota-serialization-text';
 
 /**
- * Instantiates a new {@link OlveTemplateApiClient} and sets the default values.
+ * Instantiates a new {@link OlveAgentRuntimeManagerClient} and sets the default values.
  * @param requestAdapter The request adapter to use to execute the requests.
  */
 // @ts-ignore
-export function createOlveTemplateApiClient(requestAdapter: RequestAdapter) {
+export function createOlveAgentRuntimeManagerClient(requestAdapter: RequestAdapter) {
     if (requestAdapter === undefined) {
         throw new Error("requestAdapter cannot be undefined");
     }
@@ -45,12 +45,12 @@ export function createOlveTemplateApiClient(requestAdapter: RequestAdapter) {
     const pathParameters: Record<string, unknown> = {
         "baseurl": requestAdapter.baseUrl,
     };
-    return apiClientProxifier<OlveTemplateApiClient>(requestAdapter, pathParameters, OlveTemplateApiClientNavigationMetadata, undefined);
+    return apiClientProxifier<OlveAgentRuntimeManagerClient>(requestAdapter, pathParameters, OlveAgentRuntimeManagerClientNavigationMetadata, undefined);
 }
 /**
  * The main entry point of the SDK, exposes the configuration and the fluent API.
  */
-export interface OlveTemplateApiClient extends BaseRequestBuilder<OlveTemplateApiClient> {
+export interface OlveAgentRuntimeManagerClient extends BaseRequestBuilder<OlveAgentRuntimeManagerClient> {
     /**
      * The api property
      */
@@ -63,11 +63,11 @@ export interface OlveTemplateApiClient extends BaseRequestBuilder<OlveTemplateAp
 /**
  * Uri template for the request builder.
  */
-export const OlveTemplateApiClientUriTemplate = "{+baseurl}";
+export const OlveAgentRuntimeManagerClientUriTemplate = "{+baseurl}";
 /**
  * Metadata for all the navigation properties in the request builder.
  */
-export const OlveTemplateApiClientNavigationMetadata: Record<Exclude<keyof OlveTemplateApiClient, KeysToExcludeForNavigationMetadata>, NavigationMetadata> = {
+export const OlveAgentRuntimeManagerClientNavigationMetadata: Record<Exclude<keyof OlveAgentRuntimeManagerClient, KeysToExcludeForNavigationMetadata>, NavigationMetadata> = {
     api: {
         navigationMetadata: ApiRequestBuilderNavigationMetadata,
     },

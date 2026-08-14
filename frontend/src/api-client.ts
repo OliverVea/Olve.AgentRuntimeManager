@@ -5,9 +5,9 @@ import {
 } from "@microsoft/kiota-abstractions";
 import { FetchRequestAdapter, HttpClient } from "@microsoft/kiota-http-fetchlibrary";
 import {
-  createOlveTemplateApiClient,
-  type OlveTemplateApiClient,
-} from "./api/olveTemplateApiClient.js";
+  createOlveAgentRuntimeManagerClient,
+  type OlveAgentRuntimeManagerClient,
+} from "./api/olveAgentRuntimeManagerClient.js";
 
 /** Supplies the current bearer token (async — it may refresh), or nullish for anonymous. */
 export type TokenSource = () => Promise<string | null | undefined>;
@@ -39,7 +39,7 @@ class BearerTokenAuthenticationProvider implements AuthenticationProvider {
 export function createClient(
   baseUrl: string,
   opts: { getToken?: TokenSource; onUnauthorized?: UnauthorizedHandler } = {},
-): OlveTemplateApiClient {
+): OlveAgentRuntimeManagerClient {
   const { getToken, onUnauthorized } = opts;
 
   const authProvider: AuthenticationProvider = getToken
@@ -64,5 +64,5 @@ export function createClient(
   const httpClient = new HttpClient(authFetch);
   const adapter = new FetchRequestAdapter(authProvider, undefined, undefined, httpClient);
   adapter.baseUrl = baseUrl;
-  return createOlveTemplateApiClient(adapter);
+  return createOlveAgentRuntimeManagerClient(adapter);
 }

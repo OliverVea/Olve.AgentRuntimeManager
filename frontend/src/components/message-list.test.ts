@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { OlveTemplateApiClient } from "../api/olveTemplateApiClient.js";
+import type { OlveAgentRuntimeManagerClient } from "../api/olveAgentRuntimeManagerClient.js";
 import { MessageList } from "./message-list.js";
 
 /**
@@ -23,7 +23,7 @@ function fakeClient(overrides: {
   };
   const client = { api: { messages } };
   return {
-    client: client as unknown as OlveTemplateApiClient,
+    client: client as unknown as OlveAgentRuntimeManagerClient,
     spies: {
       get: messages.get,
       post: messages.post,

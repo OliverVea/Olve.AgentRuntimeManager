@@ -203,7 +203,7 @@ The `clients/Olve.AgentRuntimeManager.Client/` project generates a typed [Refit]
 
 ```bash
 dotnet tool restore
-dotnet kiota generate -l typescript -d api.json -c OlveTemplateApiClient -o clients/olve-arm-client-ts/src -n OlveTemplateApi
+dotnet kiota generate -l typescript -d api.json -c OlveAgentRuntimeManagerClient -o clients/olve-arm-client-ts/src -n OlveAgentRuntimeManager
 ```
 
 ## Frontend

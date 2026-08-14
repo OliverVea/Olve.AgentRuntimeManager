@@ -45,12 +45,12 @@ public class AppFixture : IAsyncInitializer, IAsyncDisposable
         _baseUrl = $"http://localhost:{hostPort}";
     }
 
-    public IOlveTemplateApiv1 CreateApiClient()
+    public IOlveAgentRuntimeManagerv1 CreateApiClient()
     {
         var client = new HttpClient { BaseAddress = new Uri(_baseUrl) };
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", GenerateJwt());
-        return RestService.For<IOlveTemplateApiv1>(client);
+        return RestService.For<IOlveAgentRuntimeManagerv1>(client);
     }
 
     public HttpClient CreateUnauthenticatedHttpClient() =>

@@ -1,5 +1,5 @@
 import type { Message } from "../api/models/index.js";
-import type { OlveTemplateApiClient } from "../api/olveTemplateApiClient.js";
+import type { OlveAgentRuntimeManagerClient } from "../api/olveAgentRuntimeManagerClient.js";
 import { BaseElement, escapeHtml } from "../base-element.js";
 
 type Status = "idle" | "loading" | "ready" | "error";
@@ -15,7 +15,7 @@ type Status = "idle" | "loading" | "ready" | "error";
 export class MessageList extends BaseElement {
   static readonly tagName = "message-list";
 
-  #client: OlveTemplateApiClient | null = null;
+  #client: OlveAgentRuntimeManagerClient | null = null;
 
   // --- view state ---
   #messages: Message[] = [];
@@ -28,7 +28,7 @@ export class MessageList extends BaseElement {
   #editingId: string | null = null;
 
   /** The Kiota client. Setting it (re)loads the first page if the element is connected. */
-  set client(value: OlveTemplateApiClient) {
+  set client(value: OlveAgentRuntimeManagerClient) {
     this.#client = value;
     if (this.isConnected) void this.load();
   }

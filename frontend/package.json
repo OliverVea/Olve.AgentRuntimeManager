@@ -13,7 +13,7 @@
     "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate-client": "cd .. && dotnet tool run kiota generate -l typescript -d api.json -c OlveTemplateApiClient -o frontend/src/api -n OlveTemplateApi --clean-output"
+    "generate-client": "cd .. && dotnet tool run kiota generate -l typescript -d api.json -c OlveAgentRuntimeManagerClient -o frontend/src/api -n OlveAgentRuntimeManager --clean-output"
   },
   "dependencies": {
     "@microsoft/kiota-abstractions": "1.0.0-preview.103",

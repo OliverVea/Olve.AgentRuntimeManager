@@ -13,7 +13,7 @@ import { type BaseRequestBuilder, type KeysToExcludeForNavigationMetadata, type 
  */
 export interface MessagesRequestBuilder extends BaseRequestBuilder<MessagesRequestBuilder> {
     /**
-     * Gets an item from the OlveTemplateApi.api.messages.item collection
+     * Gets an item from the OlveAgentRuntimeManager.api.messages.item collection
      * @param id Unique identifier of the item
      * @returns {MessagesItemRequestBuilder}
      */
