@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Olve.AgentRuntimeManager.UnitTests/Olve.AgentRuntimeManager.UnitTests.csproj" />
+    <Project Path="test/Olve.AgentRuntimeManager.IntegrationTests/Olve.AgentRuntimeManager.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/clients/">
+    <Project Path="clients/Olve.AgentRuntimeManager.Client/Olve.AgentRuntimeManager.Client.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# Kiota leaves a per-run log next to the generated client; the client itself
+# (src/api/**) and kiota-lock.json ARE committed so the app builds without codegen.
+src/api/.kiota.log

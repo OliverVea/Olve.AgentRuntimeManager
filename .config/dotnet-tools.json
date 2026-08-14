@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "microsoft.openapi.kiota": {
+      "version": "1.32.5",
+      "commands": [
+        "kiota"
+      ],
+      "rollForward": false
+    },
+    "dotnet-outdated-tool": {
+      "version": "4.7.1",
+      "commands": [
+        "dotnet-outdated"
+      ],
+      "rollForward": false
+    },
+    "refitter": {
+      "version": "2.0.0",
+      "commands": [
+        "refitter"
+      ],
+      "rollForward": false
+    }
+  }
+}

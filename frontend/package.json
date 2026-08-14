@@ -1,0 +1,33 @@
+{
+  "name": "olve-template-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vanilla Web Components + TypeScript frontend for Olve.AgentRuntimeManager",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "generate-client": "cd .. && dotnet tool run kiota generate -l typescript -d api.json -c OlveTemplateApiClient -o frontend/src/api -n OlveTemplateApi --clean-output"
+  },
+  "dependencies": {
+    "@microsoft/kiota-abstractions": "1.0.0-preview.103",
+    "@microsoft/kiota-http-fetchlibrary": "1.0.0-preview.103",
+    "@microsoft/kiota-serialization-form": "1.0.0-preview.103",
+    "@microsoft/kiota-serialization-json": "1.0.0-preview.103",
+    "@microsoft/kiota-serialization-multipart": "1.0.0-preview.103",
+    "@microsoft/kiota-serialization-text": "1.0.0-preview.103"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.2",
+    "happy-dom": "^20.10.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.3",
+    "vitest": "^4.1.9"
+  }
+}
