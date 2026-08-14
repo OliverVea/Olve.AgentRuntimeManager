@@ -23,6 +23,7 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
   - [ ] A3 — auth & token model (local HMAC vs OIDC, agent tokens, permission tiers)
   - [ ] A4 — deployment shape (host process vs k8s)
   - [ ] A5 — persistence split (control-plane store vs log/event/conversation firehose)
+  - [ ] A6 — agent execution/hosting model (local process / sandbox / container / k8s job)
   - [ ] B1–B4 — storage layout, config location, API versioning, `queryMethod` default
 - [ ] Write `docs/HLD.md` covering the component architecture:
   - [ ] Session manager & lifecycle state machine

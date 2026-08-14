@@ -53,8 +53,8 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   spec parks "agents as Kubernetes jobs" as *Future*.
 - **Recommendation:** deploy V0 as a **host process** (systemd user unit, à la
   `aoe-serve`/`pl`) while still using the scaffold's build + Olve.Pipelines CD. Decide
-  this early — it ripples into A3 (local HMAC makes more sense on a host) and into
-  persistence layout below.
+  this early — it ripples into A3 (local HMAC makes more sense on a host), into
+  persistence layout below, and is tightly coupled with **A6** (where agents run).
 
 ### A5. Persistence split (the big one)
 - **Context.** The scaffold's `EntityStore<T>` + snapshot persister is whole-snapshot,
@@ -72,6 +72,38 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   the persistence tier share a writer. Note the scaffold's persister safety policy
   (never overwrite good state on load failure) is exactly what ARM's restart/adoption
   reload needs — reuse it for the control-plane stores.
+
+### A6. Agent execution / hosting model
+- **Context.** The spec's V0 implies agents are **local subprocesses** of the server:
+  the provider interface is `spawn(session) → childProcess` with `buildCwd`/`buildEnv`/
+  `kill`, and SPEC §Restart adopts survivors **by PID**. SPEC §Queue's memory gate
+  (block spawn when host RAM < 2 GB) is a single-host assumption. SPEC §Restart lists
+  "agents as **Kubernetes jobs**" as *Future*, and SPEC §Auth defers "full uid-level
+  isolation." So *where agents run* is under-specified beyond "local process."
+- **Options.**
+  1. **Local subprocess on the ARM host** (spec V0). Simplest; PID adoption works; fits a
+     host-process deployment (systemd, like `aoe-serve`/`pl`). Isolation is the **approval
+     + path policy**, not the OS — agents share the host uid/fs.
+  - **1b. Local subprocess + OS sandbox** (cgroups + bubblewrap/nsjail). Same model, adds
+     fs/resource isolation without a container runtime.
+  2. **Per-session container** (Docker/Podman on the host). Fs/uid/resource isolation +
+     reproducible per-session toolchains; adoption by container id; needs a runtime +
+     image management.
+  3. **Kubernetes Job/Pod per session** (spec's *Future* "distributed mode"). Strong
+     isolation, scheduling, quotas; fits the homelab k3s cluster; adoption via the k8s API
+     + pod logs (not PID); ARM needs RBAC to create Jobs. The memory gate/queue partly
+     defer to the scheduler.
+  4. **MicroVM** (Firecracker/Kata). Strongest multi-tenant isolation; overkill for V0.
+- **Coupling.** Tied to **A4**: {ARM as host process + local/container agents} vs {ARM in
+  k8s + k8s-Job agents}. Local subprocess *inside* a k8s pod is fragile — a pod restart
+  kills every agent, breaking survive-and-adopt. The **adoption mechanism** (PID vs
+  container-id vs k8s-API) is a function of this choice, as is the isolation roadmap (§Auth).
+- **Recommendation:** V0 = **local subprocess on a host-process deployment** (matches the
+  spec, PID adoption, homelab-friendly), but introduce an **`IAgentExecutor` seam** now —
+  `spawn / kill / list-running / re-attach` — so container and k8s-Job executors are
+  pluggable later without touching the session manager or providers (same pattern as
+  `ISnapshotStore` for storage). Providers stay "*what* CLI + args"; the executor owns
+  "*where/how* it runs." Consider **1b** as the near-term isolation story.
 
 ---
 
