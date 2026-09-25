@@ -55,6 +55,21 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
 
 ---
 
+### A9. Events — to discuss (2026-09-25)
+From an event-type review; general agreement, details open:
+- **Gaps:** `session.deleted`; `provider.status` (available/unavailable, so recovery is visible)
+  instead of `provider.unavailable`; `actor` on `session.killed`; `failed.error` as `{code, message}`.
+- **Security:** commands can echo `secretEnv` into `session.tool.*` payloads, which are
+  persisted. Scrub them, and cap payload size with a `truncated` flag.
+- **Filter semantics:** OR within a list, AND across filters? Does `session=` drop
+  `heartbeat`/`server.*`/`provider.*`? Does replay apply the same filters?
+- **Undefined terms:** what "children" (`children=`) and `session.subcontext` mean; does
+  `session.queued` re-fire when the queue position changes?
+- **Heartbeats:** keep-alive only, so no event ID, not persisted, not replayed.
+- **Scope:** `server.restart_scheduled`, `server.draining` and "503 = draining" belong to
+  restart-with-drain (VISION). Gentle restart needs a rule instead: an agent that exited while
+  the server was down gets its real `completed`/`failed` event on reattach.
+
 ## B. Spec TBDs — open
 
 - **B1. Storage layout** — resolve with A5.
