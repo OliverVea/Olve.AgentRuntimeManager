@@ -1,8 +1,7 @@
-# ARM V2 — Requirements Spec
+# ARM — V0 Spec
 
-*Renamed from the original ARS V2 draft (`ARS`→`ARM`, `ars`→`arm`); content otherwise unchanged. ARM = Agent Runtime Manager.*
-
-**Scope:** This document specifies the V0 (minimum shippable) surface. Features explicitly marked "Future" are out of scope for V0 but inform the architecture.
+ARM = Agent Runtime Manager. This document specifies the V0 surface at user/API level. What comes
+after V0 lives in [`VISION.md`](VISION.md); how it's built lives in the code and tests.
 
 ## What ARM Is
 
@@ -61,7 +60,7 @@ All error responses use a consistent envelope:
 
 `arm login` authenticates the user and issues a signed token.
 
-**Zero-config mode:** If no auth is configured, ARM generates a signed token on first login (HMAC-SHA256 with a server-generated secret key stored in the data directory). The token is handed to the user (printed to stdout / stored in a credential file). Suitable for single-user local dev.
+**Zero-config mode:** If no auth is configured, ARM issues a signed token on first login and hands it to the user (printed to stdout / stored in a credential file). Suitable for single-user local use.
 
 **Multi-user / remote mode:** ARM validates tokens against its configured auth backend. Tokens carry identity and permissions.
 
@@ -71,63 +70,21 @@ All error responses use a consistent envelope:
 
 **Actor verification:** The `actor` field in approval decisions is derived from the auth token, not user-supplied. This ensures the audit trail is tied to identity.
 
-**Isolation boundary:** Agent tokens should not be readable by the agent's subprocesses. The ARM MCP server holds the token internally; spawned commands (via `approved_bash`) receive a scrubbed environment. Full uid-level isolation is a future consideration for multi-tenant deployments.
-
----
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                       ARM Server                            │
-│                                                            │
-│  Session Manager │ Event Bus │ Approval Engine │ Scheduler │
-│  Provider Registry │ Skill Registry │ Tool Registry        │
-│  ARM MCP Server                                            │
-└────────────────────────────────────────────────────────────┘
-        │                │
-   ┌────┴────┐     ┌────┴────┐
-   │ Agent   │     │ Agent   │
-   │ (claude)│     │ (codex) │
-   └─────────┘     └─────────┘
-```
-
-The ARM MCP server is a core component that always runs. Individual tool modules within it are optionally connected per-session based on the session's `tools` configuration.
-
-Frontends (CLI, web UI, custom) subscribe to SSE and call REST. They are not part of ARM.
+**Isolation boundary:** Agent tokens are not readable by the agent's subprocesses; commands run via `approved_bash` receive a scrubbed environment.
 
 ---
 
 ## Providers
 
-### Interface
+ARM is provider-agnostic and normalizes each provider's output into one event model. V0 ships
+**Claude Code** first, then **Codex**. Providers run with their native permission prompts
+disabled: every shell/file/messaging action goes through ARM's approval tools, so ARM is the
+only gate.
 
-A provider implements: `spawn(session) → childProcess`, `parseStream(line) → event`, `parseStderr(line) → event`, `onExit(code, signal) → event`, `buildResumeArgs(session) → {bin, args}`, `kill(session)`, `buildEnv(session) → env`, `buildCommand(session) → {bin, args}`, `buildCwd(session) → path`, `checkHealth() → HealthStatus`. ARM normalizes all provider output into its unified event model.
+> **Provider CLIs evolve rapidly.** Re-evaluate each CLI (flags, stream format, resume, MCP
+> config, permissions) when picking up its connector.
 
-**Approval mechanism:** Providers are spawned with their native permissions disabled (no stdin for interactive approval). All tool calls route through the ARM MCP server, which blocks the tool response until the approval engine resolves it. This is the sole approval path — provider-native approval doesn't work because there's no interactive terminal.
-
-> **Provider CLIs evolve rapidly.** The Claude Code and Codex details below are a snapshot. Re-evaluate each CLI (flags, stream format, resume, MCP config, permissions) when picking up its connector.
-
-### Claude
-
-- CLI: `claude -p "..." --model '...' --output-format stream-json --verbose --dangerously-skip-permissions --mcp-config <path>`
-- Supports: `--effort`, `--resume`
-- Stream format: NDJSON (assistant/user/system/tool types)
-- Resume: native via `--resume <providerSessionId>`
-- Approval: ARM MCP server tools are the only bash/file tools available. Claude never sees native Bash/Write/Edit.
-
-### Codex
-
-- CLI: `codex exec "..." --json -m <model> --dangerously-bypass-approvals-and-sandbox`
-- Effort: `-c model_reasoning_effort=<level>`
-- MCP: TOML config in isolated `CODEX_HOME` per session
-- Stream format: thread/turn/item events → normalized to ARM model
-- Resume: `codex exec resume <threadId> "prompt"`
-- Note: `--ephemeral` only used for completions (non-resumable).
-
-### Adding a Provider
-
-Drop a module implementing the provider interface. Register in config. No core changes needed.
+Frontends (CLI, web UI, Slack, custom) subscribe to SSE and call the REST API. They are not part of ARM.
 
 ---
 
@@ -175,10 +132,6 @@ All fields optional. Empty body returns all sessions (same as bare `arm session 
 
 Terminal states: `completed`, `killed`, `failed`. These do not transition further. Revival creates a new linked session (see below).
 
-**Future:**
-- Effort auto-adjustment mid-session.
-- Priority (numeric, applies to sessions and completions).
-
 **Session creation payload:**
 ```json
 {
@@ -203,15 +156,13 @@ Terminal states: `completed`, `killed`, `failed`. These do not transition furthe
 
 Agent configuration is passed **inline at session creation**. The `tools` array lists which ARM MCP tool modules to enable. The `skills` array lists which skills are available (only injected if `arm-skills` is in the tools list).
 
-**`secretEnv`:** Write-only environment variables for sensitive values (API keys, tokens). Never returned in GET responses, scrubbed from logs and event persistence. Only the ARM MCP server's `approved_bash` uses them (injected into the subprocess env at execution time).
-
-**Future:** Persisted named agent configs that can be referenced by name at session creation.
+**`secretEnv`:** Write-only environment variables for sensitive values (API keys, tokens). Never returned in GET responses, scrubbed from logs and event persistence. Only commands run via `approved_bash` receive them.
 
 **Messaging:** Sessions can receive user messages via `POST /api/sessions/:id/messages`. Enabled by default; can be disabled at session creation (`messaging: false`). When disabled, the endpoint returns 403.
 
-**Headless mode:** When `headless: true`, the ARM approval layer auto-denies anything that doesn't pass automatic approval (the policy's `allow` rules). The underlying provider still gets `--dangerously-skip-permissions` / approve-all because ARM is the gate, not the provider. Useful for CI/scripting.
+**Headless mode:** When `headless: true`, ARM auto-denies anything that doesn't pass automatic approval (the policy's `allow` rules). Useful for CI/scripting.
 
-**Revival:** `POST /api/sessions/:id/revive` creates a **new** session with the parent's conversation history injected as context. The parent session record is unchanged (stays in its terminal state) and gains a `childSessionId` field. The new session is fully independent — it gets its own tools, skills, and policy (specified in the revive call or defaulting to the parent's). Provider-native `--resume` is NOT used; instead the parent's conversation is prepended. This avoids fork conflicts (reviving A to B, then A to C — both are independent fresh sessions with A's history).
+**Revival:** `POST /api/sessions/:id/revive` creates a **new** session with the parent's conversation history injected as context. The parent session record is unchanged (stays in its terminal state) and gains a `childSessionId` field. The new session is fully independent — it gets its own tools, skills, and policy (specified in the revive call or defaulting to the parent's). Reviving A to B, then A to C gives two independent sessions that both start from A's history.
 
 ### Approvals
 
@@ -238,7 +189,7 @@ Agent configuration is passed **inline at session creation**. The `tools` array 
 - Single-use (consumed on submission)
 - Session-scoped
 - TTL: 15 minutes (configurable)
-- Cryptographically bound to the command + working_dir (HMAC; server recomputes and verifies on submission)
+- Bound to the command + working_dir (a token for one command can't be reused for another)
 
 The actual approval decision is made by ARM/the user after seeing the full command and context surfaced via SSE. The token is for escalation flow control, not authorization.
 
@@ -250,8 +201,6 @@ The actual approval decision is made by ARM/the user after seeing the full comma
 | `arm skill get <name>` | `GET /api/skills/:name` | Get skill metadata + content |
 | `arm skill install <source> [--name override]` | `POST /api/skills` | Install (upsert) from source |
 | `arm skill remove <name>` | `DELETE /api/skills/:name` | Remove |
-
-**Future:** `arm skill update [--all]` — re-pull from recorded source.
 
 **Sources:**
 ```bash
@@ -274,7 +223,7 @@ A skill is a directory containing at minimum a `SKILL.md` file with YAML frontma
 | `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove |
 | `arm tool update <name> [--command "..."] [--args "..."] [--env K=V]` | `PATCH /api/tools/:name` | Update config |
 
-Tools are modules exposed by the ARM MCP server. Built-in modules (`arm-*`) are always available. Custom tool definitions (external MCP servers) are compiled into the provider-specific config at spawn time.
+Tools are MCP tool modules. Built-in modules (`arm-*`) are always available; custom tool definitions (external MCP servers) are made available to sessions that enable them.
 
 **No tools are enabled by default.** The session's `tools` array explicitly lists which modules to activate. Without any tools, the agent has no system access — it can only do LLM reasoning.
 
@@ -341,27 +290,11 @@ When `schema` is provided, ARM instructs the model to return JSON conforming to 
 | `arm server status` | `GET /api/health` | Health + diagnostics |
 | `arm server logs [-f] [--since TIME]` | — | View server output |
 
-**Future:** Scheduled restart with drain, hard restart.
-
 ### Events
 
 | CLI | API | Purpose |
 |---|---|---|
 | `arm events [--session X] [--exclude-session X] [--event X,Y] [--exclude-event X,Y] [--caller X] [--exclude-caller X] [--tag k:v] [--exclude-tag k:v] [--role X] [--exclude-role X] [--exclude-children] [--last-event-id ID]` | `GET /api/events` | Subscribe to SSE stream |
-
----
-
-## Interactive Modes (Future)
-
-The APIs support interactive use from V0, but dedicated CLI modes are a later addition.
-
-### `arm chat` (Future)
-
-Interactive conversational session via CLI.
-
-### `arm run "prompt" [...]` (Future)
-
-Non-interactive task mode: streams output to stdout, exits with session exit code.
 
 ---
 
@@ -401,7 +334,7 @@ Non-interactive task mode: streams output to stdout, exits with session exit cod
 | `server.restart_scheduled` | deadline |
 | `server.draining` | remainingSessions |
 
-**`session.text`:** Each event carries a complete text segment (not a delta/chunk). Frontends render them sequentially. Future: streaming/delta mode.
+**`session.text`:** Each event carries a complete text segment (not a delta/chunk). Frontends render them sequentially.
 
 **`session.message` vs `session.text role=user`:** Both may fire for user messages. `session.message` is for message delivery tracking; `session.text` is for rendering the conversation.
 
@@ -411,9 +344,8 @@ Non-interactive task mode: streams output to stdout, exits with session exit cod
 
 ### Event Persistence
 
-Events are written to daily-rotated NDJSON files on disk. This serves as both audit log and replay source. Each event includes timestamp and monotonic event ID.
-
-**In-memory buffer:** Last 1 day of events kept in memory for fast replay on reconnect. Older events served from disk.
+Every event is persisted with a timestamp and a monotonic event ID. The persisted stream is both
+the audit log and the replay source.
 
 ### Server-Side Filtering
 
@@ -428,7 +360,7 @@ All filter params support both include and exclude variants:
 | `role=thinking\|assistant\|result` | `exclude_role=X` | Filter session.text |
 | `children=true\|false` | — | Include/exclude child sessions |
 
-**Reconnection:** Include `Last-Event-ID` header to replay missed events from the buffer/disk.
+**Reconnection:** Include `Last-Event-ID` header to replay missed events.
 
 ---
 
@@ -436,14 +368,12 @@ All filter params support both include and exclude variants:
 
 ### How It Works
 
-The ARM MCP server is the sole path to system operations (shell, file, messaging). When an agent calls `approved_bash`:
+ARM's approval tools are the agent's only path to system operations (shell, file, messaging). When an agent calls `approved_bash`:
 
 1. ARM classifies the command against the session's policy
 2. If `safe`: execute immediately, return stdout
 3. If `blocked`: return error with reason
-4. If `needs_approval`: return `approvalToken` → agent can re-submit to escalate → ARM emits `session.approval` on SSE → MCP tool call blocks (defer-and-resume for human-latency decisions) → frontend responds → tool call resolves
-
-Provider-native approval doesn't exist in this architecture — there's no interactive terminal, and provider permissions are disabled at spawn. ARM is the only gate.
+4. If `needs_approval`: return `approvalToken` → agent can re-submit to escalate → ARM emits `session.approval` on SSE → the tool call waits for a human decision → frontend responds → tool call resolves
 
 ### ARM MCP Tool Modules
 
@@ -485,9 +415,7 @@ Provider-native approval doesn't exist in this architecture — there's no inter
 
 **File reading:** `approved_file_read` is subject to path policy. Policies can allow reads broadly while restricting writes.
 
-**Timeout:** The MCP tool call uses defer-and-resume semantics for human-latency decisions. The ARM server sets a reasonable timeout (configurable, tested to work with both Claude and Codex providers). If the timeout expires before a decision, the approval auto-denies.
-
-**Future:** `suggest_safe` — on the approval response, the agent can include a suggested pattern for auto-approval.
+**Timeout:** The tool call waits for a human decision up to a configurable timeout. If the timeout expires before a decision, the approval auto-denies.
 
 ### Classification
 
@@ -513,8 +441,6 @@ Policies are **versioned application data**. Each mutation creates a new version
 | `arm policy delete <name>` | `DELETE /api/policies/:name` | Delete (fails if sessions reference it) |
 | `arm policy test <name> [--file commands.txt]` | — | Test policy against commands (reads stdin if no file) |
 | `arm policy history <name> [--limit N]` | — | View version history |
-
-**Future:** `arm policy export/import` — export as JSON for sharing.
 
 **Policy structure:**
 ```json
@@ -544,14 +470,10 @@ Rules are evaluated in order; first match wins. Unmatched commands require appro
 - Session metadata, logs, and conversations retained for at least 6 months
 - Hot storage for recent sessions (active + last N days)
 - Cold/archive storage for older sessions (compressed, queryable by ID)
-- Event files: daily rotation, 1 day in-memory, older from disk
+- Events replayable (`Last-Event-ID`) across the retention window
 - Completions history retained similarly
 - Access to logs gated by the same auth system
 - `secretEnv` values never persisted in any log or event
-
-**Future:**
-- Log scrubbing: strip sensitive content from archived logs.
-- Provider log cleanup: strip provider-specific cruft before archival.
 
 ---
 
@@ -571,15 +493,12 @@ Location/filename TBD.
 | `contextThresholds` | [...] | Token alerts |
 | `providers` | [...] | Registered provider configs |
 
-**Future:** Composable dynamic configuration.
-
 ---
 
 ## Restart & Adoption
 
-Soft restart (the only mode in V0): Server exits. Agent processes survive (detached). New server adopts by PID + log replay from the event files.
-
-**Future:** Scheduled restart with drain, hard restart. Distributed mode with agents as Kubernetes jobs.
+Gentle restart (the only mode in V0): the server exits, running agents keep running, and the new
+server re-attaches to them. Clients reconnect with `Last-Event-ID` and miss nothing.
 
 ---
 
@@ -591,27 +510,14 @@ Soft restart (the only mode in V0): Server exits. Agent processes survive (detac
 - Configurable per-session timeout
 - When slots are full but queue has room: `POST /api/sessions` returns 202 Accepted with queue position
 
-**Future:** Numeric priority with reserved capacity for high-priority sessions.
-
 ---
 
 ## Standards & Extensibility
-
-### Current
 
 - **MCP** (Model Context Protocol) for tool integration — used sparingly, only for truly general-purpose operations (shell, file I/O, user communication). Domain-specific integrations should be skills with scripts.
 - **SSE** for real-time streaming — standard event-stream protocol with `Last-Event-ID` replay
 - **REST/JSON** for all management APIs
 - **HTTP QUERY method** (RFC 10008) for search/filter operations
-
-### Future
-
-- **OpenAI-compatible chat completions endpoint** (`/v1/chat/completions`) — makes ARM usable as a backend for any OpenAI-SDK client
-- **A2A (Agent-to-Agent)** protocol support for multi-agent orchestration
-- **AG-UI (Agent-to-User)** protocol — closer fit than A2A for a frontend-agnostic runtime
-- **Skill registry protocol** — standardized discovery/installation from public registries
-- **OpenTelemetry** — structured observability for session traces
-- **WebSocket** — bidirectional streaming for interactive frontends
 
 ---
 
@@ -620,10 +526,6 @@ Soft restart (the only mode in V0): Server exits. Agent processes survive (detac
 ### Headless (Slack)
 
 Subscribe to SSE (`session.approval`, `session.text`, lifecycle events). Render approvals as Slack buttons. Post decisions via REST.
-
-### CLI Interactive (Future)
-
-Local session. Approval prompts rendered inline. Keyboard approve/deny.
 
 ### Web UI
 
