@@ -29,6 +29,10 @@ dotnet run --project Olve.AgentRuntimeManager               # Run locally
 - OpenAPI is a build artifact: the backend build writes `artifacts/backend/api.json` (`Microsoft.Extensions.ApiDescription.Server`); M1 moves the contract to `src/spec/main.tsp` (`docs/SPEC-FIRST.md`)
 - No C# client: integration tests use raw HTTP; the `arm` CLI will be generated from the spec
 
+## Standards
+
+Follow [`docs/STANDARDS.md`](docs/STANDARDS.md) (MUST/SHOULD rules for API behaviour, events and code).
+
 ## Decisions are dated leanings
 
 `docs/OPEN-QUESTIONS.md` (and similar notes) record *dated leanings*, not binding decisions.

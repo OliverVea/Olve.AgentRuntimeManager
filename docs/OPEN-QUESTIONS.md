@@ -34,6 +34,11 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   Local: SQLite + NDJSON files + in-process notify (self-contained is a hard requirement).
   Prod: ARM-owned private Postgres + `LISTEN/NOTIFY`. CI exercises both engines.
 
+### A5b. Secret storage
+- **Leaning (2026-09-25):** `secretEnv` encrypted at rest; key from an env var (`ARM_SECRET_KEY`,
+  from a k8s Secret in prod, a local file / systemd credential on a host), stripped from the
+  environment passed to agents.
+
 ### A6. Where agents run
 - **Leaning (2026-08-14):** `IAgentExecutor` seam (spawn / kill / list / re-attach);
   V0 = `LocalProcessExecutor`. Later: k8s Job executor. **Open:** remote SSH executor

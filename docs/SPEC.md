@@ -111,8 +111,9 @@ a repeated key within 24 hours returns the original response.
 `queued|working|waiting → killed`; `queued|working → failed`. Terminal: `completed`, `killed`,
 `failed`.
 
-- **`secretEnv`** is write-only: never returned, never logged or persisted, and only passed to
-  commands run through `approved_bash`.
+- **`secretEnv`** is write-only: never returned or logged, and only passed to commands run through
+  `approved_bash`. It is stored encrypted (so restart and revive keep working) and deleted once
+  nothing can use it anymore.
 - **Messaging** is on by default; with `messaging: false` the messages endpoint returns 403.
 - **Headless** sessions auto-deny anything the policy doesn't `allow` (for CI/scripting).
 - **Revive** creates a new, independent session seeded with the parent's conversation, using its
@@ -320,7 +321,7 @@ a trailing `.*` matches a namespace, e.g. `session.approval.*`),
   server re-attaches to them and clients replay missed events via `Last-Event-ID`.
 - **Retention:** sessions, logs, conversations, completions and events are kept for at least
   6 months (recent ones hot, older ones compressed but retrievable by ID), with access gated by
-  auth. `secretEnv` values are never stored.
+  auth. `secretEnv` values are only ever stored encrypted.
 
 ## Configuration
 
