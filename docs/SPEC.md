@@ -235,9 +235,10 @@ One-off LLM calls, no session.
 | `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `QUERY /api/completions` | History |
 | `arm completion get <id>` | `GET /api/completions/:id` | Get |
 
-`provider` is optional (resolved from the model). With a `schema`, ARM validates the output and
-retries up to `retries` times (default 2); if every attempt fails it returns 422 with the raw
-text and the validation errors.
+`provider` is optional (resolved from the model). `schema` is optional: without it the response
+is plain `text` (no `data`). With a `schema`, the response also has `data` (the parsed JSON); ARM
+validates it and retries up to `retries` times (default 2), and if every attempt fails it returns
+422 with the raw text and the validation errors.
 
 ```json
 // request
