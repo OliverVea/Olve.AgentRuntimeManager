@@ -65,7 +65,6 @@ From an event-type review; general agreement, details open:
   `heartbeat`/`server.*`/`provider.*`? Does replay apply the same filters?
 - **Undefined terms:** what "children" (`children=`) and `session.subcontext` mean; does
   `session.queued` re-fire when the queue position changes?
-- **Heartbeats:** keep-alive only, so no event ID, not persisted, not replayed.
 - **Scope:** `server.restart_scheduled`, `server.draining` and "503 = draining" belong to
   restart-with-drain (VISION). Gentle restart needs a rule instead: an agent that exited while
   the server was down gets its real `completed`/`failed` event on reattach.

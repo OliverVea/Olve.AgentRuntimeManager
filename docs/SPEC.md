@@ -257,7 +257,8 @@ validates it and retries up to `retries` times (default 2), and if every attempt
 
 `GET /api/events` (`arm events`) streams events. Every event has an `id`; reconnect with
 `Last-Event-ID` to replay what you missed, across the retention window and server restarts. A
-`heartbeat` is sent every 30s.
+`heartbeat` is sent every 30s to keep the connection alive; heartbeats have no event ID and are
+never stored or replayed.
 
 **Envelope:** every event's JSON `data` has `type` (the event name), `at` (timestamp), and its
 subject ID (`sessionId`, `completionId`, or `provider`). The table lists the remaining fields.
