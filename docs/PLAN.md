@@ -98,11 +98,20 @@ Repeat this cycle for **each** milestone below, one at a time, on its own featur
 
 ### Milestones
 
-_To be populated in Phase 3 (dependency-ordered). Each entry gets its own Phase 4 cycle._
+_Draft (P1 = the full ARM API, built on the P0 toolchain). Dependency-ordered; each entry gets
+its own Phase 4 cycle. Scope + acceptance per milestone still to be written._
 
-- [ ] M1 — …
-- [ ] M2 — …
-- [ ] M3 — …
+- [ ] M1 — **Sessions core**: create/get/list/kill/delete, state machine, queue + slots, FakeProvider
+- [ ] M2 — **Gentle restart**: persist session state; server exits, agents survive, new server adopts by PID (event replay completes in M3)
+- [ ] M3 — **Event bus**: all SPEC event types, filters, `Last-Event-ID` replay, NDJSON persistence (incl. replay across restart)
+- [ ] M4 — **Auth**: fine-grained permissions (`sessions:create`, `sessions:kill`, `approvals:decide`, …) composed into roles; default roles read-only / operator (functional: start, kill, approve; no configuration) / admin; agent tokens = session-scoped permission set; local HMAC (A3)
+- [ ] M5 — **Approvals**: ARM MCP server, policies (versioned), approve/deny, long-poll wait; shell classifier as a **separate low-dependency package** (wrap an existing parser, e.g. tree-sitter-bash / mvdan/sh / bashlex, else from scratch)
+- [ ] M6 — **Claude provider**: real Claude CLI, health, record/replay LLM stub
+- [ ] M7 — **Skills & tools** registries + session injection
+- [ ] M8 — **Messaging + revive**
+- [ ] M9 — **Completions** (schema validation, retries)
+- [ ] M10 — **Codex provider**
+- [ ] M11 — **Retention**: 6-month retention, hot/cold tiers, compressed archive
 
 ## Phase 5 — Finalize
 
