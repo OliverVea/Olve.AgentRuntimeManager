@@ -1,146 +1,91 @@
 # ARM — V0 Spec
 
-ARM = Agent Runtime Manager. This document specifies the V0 surface at user/API level. What comes
-after V0 lives in [`VISION.md`](VISION.md); how it's built lives in the code and tests.
+ARM (Agent Runtime Manager) is a standalone agent runtime. It runs and queues LLM agent sessions,
+streams everything they do as events (SSE), gates their system access through human approvals,
+and manages the skills and tools they get. It is provider-agnostic (Claude Code first, then Codex)
+and frontend-agnostic: the CLI, web UI, Slack and custom integrations are all equal API clients.
+ARM has no opinion on what agents do.
 
-## What ARM Is
+This spec covers V0 at user/API level. Later ideas: [`VISION.md`](VISION.md). Order of work:
+[`MILESTONES.md`](MILESTONES.md).
 
-A standalone, general-purpose agent runtime. It manages LLM agent sessions (spawn, supervise, queue), provides a real-time event bus (SSE), brokers tool approvals, and manages skills/tools configuration. Provider-agnostic (Claude, Codex, extensible to others). Frontend-agnostic (CLI, web, Slack, custom integrations are all equal SSE consumers).
+---
 
-No opinion on what agents do — ARM handles the plumbing (process lifecycle, approval flows, skill/tool distribution, streaming, persistence) and stays out of the way.
+## API conventions
 
-### HTTP Method Conventions
+| Method | Use |
+|---|---|
+| `GET` | Retrieve one resource by ID |
+| `QUERY` | Search/list; the request body carries the filter (RFC 10008) |
+| `POST` | Create a resource or trigger an action |
+| `PATCH` | Partial update |
+| `DELETE` | Remove a resource |
 
-- `GET` — retrieve a single resource by ID (e.g. `GET /api/sessions/:id`)
-- `QUERY` — search/filter/list resources (request body carries filter criteria) — per RFC 10008
-- `POST` — create a resource or trigger an action
-- `PATCH` — partial update
-- `DELETE` — remove a resource
+`queryMethod` (`query` \| `get` \| `post`, default `query`) switches search endpoints to
+query-string `GET` or `POST /api/<resource>/search` for infrastructure without `QUERY`.
 
-`QUERY` replaces the traditional `GET` + query-string pattern for collection endpoints. It's safe and idempotent (like GET) but accepts a request body, making complex filters natural without URL encoding gymnastics.
-
-**Query method is configurable** (`queryMethod: "query" | "get" | "post"`, default `"query"`). If deployed behind infrastructure that doesn't support QUERY, switch to `"get"` (query-string encoding) or `"post"` (POST to `/api/<resource>/search`).
-
-### Error Model
-
-All error responses use a consistent envelope:
+**Errors** always use one envelope:
 
 ```json
-{
-  "error": {
-    "code": "APPROVAL_EXPIRED",
-    "message": "Approval arm-apv-xyz expired after 30 minutes",
-    "details": {}
-  }
-}
+{ "error": { "code": "APPROVAL_EXPIRED", "message": "Approval arm-apv-xyz expired after 30 minutes", "details": {} } }
 ```
-
-**HTTP status semantics:**
 
 | Status | Meaning |
 |---|---|
-| 400 | Malformed request body / invalid parameters |
-| 401 | Missing or invalid auth token |
-| 403 | Authenticated but not authorized (e.g. messaging disabled) |
-| 404 | Resource not found |
-| 409 | Conflict (e.g. approve an already-resolved approval, kill an already-dead session) |
-| 410 | Resource existed but was purged (retention GC) |
-| 422 | Semantically invalid (e.g. schema validation failure on completions) |
+| 400 | Malformed request / invalid parameters |
+| 401 | Missing or invalid token |
+| 403 | Not permitted (e.g. messaging disabled) |
+| 404 | Not found |
+| 409 | Conflict (already-resolved approval, already-dead session, message to a queued session, revive a running session) |
+| 410 | Existed but purged by retention |
+| 422 | Semantically invalid (e.g. completion output fails its schema) |
 | 429 | Rate limited |
-| 503 | Server draining (restart scheduled) |
+| 503 | Queue full, or server draining |
 
-**Race conditions:**
-- Two frontends approving the same approval: first wins (200), second gets 409
-- Message to a queued session: 409 (session not yet running)
-- Revive on a running session: 409
+When two frontends decide the same approval, the first wins (200) and the second gets 409.
 
----
-
-## Authentication
-
-`arm login` authenticates the user and issues a signed token.
-
-**Zero-config mode:** If no auth is configured, ARM issues a signed token on first login and hands it to the user (printed to stdout / stored in a credential file). Suitable for single-user local use.
-
-**Multi-user / remote mode:** ARM validates tokens against its configured auth backend. Tokens carry identity and permissions.
-
-**Permissions:** fine-grained (`sessions:create`, `sessions:kill`, `approvals:decide`, …). The auth system composes them into roles. Default roles: read-only, operator (functional: start, kill, approve; no configuration) and admin.
-
-**Agent auth:** Sessions get a scoped token via env (`AGENT_RUNTIME_TOKEN`): a permission set limited to that session. The token grants only session-specific operations (approvals, messages, skill loads for that session). An agent cannot self-approve — approval decisions require `approvals:decide`.
-
-**Actor verification:** The `actor` field in approval decisions is derived from the auth token, not user-supplied. This ensures the audit trail is tied to identity.
-
-**Isolation boundary:** Agent tokens are not readable by the agent's subprocesses; commands run via `approved_bash` receive a scrubbed environment.
+**Idempotency:** `create` and `revive` accept an `Idempotency-Key` header (`--idempotency-key`);
+a repeated key within 24 hours returns the original response.
 
 ---
 
-## Providers
+## Auth
 
-ARM is provider-agnostic and normalizes each provider's output into one event model. V0 ships
-**Claude Code** first, then **Codex**. Providers run with their native permission prompts
-disabled: every shell/file/messaging action goes through ARM's approval tools, so ARM is the
-only gate.
-
-> **Provider CLIs evolve rapidly.** Re-evaluate each CLI (flags, stream format, resume, MCP
-> config, permissions) when picking up its connector.
-
-Frontends (CLI, web UI, Slack, custom) subscribe to SSE and call the REST API. They are not part of ARM.
+- `arm login` issues a signed token. With no auth backend configured, ARM issues tokens itself
+  (single-user, zero config); otherwise it validates tokens from the configured backend.
+- **Permissions** are fine-grained (`sessions:create`, `sessions:kill`, `approvals:decide`, …)
+  and composed into roles. Default roles: read-only, operator (start, kill, approve; no
+  configuration), admin.
+- **Agent tokens** (`AGENT_RUNTIME_TOKEN`) are limited to their own session (approvals, messages,
+  skill loads). Agents can't approve their own requests, and their subprocesses can't read the
+  token.
+- The `actor` on an approval decision comes from the token, never the payload.
 
 ---
 
-## Entities & Operations
-
-### Sessions
+## Sessions
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2] [--idempotency-key K]` | `POST /api/sessions` | Create (queues or starts) |
-| `arm session list [--status X] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `QUERY /api/sessions` | Search/filter sessions |
-| `arm session get <id>` | `GET /api/sessions/:id` | Get by ID (includes computed status) |
-| `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill running/queued/waiting |
-| `arm session delete <id>` | `DELETE /api/sessions/:id` | Delete record (terminal states only) |
-| `arm session revive <id> [-p "follow-up prompt"] [--tools T1,T2] [--skills S1,S2] [--idempotency-key K]` | `POST /api/sessions/:id/revive` | Create new session continuing from this one |
-| `arm session logs <id> [-f] [--since TIME] [--until TIME]` | `GET /api/sessions/:id/logs` | View log (SSE if -f) |
+| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create (starts, or queues: 202 + position) |
+| `arm session list [--status X] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `QUERY /api/sessions` | Search |
+| `arm session get <id>` | `GET /api/sessions/:id` | Get |
+| `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill a queued/working/waiting session |
+| `arm session delete <id>` | `DELETE /api/sessions/:id` | Delete (terminal sessions only) |
+| `arm session revive <id> [-p "follow-up"] [--tools …] [--skills …]` | `POST /api/sessions/:id/revive` | New session continuing this one |
+| `arm session logs <id> [-f] [--since T] [--until T]` | `GET /api/sessions/:id/logs` | Log (streams with `-f`) |
 | `arm session conversation <id> [--format json\|text]` | `GET /api/sessions/:id/conversation` | Structured conversation |
-| `arm session message <id> "text"` | `POST /api/sessions/:id/messages` | Send a message to the session |
+| `arm session message <id> "text"` | `POST /api/sessions/:id/messages` | Message the agent |
 
-**Idempotency:** All mutating operations (`create`, `revive`) support an optional `Idempotency-Key` header (API) or `--idempotency-key` flag (CLI). Duplicate requests with the same key return the original response. Keys are retained for 24 hours.
+**Create payload** (all agent configuration is inline):
 
-**Session search body (QUERY):**
-```json
-{
-  "status": "working",
-  "caller": "oribot",
-  "tags": {"team": "seller-growth"},
-  "createdAfter": "2026-08-01T00:00:00Z",
-  "createdBefore": "2026-08-10T00:00:00Z",
-  "text": "deploy",
-  "limit": 20,
-  "offset": 0
-}
-```
-All fields optional. Empty body returns all sessions (same as bare `arm session list`).
-
-**Status** (state machine, single value):
-- `queued` → `working` → `completed`
-- `queued` → `killed`
-- `queued` → `failed` (validation failure at dequeue)
-- `working` → `waiting` (pending approval) → `working` (approval resolved or denied — agent decides what's next)
-- `working` → `killed`
-- `working` → `failed`
-- `waiting` → `killed`
-
-Terminal states: `completed`, `killed`, `failed`. These do not transition further. Revival creates a new linked session (see below).
-
-**Session creation payload:**
 ```json
 {
   "prompt": "...",
   "provider": "claude",
   "model": "claude-sonnet-4-6[1m]",
   "effort": "high",
-  "messaging": true,
-  "headless": false,
+  "systemPrompt": "Optional additional system prompt.",
   "caller": "oribot",
   "tags": {},
   "env": {},
@@ -149,167 +94,169 @@ Terminal states: `completed`, `killed`, `failed`. These do not transition furthe
   "approvalPolicy": "standard",
   "tools": ["arm-approved-bash", "arm-file-ops", "arm-skills", "arm-messaging"],
   "skills": ["brazil", "git-workflows"],
-  "systemPrompt": "Optional additional system prompt.",
-  "idempotencyKey": "optional-unique-key"
+  "messaging": true,
+  "headless": false
 }
 ```
 
-Agent configuration is passed **inline at session creation**. The `tools` array lists which ARM MCP tool modules to enable. The `skills` array lists which skills are available (only injected if `arm-skills` is in the tools list).
+**Search body** (all fields optional; empty = everything):
 
-**`secretEnv`:** Write-only environment variables for sensitive values (API keys, tokens). Never returned in GET responses, scrubbed from logs and event persistence. Only commands run via `approved_bash` receive them.
-
-**Messaging:** Sessions can receive user messages via `POST /api/sessions/:id/messages`. Enabled by default; can be disabled at session creation (`messaging: false`). When disabled, the endpoint returns 403.
-
-**Headless mode:** When `headless: true`, ARM auto-denies anything that doesn't pass automatic approval (the policy's `allow` rules). Useful for CI/scripting.
-
-**Revival:** `POST /api/sessions/:id/revive` creates a **new** session with the parent's conversation history injected as context. The parent session record is unchanged (stays in its terminal state) and gains a `childSessionId` field. The new session is fully independent — it gets its own tools, skills, and policy (specified in the revive call or defaulting to the parent's). Reviving A to B, then A to C gives two independent sessions that both start from A's history.
-
-### Approvals
-
-| CLI | API | Purpose |
-|---|---|---|
-| — | `POST /api/sessions/:id/approvals` | Register pending (called by ARM MCP server internally) |
-| `arm approval list [--session X] [--status pending\|approved\|denied\|expired] [--kind bash\|file\|tool] [--after DATE] [--limit N]` | `QUERY /api/approvals` | Search approvals |
-| `arm approval get <session-id> <approval-id>` | `GET /api/sessions/:id/approvals/:aid` | Get by ID |
-| `arm approval approve <session-id> <approval-id> [--reason "..."]` | `POST /api/sessions/:id/approvals/:aid/decide` | Approve |
-| `arm approval deny <session-id> <approval-id> [--reason "..."]` | `POST /api/sessions/:id/approvals/:aid/decide` | Deny |
-| — | `GET /api/sessions/:id/approvals/:aid/wait` | Long-poll until resolved (used internally by MCP server) |
-
-**Decision payload:**
 ```json
-{
-  "decision": "approve | deny",
-  "reason": "optional"
-}
+{ "status": "working", "caller": "oribot", "tags": {"team": "seller-growth"},
+  "createdAfter": "2026-08-01T00:00:00Z", "createdBefore": "2026-08-10T00:00:00Z",
+  "text": "deploy", "limit": 20, "offset": 0 }
 ```
 
-`actor` is derived from the auth token — not supplied in the payload.
+**Status:** `queued → working → completed`; `working ⇄ waiting` (waiting = pending approval);
+`queued|working|waiting → killed`; `queued|working → failed`. Terminal: `completed`, `killed`,
+`failed`.
 
-**Approval token protocol:** When a command is classified as `needs_approval`, the MCP tool returns a structured error containing an `approvalToken`. The agent can re-call with the token to escalate to the user. The token is:
-- Single-use (consumed on submission)
-- Session-scoped
-- TTL: 15 minutes (configurable)
-- Bound to the command + working_dir (a token for one command can't be reused for another)
-
-The actual approval decision is made by ARM/the user after seeing the full command and context surfaced via SSE. The token is for escalation flow control, not authorization.
-
-### Skills
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm skill list [--text "..."] [--source github\|local]` | `QUERY /api/skills` | Search/filter installed skills |
-| `arm skill get <name>` | `GET /api/skills/:name` | Get skill metadata + content |
-| `arm skill install <source> [--name override]` | `POST /api/skills` | Install (upsert) from source |
-| `arm skill remove <name>` | `DELETE /api/skills/:name` | Remove |
-
-**Sources:**
-```bash
-arm skill install github:user/repo              # git repo
-arm skill install github:user/repo/skills/name  # subdirectory
-arm skill install ./local-path/                  # local directory
-```
-
-A skill is a directory containing at minimum a `SKILL.md` file with YAML frontmatter (name, description, triggers). Installed to `~/.agent-runtime/skills/<name>/`.
-
-**Session injection:** At session start, the available skill list (names + descriptions) is injected into the agent's system prompt **only if `arm-skills` is in the session's tools list**. The agent calls `skill_load` to retrieve full content on demand.
-
-### Tools (MCP Server Modules)
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm tool list [--text "..."]` | `QUERY /api/tools` | Search/list configured tools |
-| `arm tool get <name>` | `GET /api/tools/:name` | Get tool config |
-| `arm tool add <name> --command "..." [--args "..."] [--env K=V]` | `POST /api/tools` | Add a tool definition |
-| `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove |
-| `arm tool update <name> [--command "..."] [--args "..."] [--env K=V]` | `PATCH /api/tools/:name` | Update config |
-
-Tools are MCP tool modules. Built-in modules (`arm-*`) are always available; custom tool definitions (external MCP servers) are made available to sessions that enable them.
-
-**No tools are enabled by default.** The session's `tools` array explicitly lists which modules to activate. Without any tools, the agent has no system access — it can only do LLM reasoning.
-
-### Providers
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm provider list` | `QUERY /api/providers` | List registered providers |
-| `arm provider get <name>` | `GET /api/providers/:name` | Get provider config + status |
-| `arm provider health [<name>]` | `GET /api/providers/health` or `GET /api/providers/:name/health` | Overall or per-provider health |
-
-### Completions (one-off LLM calls, no session)
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm completion create -p "prompt" [--provider X] [--model X] [--system "..."] [--schema <file\|inline>] [--timeout-seconds N] [--caller X] [--retries N] [--idempotency-key K]` | `POST /api/completions` | Single LLM call |
-| `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `QUERY /api/completions` | Search completion history |
-| `arm completion get <id>` | `GET /api/completions/:id` | Get by ID |
-
-**Completion creation payload:**
-```json
-{
-  "prompt": "Classify this ticket as bug/feature/question",
-  "provider": "claude",
-  "model": "claude-sonnet-4-6[1m]",
-  "systemPrompt": "You are a ticket classifier.",
-  "schema": {
-    "type": "object",
-    "properties": {
-      "category": {"type": "string", "enum": ["bug", "feature", "question"]},
-      "confidence": {"type": "number"}
-    },
-    "required": ["category", "confidence"]
-  },
-  "timeoutSeconds": 60,
-  "retries": 2,
-  "caller": "oribot"
-}
-```
-
-`provider` is optional — if omitted, ARM auto-resolves from model name.
-
-**Response:**
-```json
-{
-  "id": "cmp-a1b2c3",
-  "text": "...",
-  "data": {"category": "bug", "confidence": 0.95},
-  "provider": "claude",
-  "model": "claude-sonnet-4-6[1m]",
-  "tokens": {"input": 150, "output": 42},
-  "durationMs": 1200
-}
-```
-
-When `schema` is provided, ARM instructs the model to return JSON conforming to the schema and validates the output. If validation fails, ARM retries up to `retries` times (default 2). If all attempts fail, returns 422 with the raw text and validation errors.
-
-### Server
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm server start [--port N] [--foreground]` | — | Start in background (or foreground) |
-| `arm server stop` | — | Soft stop (sessions survive, server exits) |
-| `arm server status` | `GET /api/health` | Health + diagnostics |
-| `arm server logs [-f] [--since TIME]` | — | View server output |
-
-### Events
-
-| CLI | API | Purpose |
-|---|---|---|
-| `arm events [--session X] [--exclude-session X] [--event X,Y] [--exclude-event X,Y] [--caller X] [--exclude-caller X] [--tag k:v] [--exclude-tag k:v] [--role X] [--exclude-role X] [--exclude-children] [--last-event-id ID]` | `GET /api/events` | Subscribe to SSE stream |
+- **`secretEnv`** is write-only: never returned, never logged or persisted, and only passed to
+  commands run through `approved_bash`.
+- **Messaging** is on by default; with `messaging: false` the messages endpoint returns 403.
+- **Headless** sessions auto-deny anything the policy doesn't `allow` (for CI/scripting).
+- **Revive** creates a new, independent session seeded with the parent's conversation, using its
+  own tools/skills/policy (default: the parent's). The parent stays terminal and gains
+  `childSessionId`. Reviving the same parent twice gives two independent sessions.
 
 ---
 
-## Event Bus (SSE)
+## Approvals
 
-### Endpoint
+The agent's only access to the system (shell, files, messaging) is through ARM's tools. Each call
+is checked against the session's policy:
 
-`GET /api/events` — Server-Sent Events stream. Every event has an `id:` field for reconnection via `Last-Event-ID`.
+- **safe** → runs immediately, output returned
+- **blocked** → error with reason
+- **needs approval** → error with an `approvalToken`; the agent re-submits with the token to
+  escalate, ARM emits `session.approval`, and the call waits for a human decision (auto-deny
+  after a configurable timeout)
 
-### Events
+The check understands shell syntax (pipes, chains, subshells, quoting) and fails closed: anything
+it can't parse needs approval.
+
+| CLI | API | Purpose |
+|---|---|---|
+| `arm approval list [--session X] [--status pending\|approved\|denied\|expired] [--kind bash\|file\|tool] [--after DATE] [--limit N]` | `QUERY /api/approvals` | Search |
+| `arm approval get <session-id> <approval-id>` | `GET /api/sessions/:id/approvals/:aid` | Get |
+| `arm approval approve\|deny <session-id> <approval-id> [--reason "..."]` | `POST /api/sessions/:id/approvals/:aid/decide` | Decide: `{ "decision": "approve" \| "deny", "reason": "…" }` |
+
+**Approval tokens** are single-use, session-scoped, expire after 15 minutes (configurable), and
+are bound to the exact command + working directory. They control escalation, not authorization.
+
+### Agent tools
+
+Enabled per session via `tools`; none are on by default (no tools = reasoning only).
+
+| Module | Tools |
+|---|---|
+| `arm-approved-bash` | `approved_bash` |
+| `arm-file-ops` | `approved_file_read`, `approved_file_edit`, `approved_file_create`, `approved_file_delete` |
+| `arm-skills` | `skill_list`, `skill_load` |
+| `arm-messaging` | `message_user`, `check_user_replies` |
+
+```json
+// approved_bash call
+{ "command": "git push origin main", "purpose": "Deploy fix", "working_dir": "/path/to/repo", "approvalToken": "optional" }
+// blocked
+{ "error": "BLOCKED", "reason": "rm commands are not allowed in this policy" }
+// needs approval
+{ "error": "NEEDS_APPROVAL", "reason": "npm install requires human approval", "approvalToken": "arm-tok-abc123" }
+```
+
+### Policies
+
+Versioned: every update creates a new version; unreferenced old versions are cleaned up. Rules are
+evaluated in order, first match wins, and unmatched commands need approval. Path rules let a
+policy allow reads broadly while restricting writes.
+
+| CLI | API | Purpose |
+|---|---|---|
+| `arm policy list [--text "..."]` | `QUERY /api/policies` | List |
+| `arm policy get <name> [--version N]` | `GET /api/policies/:name` | Get (latest or a version) |
+| `arm policy create <name> [--from <file>]` | `POST /api/policies` | Create |
+| `arm policy update <name> [--from <file>]` | `PATCH /api/policies/:name` | Update (new version) |
+| `arm policy delete <name>` | `DELETE /api/policies/:name` | Delete (fails while referenced) |
+| `arm policy test <name> [--file commands.txt]` | — | Check commands against a policy (stdin if no file) |
+| `arm policy history <name> [--limit N]` | — | Version history |
+
+```json
+{
+  "name": "standard",
+  "version": 3,
+  "rules": [
+    {"action": "allow", "pattern": "git log *", "kind": "bash"},
+    {"action": "deny", "pattern": "git push --force *", "kind": "bash", "reason": "Force push is never safe."},
+    {"action": "allow", "pattern": "file-read", "kind": "file", "paths": ["**"]},
+    {"action": "allow", "pattern": "file-edit", "kind": "file", "paths": ["/tmp/**", "./src/**"]},
+    {"action": "deny", "pattern": "file-edit", "kind": "file", "paths": ["/etc/**", "/home/*/.ssh/**"], "reason": "System files are off limits."}
+  ]
+}
+```
+
+---
+
+## Skills & tools
+
+| CLI | API | Purpose |
+|---|---|---|
+| `arm skill list [--text "..."] [--source github\|local]` | `QUERY /api/skills` | Search |
+| `arm skill get <name>` | `GET /api/skills/:name` | Metadata + content |
+| `arm skill install <source> [--name override]` | `POST /api/skills` | Install/upsert (`github:user/repo[/path]` or a local directory) |
+| `arm skill remove <name>` | `DELETE /api/skills/:name` | Remove |
+| `arm tool list [--text "..."]` | `QUERY /api/tools` | Search |
+| `arm tool get <name>` | `GET /api/tools/:name` | Get |
+| `arm tool add <name> --command "..." [--args "..."] [--env K=V]` | `POST /api/tools` | Add an external MCP server |
+| `arm tool update <name> [--command …] [--args …] [--env …]` | `PATCH /api/tools/:name` | Update |
+| `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove |
+
+A skill is a directory with a `SKILL.md` (YAML frontmatter: name, description, triggers). When a
+session enables `arm-skills`, the agent sees the list of its skills and loads full content on
+demand with `skill_load`. Built-in tools (`arm-*`) are always available; custom tools are external
+MCP servers a session can enable.
+
+---
+
+## Providers & completions
+
+| CLI | API | Purpose |
+|---|---|---|
+| `arm provider list` | `QUERY /api/providers` | List |
+| `arm provider get <name>` | `GET /api/providers/:name` | Config + status |
+| `arm provider health [<name>]` | `GET /api/providers/health`, `GET /api/providers/:name/health` | Health |
+| `arm completion create -p "prompt" [--provider X] [--model X] [--system "..."] [--schema <file\|inline>] [--timeout-seconds N] [--caller X] [--retries N]` | `POST /api/completions` | One-off LLM call, no session |
+| `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `QUERY /api/completions` | History |
+| `arm completion get <id>` | `GET /api/completions/:id` | Get |
+
+Provider CLIs change quickly; re-evaluate each one when building its connector.
+
+`provider` is optional (resolved from the model). With a `schema`, ARM validates the output and
+retries up to `retries` times (default 2); if every attempt fails it returns 422 with the raw
+text and the validation errors.
+
+```json
+// request
+{ "prompt": "Classify this ticket as bug/feature/question", "model": "claude-sonnet-4-6[1m]",
+  "systemPrompt": "You are a ticket classifier.",
+  "schema": { "type": "object", "properties": { "category": {"type": "string", "enum": ["bug", "feature", "question"]} }, "required": ["category"] },
+  "timeoutSeconds": 60, "retries": 2, "caller": "oribot" }
+// response
+{ "id": "cmp-a1b2c3", "text": "...", "data": {"category": "bug"}, "provider": "claude",
+  "model": "claude-sonnet-4-6[1m]", "tokens": {"input": 150, "output": 42}, "durationMs": 1200 }
+```
+
+---
+
+## Events (SSE)
+
+`GET /api/events` (`arm events`) streams events. Every event has an `id`; reconnect with
+`Last-Event-ID` to replay what you missed, across the retention window and server restarts. Every
+event's JSON `data` has a `type` field equal to the event name. A `heartbeat` is sent every 30s.
 
 | Event | Payload |
 |---|---|
 | `heartbeat` | timestamp |
-| `session.created` | Full session metadata |
+| `session.created` | full session |
 | `session.queued` | id, position |
 | `session.started` | id, providerSessionId |
 | `session.status` | id, status, previous |
@@ -317,13 +264,13 @@ When `schema` is provided, ARM instructs the model to return JSON conforming to 
 | `session.failed` | id, error |
 | `session.killed` | id, reason, source (user\|system\|timeout) |
 | `session.revived` | id, newSessionId |
-| `session.text` | id, role (thinking/assistant/result/user), text (complete, not delta) |
+| `session.text` | id, role (thinking\|assistant\|result\|user), text (complete segment, not a delta) |
 | `session.tool` | id, name, toolId, args |
 | `session.tool_result` | id, toolId, result, error? |
 | `session.context` | id, tokens, percentage |
 | `session.context_threshold` | id, percentage, threshold |
 | `session.subcontext` | id, subcontextId, tokens |
-| `session.message` | id, text (user→agent message delivered) |
+| `session.message` | id, text (delivery of a user message; the conversation also gets `session.text` role=user) |
 | `session.approval` | id, approvalId, kind, command, purpose, deadline |
 | `session.approval_resolved` | id, approvalId, decision, actor |
 | `session.approval_expired` | id, approvalId |
@@ -334,213 +281,52 @@ When `schema` is provided, ARM instructs the model to return JSON conforming to 
 | `server.restart_scheduled` | deadline |
 | `server.draining` | remainingSessions |
 
-**`session.text`:** Each event carries a complete text segment (not a delta/chunk). Frontends render them sequentially.
-
-**`session.message` vs `session.text role=user`:** Both may fire for user messages. `session.message` is for message delivery tracking; `session.text` is for rendering the conversation.
-
-**Heartbeat:** Server sends `heartbeat` event every 30s.
-
-**Payload discriminator:** every event's JSON `data` carries a `type` field equal to its event name, so generated clients get per-event types.
-
-### Event Persistence
-
-Every event is persisted with a timestamp and a monotonic event ID. The persisted stream is both
-the audit log and the replay source.
-
-### Server-Side Filtering
-
-All filter params support both include and exclude variants:
-
-| Param | Exclude variant | Purpose |
-|---|---|---|
-| `session=<id>` | `exclude_session=<id>` | Filter by session |
-| `event=t1,t2` | `exclude_event=t1,t2` | Filter by event type |
-| `caller=X` | `exclude_caller=X` | Filter by session caller |
-| `tag=key:value` | `exclude_tag=key:value` | Filter by session tag |
-| `role=thinking\|assistant\|result` | `exclude_role=X` | Filter session.text |
-| `children=true\|false` | — | Include/exclude child sessions |
-
-**Reconnection:** Include `Last-Event-ID` header to replay missed events.
+**Filters** (server-side; each has an `exclude_` variant): `session`, `event` (comma list),
+`caller`, `tag` (`key:value`), `role` (for `session.text`), plus `children=true|false`.
 
 ---
 
-## Approval System
-
-### How It Works
-
-ARM's approval tools are the agent's only path to system operations (shell, file, messaging). When an agent calls `approved_bash`:
-
-1. ARM classifies the command against the session's policy
-2. If `safe`: execute immediately, return stdout
-3. If `blocked`: return error with reason
-4. If `needs_approval`: return `approvalToken` → agent can re-submit to escalate → ARM emits `session.approval` on SSE → the tool call waits for a human decision → frontend responds → tool call resolves
-
-### ARM MCP Tool Modules
-
-**Recommended tool modules** (each enabled independently via session `tools` array):
-
-| Module | Tools | Purpose |
-|---|---|---|
-| `arm-approved-bash` | `approved_bash` | Execute shell commands through approval policy |
-| `arm-file-ops` | `approved_file_read`, `approved_file_edit`, `approved_file_create`, `approved_file_delete` | File operations through path policy |
-| `arm-skills` | `skill_load`, `skill_list` | Skill discovery and loading |
-| `arm-messaging` | `message_user`, `check_user_replies` | Bidirectional user communication |
-
-**Parameters (approved_bash):**
-```json
-{
-  "command": "git push origin main",
-  "purpose": "Deploy fix",
-  "working_dir": "/path/to/repo",
-  "approvalToken": "optional — include to escalate a previously-denied command"
-}
-```
-
-**When blocked:**
-```json
-{
-  "error": "BLOCKED",
-  "reason": "rm commands are not allowed in this policy"
-}
-```
-
-**When needs approval:**
-```json
-{
-  "error": "NEEDS_APPROVAL",
-  "reason": "npm install requires human approval",
-  "approvalToken": "arm-tok-abc123"
-}
-```
-
-**File reading:** `approved_file_read` is subject to path policy. Policies can allow reads broadly while restricting writes.
-
-**Timeout:** The tool call waits for a human decision up to a configurable timeout. If the timeout expires before a decision, the approval auto-denies.
-
-### Classification
-
-```
-command → policy evaluation → safe | blocked | needs_approval
-  safe → execute immediately, return stdout
-  blocked → return error with reason
-  needs_approval → return approvalToken → agent re-submits → SSE event → defer → decision → resume
-```
-
-The classifier must be shell-aware with a fail-closed default. Covered by extensive unit tests including adversarial inputs.
-
-### Policies (Application Data)
-
-Policies are **versioned application data**. Each mutation creates a new version. Old versions without any referencing sessions are garbage-collected.
+## Server, queue & restart
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm policy list [--text "..."]` | `QUERY /api/policies` | List all policies |
-| `arm policy get <name> [--version N]` | `GET /api/policies/:name` | Get policy rules (latest or specific version) |
-| `arm policy create <name> [--from <file>]` | `POST /api/policies` | Create policy |
-| `arm policy update <name> [--from <file>]` | `PATCH /api/policies/:name` | Update rules (creates new version) |
-| `arm policy delete <name>` | `DELETE /api/policies/:name` | Delete (fails if sessions reference it) |
-| `arm policy test <name> [--file commands.txt]` | — | Test policy against commands (reads stdin if no file) |
-| `arm policy history <name> [--limit N]` | — | View version history |
+| `arm server start [--port N] [--foreground]` | — | Start |
+| `arm server stop` | — | Stop; running sessions keep going |
+| `arm server status` | `GET /api/health` | Health |
+| `arm server logs [-f] [--since T]` | — | Server output |
 
-**Policy structure:**
-```json
-{
-  "name": "standard",
-  "version": 3,
-  "rules": [
-    {"action": "allow", "pattern": "git status", "kind": "bash"},
-    {"action": "allow", "pattern": "git log *", "kind": "bash"},
-    {"action": "allow", "pattern": "cat *", "kind": "bash"},
-    {"action": "deny", "pattern": "rm -rf *", "kind": "bash", "reason": "Destructive operation. Use approved_file_delete for individual files."},
-    {"action": "deny", "pattern": "git push --force *", "kind": "bash", "reason": "Force push is never safe."},
-    {"action": "allow", "pattern": "file-read", "kind": "file", "paths": ["**"]},
-    {"action": "allow", "pattern": "file-edit", "kind": "file", "paths": ["/tmp/**", "./src/**"]},
-    {"action": "deny", "pattern": "file-edit", "kind": "file", "paths": ["/etc/**", "/home/*/.ssh/**"], "reason": "System files are off limits."}
-  ]
-}
-```
-
-Rules are evaluated in order; first match wins. Unmatched commands require approval.
-
----
-
-## Persistence
-
-**Requirements:**
-- Session metadata, logs, and conversations retained for at least 6 months
-- Hot storage for recent sessions (active + last N days)
-- Cold/archive storage for older sessions (compressed, queryable by ID)
-- Events replayable (`Last-Event-ID`) across the retention window
-- Completions history retained similarly
-- Access to logs gated by the same auth system
-- `secretEnv` values never persisted in any log or event
-
----
+- **Queue:** FIFO with a concurrent-session limit. When all slots are busy, create returns 202
+  with the queue position; when the queue is full, 503. New sessions also wait while host memory
+  is low.
+- **Gentle restart:** the server can exit and come back without killing running agents; the new
+  server re-attaches to them and clients replay missed events via `Last-Event-ID`.
+- **Retention:** sessions, logs, conversations, completions and events are kept for at least
+  6 months (recent ones hot, older ones compressed but retrievable by ID), with access gated by
+  auth. `secretEnv` values are never stored.
 
 ## Configuration
-
-Location/filename TBD.
 
 | Setting | Default | Description |
 |---|---|---|
 | `port` | 18791 | Listen port |
-| `queryMethod` | `"query"` | HTTP method for search endpoints (`query`, `get`, `post`) |
+| `queryMethod` | `query` | Search method (`query`, `get`, `post`) |
 | `totalSlots` | 10 | Max concurrent sessions |
-| `maxQueueSize` | 200 | Max queued sessions (reject above this) |
-| `backgroundTimeout` | 600 | Background timeout (s) |
-| `interactiveMaxLifetime` | 21600 | Interactive max (s) |
-| `memoryLimitMB` | 0 | 0=auto (block when <2GB free) |
-| `contextThresholds` | [...] | Token alerts |
-| `providers` | [...] | Registered provider configs |
+| `maxQueueSize` | 200 | Max queued sessions |
+| `backgroundTimeout` | 600 | Background session timeout (s) |
+| `interactiveMaxLifetime` | 21600 | Interactive session max lifetime (s) |
+| `memoryLimitMB` | 0 | Free-memory floor for starting sessions (0 = auto, 2 GB) |
+| `contextThresholds` | [...] | Context-usage alert thresholds |
+| `providers` | [...] | Registered providers |
 
 ---
 
-## Restart & Adoption
+## Integration patterns
 
-Gentle restart (the only mode in V0): the server exits, running agents keep running, and the new
-server re-attaches to them. Clients reconnect with `Last-Event-ID` and miss nothing.
+- **Slack:** subscribe to `session.approval`, `session.text` and lifecycle events; render approvals
+  as buttons; post decisions.
+- **Web UI:** dashboard over SSE with an approval queue across sessions.
+- **CI/scripting:** `arm session create --headless --tools arm-approved-bash --policy permissive`.
+- **Custom:** any HTTP client can call the API and consume SSE.
 
----
-
-## Queue & Scheduling
-
-- FIFO queue with configurable slot limit
-- Configurable max queue size (default 200). When queue is full: `POST /api/sessions` returns 503 (rejected, try again later)
-- Memory gate: blocks spawns when system RAM < 2GB free
-- Configurable per-session timeout
-- When slots are full but queue has room: `POST /api/sessions` returns 202 Accepted with queue position
-
----
-
-## Standards & Extensibility
-
-- **MCP** (Model Context Protocol) for tool integration — used sparingly, only for truly general-purpose operations (shell, file I/O, user communication). Domain-specific integrations should be skills with scripts.
-- **SSE** for real-time streaming — standard event-stream protocol with `Last-Event-ID` replay
-- **REST/JSON** for all management APIs
-- **HTTP QUERY method** (RFC 10008) for search/filter operations
-
----
-
-## Integration Patterns
-
-### Headless (Slack)
-
-Subscribe to SSE (`session.approval`, `session.text`, lifecycle events). Render approvals as Slack buttons. Post decisions via REST.
-
-### Web UI
-
-SSE for dashboard. Approval queue view across all sessions.
-
-### CI/Scripting
-
-`arm session create --headless --tools arm-approved-bash --policy permissive` — auto-approves everything within policy.
-
-### Custom
-
-Any HTTP client can consume SSE and call REST. The approval contract is frontend-agnostic.
-
----
-
-## Next Steps
-
-See [`MILESTONES.md`](MILESTONES.md). Open: API version strategy (version prefix or header).
+Tools use MCP, reserved for general-purpose operations (shell, files, messaging); domain-specific
+integrations belong in skills.
