@@ -1,0 +1,6 @@
+# Single entry point for humans, Claude and CI: pins the toolchain and runs the same tasks
+# everywhere. Each task delegates to the project's native build (npm / dotnet).
+[tools]
+node = "24.14.0"
+dotnet = "10.0.200"
+

@@ -1,0 +1,8 @@
+{
+  "name": "arm-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "arm — command-line client for Olve.AgentRuntimeManager",
+  "scripts": {}
+}

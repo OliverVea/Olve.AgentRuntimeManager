@@ -1,5 +1,5 @@
 {
-  "name": "olve-template-web",
+  "name": "arm-frontend",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,17 +12,9 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "generate-client": "cd ../backend && dotnet tool run kiota generate -l typescript -d ../../artifacts/backend/api.json -c OlveAgentRuntimeManagerClient -o ../frontend/src/api -n OlveAgentRuntimeManager --clean-output"
+    "test:watch": "vitest"
   },
-  "dependencies": {
-    "@microsoft/kiota-abstractions": "1.0.0-preview.103",
-    "@microsoft/kiota-http-fetchlibrary": "1.0.0-preview.103",
-    "@microsoft/kiota-serialization-form": "1.0.0-preview.103",
-    "@microsoft/kiota-serialization-json": "1.0.0-preview.103",
-    "@microsoft/kiota-serialization-multipart": "1.0.0-preview.103",
-    "@microsoft/kiota-serialization-text": "1.0.0-preview.103"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
     "happy-dom": "^20.10.6",

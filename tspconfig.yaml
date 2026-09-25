@@ -1,0 +1,10 @@
+# TypeSpec emitter config for src/spec/main.tsp. Generated output goes to artifacts/ (gitignored),
+# never into source folders.
+output-dir: "{project-root}/artifacts/spec"
+emit:
+  - "@typespec/openapi3"
+options:
+  "@typespec/openapi3":
+    openapi-versions: ["3.2.0"]
+    file-type: json
+    emitter-output-dir: "{output-dir}"
