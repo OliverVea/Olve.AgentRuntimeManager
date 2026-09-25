@@ -285,7 +285,7 @@ event's JSON `data` has a `type` field equal to the event name. A `heartbeat` is
 | `session.context_threshold` | id, percentage, threshold |
 | `session.subcontext` | id, subcontextId, tokens |
 | `session.message` | id, messageId, direction (to_agent\|to_user), text |
-| `session.approval` | id, approvalId, kind, purpose, deadline, plus per kind: bash → command, workingDir; file → operation (read\|edit\|create\|delete), path, diff (edits); tool → tool, args |
+| `session.approval` | id, approvalId, kind (bash\|file\|tool), summary (human-readable), details (untyped JSON), purpose, deadline |
 | `session.approval_resolved` | id, approvalId, decision (approved\|denied\|expired\|cancelled), actor (`system` for expired/cancelled), reason? |
 | `completion.start` | id, model, provider |
 | `completion.done` | id, tokens, durationMs |

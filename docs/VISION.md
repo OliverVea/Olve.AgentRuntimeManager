@@ -41,6 +41,10 @@ re-evaluated and scoped when it's picked up.
 
 ## Approvals & policies
 
+- **Typed approval payloads**: per-kind `details` instead of untyped JSON. bash → `command`,
+  `workingDir`; file → `operation` (read/edit/create/delete), `path`, and a diff for edits; tool →
+  `tool`, `args`. Lets frontends render rich approvals, such as diffs and syntax-highlighted
+  commands.
 - **Approval tokens (two-step escalation)**: on `needs approval` the tool returns a single-use,
   command-bound token and the agent must re-submit with it to actually ask a human. Gives the
   agent a chance to pick a safer command first. Parked: it didn't work well in practice (work
