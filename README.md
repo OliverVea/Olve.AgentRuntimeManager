@@ -15,30 +15,35 @@ dotnet new olve-api -n "MyCompany.MyService"
 ## Project Structure
 
 ```
-src/Olve.AgentRuntimeManager/                          # API application (minimal API)
-├── Configuration/                              # Auth, telemetry, JSON, host config
-├── Messages/                                   # Message CRUD example feature
-├── Stores/                                     # EntityStore snapshot persistence (promotion-shaped)
-├── Health/                                     # Health check endpoints
-└── appsettings.json                            # Default configuration
-test/Olve.AgentRuntimeManager.UnitTests/               # Unit tests (TUnit + Rocks)
-test/Olve.AgentRuntimeManager.IntegrationTests/        # Integration tests (TUnit + Testcontainers)
-clients/Olve.AgentRuntimeManager.Client/               # Generated C# client (Refitter CLI + Refit)
-clients/olve-arm-client-ts/            # Generated TypeScript client (Kiota)
-frontend/                                       # Vanilla Web Components + TS frontend (see frontend/README.md)
-tools/version.cs                                # CalVer versioning script
-helm/                                           # Helm chart for Kubernetes (ClusterIP Service + SLO)
+src/
+├── backend/                                    # .NET — run dotnet commands from here
+│   ├── Olve.AgentRuntimeManager.slnx
+│   ├── Olve.AgentRuntimeManager/               # API application (minimal API)
+│   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
+│   │   ├── Messages/                           # Message CRUD example feature
+│   │   ├── Stores/                             # EntityStore snapshot persistence (promotion-shaped)
+│   │   ├── Health/                             # Health check endpoints
+│   │   └── appsettings.json                    # Default configuration
+│   ├── Olve.AgentRuntimeManager.UnitTests/     # Unit tests (TUnit + Rocks)
+│   ├── Olve.AgentRuntimeManager.IntegrationTests/  # Integration tests (TUnit + Testcontainers, raw HTTP)
+│   ├── tools/version.cs                        # CalVer versioning script
+│   ├── .config/dotnet-tools.json               # Local tools (Kiota, dotnet-outdated)
+│   ├── global.json                             # SDK pin
+│   ├── Directory.Build.props                   # Shared build properties (TFM, nullable, etc.)
+│   └── Directory.Packages.props                # Central package version management
+├── frontend/                                   # Vanilla Web Components + TS frontend (see src/frontend/README.md)
+├── spec/main.tsp                               # API contract (TypeSpec) — see docs/P0-SPEC-FIRST.md
+└── deploy/
+    └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
-Dockerfile                                      # Multi-stage build (AOT, chiseled)
-Directory.Build.props                           # Shared build properties (TFM, nullable, etc.)
-Directory.Packages.props                        # Central package version management
+Dockerfile                                      # Multi-stage build (AOT, chiseled); repo root is the build context
 ```
 
 ## Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | No | The SPA (`frontend/`), served from `wwwroot` — see [Frontend](#frontend) |
+| GET | `/` | No | The SPA (`src/frontend/`), served from `wwwroot` — see [Frontend](#frontend) |
 | GET | `/health` | No | Health check, returns 200 |
 | GET | `/api/auth-config` | No | Public OIDC settings for the SPA login (authority, client id, scopes) |
 | GET | `/api/messages?page=<n>&pageSize=<n>` | No | List messages (paginated, 1-based) |
@@ -56,6 +61,8 @@ The `Messages` feature is the template's worked example — it exercises `Id<T>`
 
 ## Build & Test
 
+Run from `src/backend/` (the solution root):
+
 ```bash
 # Restore and build
 dotnet restore
@@ -71,7 +78,7 @@ dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false
 dotnet test -p:RunIntegrationTests=true
 ```
 
-Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it through the generated Refit client — so the tests cover the AOT-published binary end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
+Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it over raw HTTP (no generated client, so the tests check the wire contract) — covering the AOT-published binary end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
 
 To add a dependency (e.g. PostgreSQL):
 
@@ -102,11 +109,11 @@ Test execution is controlled by MSBuild properties:
 ## Running
 
 ```bash
-# Local
-dotnet run --project src/Olve.AgentRuntimeManager
+# Local (from src/backend/)
+dotnet run --project Olve.AgentRuntimeManager
 
-# Kubernetes
-helm install olve-arm helm/
+# Kubernetes (from the repo root)
+helm install olve-arm src/deploy/helm/
 ```
 
 ## Deployment (GitOps)
@@ -195,20 +202,25 @@ handlers. The `Stores/` module is written at library quality for later promotion
 
 ## Client Generation
 
-### C# ([Refitter](https://refitter.github.io/))
-
-The `clients/Olve.AgentRuntimeManager.Client/` project generates a typed [Refit](https://github.com/reactiveui/refit) client from `api.json` at build time — just build the solution, no manual codegen step needed. A build target runs the [Refitter](https://refitter.github.io/) CLI (restored via `dotnet tool restore`) to emit the interface as `Generated/Output.cs`, which Refit's own source generator then turns into the client implementation. (Refit 12's `RestService.For<T>` requires that generated implementation, and Refit's generator can only consume a real source file — not the output of Refitter's source generator — hence the CLI step rather than `Refitter.SourceGenerator`.)
+Generated output never lives in source folders. The backend build writes its OpenAPI document to
+`artifacts/backend/api.json` (gitignored); in P0 the contract moves to `src/spec/main.tsp` (see
+[`docs/P0-SPEC-FIRST.md`](docs/P0-SPEC-FIRST.md)).
 
 ### TypeScript ([Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview))
 
+The frontend's client (`src/frontend/src/api/`) is generated from `artifacts/backend/api.json` and
+(for now) committed:
+
 ```bash
-dotnet tool restore
-dotnet kiota generate -l typescript -d api.json -c OlveAgentRuntimeManagerClient -o clients/olve-arm-client-ts/src -n OlveAgentRuntimeManager
+cd src/frontend && npm run generate-client
 ```
+
+There is no C# client: the integration tests speak raw HTTP, and the `arm` CLI will be generated
+from the spec.
 
 ## Frontend
 
-`frontend/` is the template's companion UI: a no-framework, **vanilla Web Components** app in
+`src/frontend/` is the template's companion UI: a no-framework, **vanilla Web Components** app in
 **TypeScript**, consuming the API through its own Kiota-generated client. It ships a
 `<message-list>` CRUD view over the backend `Message` feature, proving the client-gen →
 component → API loop end to end.
@@ -218,20 +230,20 @@ The stance is deliberate (DESIGN §2): standalone custom elements, ES modules, a
 re-rendering**. A component that outgrows this can `npm i lit` and switch its own base to
 `LitElement` per-component; auto-rerender is always opt-in, never the baseline.
 
-It's served **same-origin**: the Dockerfile's Node stage builds `frontend/dist` into the app's
+It's served **same-origin**: the Dockerfile's Node stage builds `src/frontend/dist` into the app's
 `wwwroot`, so the deployed API serves the SPA at `/` and the JSON API at `/api/` (one host, no
 CORS). Locally you run it on Vite instead, which proxies `/api` to the backend:
 
 ```bash
-cd frontend && npm install && npm run dev    # proxies /api to the API (VITE_API_TARGET)
+cd src/frontend && npm install && npm run dev    # proxies /api to the API (VITE_API_TARGET)
 ```
 
-See [`frontend/README.md`](frontend/README.md) for the layout, run/build commands, auth for
+See [`src/frontend/README.md`](src/frontend/README.md) for the layout, run/build commands, auth for
 writes, and how to regenerate the client (including the Kiota-runtime version pin).
 
 ## Versioning
 
-The `tools/version.cs` script computes CalVer versions:
+The `src/backend/tools/version.cs` script computes CalVer versions (run from `src/backend/`):
 
 ```bash
 # Local development
@@ -268,6 +280,9 @@ jobs:
   build-and-test:
     name: Build and test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -296,6 +311,9 @@ jobs:
   build-and-test:
     name: Build and test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -310,6 +328,9 @@ jobs:
     name: Compute version
     needs: build-and-test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact-name: ${{ steps.version.outputs.artifact-name }}
@@ -335,7 +356,7 @@ running instance/tooling, and the Claude Code skill that knows the model).
 | **Olve.Utilities** stack (Results, Validation, MinimalApi, Utilities) | Baked-in error handling, validation, result→HTTP mapping, `Id<T>`/`EntityStore<T>` primitives | [docs site](https://olivervea.github.io/Olve.Utilities/) | [OliverVea/Olve.Utilities](https://github.com/OliverVea/Olve.Utilities) | NuGet | *(none yet — gap)* |
 | **Olve.Pipelines** | GitOps CD — builds & deploys this repo via `.pipelines/` (see [Deployment](#deployment-gitops)) | in-repo `docs/setup/`, served at `/docs` + `llms.txt` | [OliverVea/Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines) | [`pipelines-private.ovea.pro`](https://pipelines-private.ovea.pro), beta `pipelines-beta.ovea.pro`, hooks `pipelines-hooks.ovea.pro`; **`pl` CLI** via `GET /download/{asset}` | `ovea-olve-pipelines` |
 | **Olve.Homelab** | Edge chart that owns all Ingress; public exposure is registered there, not in this chart | — | [OliverVea/Olve.Homelab](https://github.com/OliverVea/Olve.Homelab) | — | — |
-| **TUnit · Rocks · Refitter · Kiota** | Test framework, AOT mocking, C# & TS client generation | see per-library links below | — | — | — |
+| **TUnit · Rocks · Kiota** | Test framework, AOT mocking, TS client generation | see per-library links below | — | — | — |
 
 Per-library documentation:
 
@@ -345,5 +366,4 @@ Per-library documentation:
 - [Olve.Utilities](https://olivervea.github.io/Olve.Utilities/src/Olve.Utilities/README.html) — Meta-package bundling utility libraries including identifiers, collections, and graph types
 - [TUnit](https://tunit.dev/docs/intro) — Test framework (not xUnit/NUnit). Uses `await Assert.That(...)` fluent syntax
 - [Rocks](https://raw.githubusercontent.com/JasonBock/Rocks/refs/heads/main/docs/Overview.md) — Source-generated mocking library for AOT-compatible test doubles
-- [Refitter](https://refitter.github.io/articles/refitter-file-format.html) — Source generator for typed C# HTTP clients from OpenAPI specs via Refit
 - [Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview) — Microsoft's OpenAPI client generator for TypeScript (and other languages)

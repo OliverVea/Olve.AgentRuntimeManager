@@ -24,6 +24,9 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
 - **Recommendation:** (2) — keep minimal API + Olve.MinimalApi result mapping, expose
   `QUERY` via `MapMethods`, keep `queryMethod` configurable per spec. Bump to .NET 11
   only if a concrete feature needs it.
+- **Update (2026-09-25):** .NET 11 (Nov 2026) supports `QUERY` natively *and* emits OpenAPI 3.2
+  with SSE `itemSchema` from `TypedResults.ServerSentEvents` (useful for the A8 conformance
+  check). That's two concrete features: revisit the bump when it ships.
 
 ### A2. Error envelope
 - **Context.** SPEC §"Error Model" mandates `{ "error": { code, message, details } }`
@@ -169,6 +172,65 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   bus is correct. Build it **behind the notify port (A5)** so the SQLite/in-process impl
   becomes Postgres/`NOTIFY` when multi-replica is real. **No coordination backbone in V0.**
 
+### A8. API definition — code-first vs spec-first
+- **Context.** The scaffold is **code-first**: `api.json` is generated from the minimal-API
+  endpoints on build (`Microsoft.Extensions.ApiDescription.Server`), then Refitter/Kiota
+  generate clients from it. SPEC §"Next Steps" wants an OpenAPI document + JSON Schemas +
+  contract tests as the *first* deliverable — i.e. **API-first**. The `arm` CLI (every SPEC
+  command table pairs `arm …` with an endpoint) should be largely generated from the same
+  source.
+- **Options.**
+  1. Keep code-first (spec is whatever the server emits).
+  2. Hand-written OpenAPI YAML as source — no toolchain, but verbose and poor for SSE.
+  3. **TypeSpec** (`.tsp`) as source → emits OpenAPI 3.2 (incl. typed SSE events via
+     `@typespec/sse`/`@typespec/events`), JSON Schema, and (later) `.proto`.
+  4. Protobuf + proto3 JSON mapping / gRPC JSON transcoding — protobuf-flavoured JSON, weak
+     SSE story, AOT doubtful.
+- **Verified (scratch spike, TypeSpec 1.16, 2026-09-25):**
+  - OpenAPI **3.2** output carries per-event SSE schemas (`itemSchema` + `oneOf` on `event`
+    const); **3.1 silently drops them** → emit 3.2.
+  - Refitter 2.0 and Kiota 1.32 **both accept the 3.2 document** and honour visibility
+    (read-only `id`, write-only `secretEnv` excluded from the read model). Neither types the
+    SSE stream: Refitter emits `Task Events(...)`, Kiota warns the event union has no
+    discriminator. → SSE client consumption is ours to write/generate.
+  - `@typespec/http-server-csharp` is **not usable for the server**: emits MVC controllers
+    (not AOT, scaffold is minimal API), collapses `201 | 202 | error` to `Ok(...)` with
+    anonymous `Model0`, ignores visibility (would put `secretEnv` on the read model), mutable
+    classes without `required`, and the generated code **fails to compile** (argument-order
+    mismatch between interface and controller; broken ctor name on generic error models).
+  - No `QUERY` verb decorator in `@typespec/http` (OpenAPI 3.2 itself supports `query`).
+- **Direction (pending P0):** **option 3 — TypeSpec as the single source.** TypeSpec does not
+  implement the server: the backend stays hand-written minimal API + Olve.Results, and
+  conformance is enforced by (a) a **route-coverage test** (every spec operation's method +
+  path is mapped, via `EndpointDataSource`) and (b) **contract tests** validating live
+  responses against the emitted schemas (SPEC Next Steps #2) — not by diffing OpenAPI
+  documents. Server DTOs are hand-written. **No custom TypeSpec emitter**: clients come from
+  off-the-shelf generators and the CLI is hand-written on the generated client. WebSocket/binary (SPEC *Future*, and
+  per A7 not needed) would reuse the same models via the protobuf emitter.
+- **Couples to:** A1/B4 (`QUERY` + `queryMethod` — one spec operation, three routings; P0
+  must solve it), A2 (error envelope modelled once as `@error` models), B3 (TypeSpec
+  `@versioned`).
+- **No C# client (decided).** The Refitter/Refit client's only consumer was the integration
+  tests; they now speak raw HTTP (they test the wire contract, which a typed client masks). The
+  `arm` CLI is TypeScript on the generated TS client (below).
+- **Generated output is a build artifact.** OpenAPI documents (and generated clients) go to the
+  gitignored `artifacts/`, never source folders; `src/spec/` holds only `main.tsp`. The backend
+  currently writes `artifacts/backend/api.json`.
+- **Clients: TypeSpec → OpenAPI 3.2 → Hey API (decided, replaces Kiota).** Researched and spiked
+  2026-09-25: Hey API reads 3.2, honours read-only, has real SSE streaming (reconnect,
+  `Last-Event-ID`); it ignores `itemSchema`, so event payloads carry a `type` discriminator.
+  `@typespec/http-client-js` (direct TS from TypeSpec) is preview and was buggy on our spec.
+  Python/Bash clients come from the same artifact if needed.
+- **CLI: TypeScript on the generated client, compiled with `bun build --compile`** to a
+  standalone binary (~81 MB, libc only). Spiked.
+- **Build orchestration: mise (decided).** Root `mise.toml` pins node/dotnet/bun and defines
+  `spec`/`build`/`test`/`ci` tasks that delegate to each project's native build; each native
+  build owns its link to `main.tsp`. One root `package.json` (npm workspaces + TypeSpec tooling).
+  Same entry point for humans, Claude, and CI. Nx rejected as JS-centric and heavy; just/Taskfile
+  lack toolchain pinning.
+- **Exit criteria / plan:** [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md). Promote to the
+  `olve-api` template only after P0 1.0.
+
 ---
 
 ## B. Spec-declared TBDs
@@ -206,6 +268,6 @@ The scaffold ships a `Message` CRUD example (endpoints, handlers, store, seeder,
 `<message-list>`, tests). It's the worked example, not an ARM feature. **Keep as a
 pattern reference until the first real ARM entity lands, then remove?**
 
-### C4. .NET 10 SDK not installed locally
-Only .NET 8 (8.0.129) is on this machine; the project pins **10.0.200**. Build/test can't
-run locally until the .NET 10 SDK is installed. CI is unaffected (uses `dotnet/sdk:10.0`).
+### C4. .NET 10 SDK not installed locally — RESOLVED
+Only .NET 8 (8.0.129) was on this machine; the project pins **10.0.200**. As of 2026-09-25
+`dotnet --list-sdks` shows 10.0.200 installed.

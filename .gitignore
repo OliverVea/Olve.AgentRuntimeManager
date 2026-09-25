@@ -481,8 +481,6 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Generated API clients
-clients/
 
 # Local persistence snapshots (Storage:Mode=Persistent)
 data/

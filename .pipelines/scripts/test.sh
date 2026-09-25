@@ -23,6 +23,6 @@ olve_fetch_repo "$REPO" "$BRANCH" /src
 
 # Unit suite only: RunUnitTests is on by default. The integration tests need Docker
 # (Testcontainers) and are not run here — they exercise the AOT image locally/in CI.
-dotnet test /src/test/Olve.AgentRuntimeManager.UnitTests/Olve.AgentRuntimeManager.UnitTests.csproj -c Release
+dotnet test /src/src/backend/Olve.AgentRuntimeManager.UnitTests/Olve.AgentRuntimeManager.UnitTests.csproj -c Release
 
 echo "Tests passed"

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PublishAot>true</PublishAot>
-    <OpenApiDocumentsDirectory>$(MSBuildThisFileDirectory)..\..\</OpenApiDocumentsDirectory>
+    <OpenApiDocumentsDirectory>$(MSBuildThisFileDirectory)..\..\..\artifacts\backend\</OpenApiDocumentsDirectory>
     <OpenApiGenerateDocumentsOptions>--file-name api</OpenApiGenerateDocumentsOptions>
   </PropertyGroup>
 

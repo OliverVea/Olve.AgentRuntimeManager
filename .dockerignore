@@ -7,4 +7,4 @@ TestResults
 # Frontend: never ship the host's node_modules (wrong libc/arch) or a stale build into the
 # image context — the Dockerfile's Node stage runs a clean `npm ci` + `npm run build`.
 **/node_modules
-frontend/dist
+src/frontend/dist

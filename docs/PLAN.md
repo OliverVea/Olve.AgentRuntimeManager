@@ -25,6 +25,7 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
   - [ ] A5 — persistence split (control-plane store vs log/event/conversation firehose)
   - [ ] A6 — agent execution/hosting model (local process / sandbox / container / k8s job / SSH)
   - [ ] A7 — MCP transport + approval-await under distribution/HA (notify port; SSE stays)
+  - [ ] A8 — API definition: spec-first via TypeSpec (direction set; proven by P0, see [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md))
   - [ ] B1–B4 — storage layout, config location, API versioning, `queryMethod` default
 
   Resolved directions (see [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) and [`TESTING.md`](TESTING.md)):
@@ -47,12 +48,15 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
 
 Establish that the scaffold produces every artifact ARM ships, before feature work.
 
+- [ ] **P0 — spec-first toolchain**, staged 0.1 (one POST/GET) → 0.2 (SSE) → … → 1.0; see
+  [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md). The full ARM API is P1 and builds on it.
+
 - [ ] Install/pin the .NET 10 SDK so build/test run locally (OPEN-QUESTIONS C4)
 - [ ] `dotnet build` clean; unit + in-process API tests green (SQLite + FakeProvider)
 - [ ] Docker image builds (AOT, chiseled) and runs; `/health` responds
 - [ ] Helm chart renders (ClusterIP only) with `olve-arm` names
 - [ ] OpenAPI `api.json` generates on build
-- [ ] C# (Refit) and TS (Kiota) clients generate cleanly and compile
+- [ ] TS (Kiota) client generates cleanly and compiles (no C# client — see A8)
 - [ ] Frontend builds (`dist`) and is served from `wwwroot`
 - [ ] `arm` CLI project builds and produces a distributable binary (download path like `pl`)
 - [ ] Set up hosted project documentation site (mirroring the Olve.Utilities docs setup) and confirm it publishes
@@ -104,7 +108,7 @@ _To be populated in Phase 3 (dependency-ordered). Each entry gets its own Phase 
 
 - [ ] All milestone PRs merged; `main` green
 - [ ] Everything synchronized & up to date:
-  - [ ] `api.json` current; clients (C#/TS) regenerated from it
+  - [ ] `api.json` current; TS client regenerated from it
   - [ ] `OPEN-QUESTIONS.md` decisions all closed
   - [ ] `SPEC.md` / `HLD.md` reflect the built system
   - [ ] Hosted docs published and current

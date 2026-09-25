@@ -15,13 +15,6 @@
         "dotnet-outdated"
       ],
       "rollForward": false
-    },
-    "refitter": {
-      "version": "2.0.0",
-      "commands": [
-        "refitter"
-      ],
-      "rollForward": false
     }
   }
 }

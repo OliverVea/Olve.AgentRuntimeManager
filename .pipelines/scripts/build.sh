@@ -21,7 +21,7 @@ CTX=/kaniko/build-context
 olve_fetch_repo "$REPO" "$BRANCH" "$CTX"
 
 # Carry the helm chart and version forward as build artifacts before Kaniko runs.
-olve_stage_artifact "$CTX/helm" /output/helm
+olve_stage_artifact "$CTX/src/deploy/helm" /output/helm
 echo "$VERSION" > /output/version.txt
 
 olve_kaniko_build "$CTX" "olve-arm:$VERSION"

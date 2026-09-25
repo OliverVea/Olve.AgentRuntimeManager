@@ -27,7 +27,7 @@ BRANCH=main
 
 olve_fetch_repo "$REPO" "$BRANCH" /src
 
-cd /src/frontend
+cd /src/src/frontend
 
 # Clean, reproducible install from the committed lockfile, then the three gates: Biome
 # (lint + format check), the Vitest unit suite, and the tsc typecheck + Vite production build.

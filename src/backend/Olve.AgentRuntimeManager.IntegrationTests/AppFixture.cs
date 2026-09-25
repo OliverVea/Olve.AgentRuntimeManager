@@ -5,8 +5,6 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
-using Olve.AgentRuntimeManager.Client;
-using Refit;
 using TUnit.Core.Interfaces;
 
 namespace Olve.AgentRuntimeManager.IntegrationTests;
@@ -23,8 +21,9 @@ public class AppFixture : IAsyncInitializer, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
+        // The Dockerfile lives at the repo root (its build context), not next to the solution in src/backend.
         var image = new ImageFromDockerfileBuilder()
-            .WithDockerfileDirectory(CommonDirectoryPath.GetSolutionDirectory(), string.Empty)
+            .WithDockerfileDirectory(CommonDirectoryPath.GetGitDirectory(), string.Empty)
             .WithDockerfile("Dockerfile")
             .Build();
 
@@ -45,12 +44,12 @@ public class AppFixture : IAsyncInitializer, IAsyncDisposable
         _baseUrl = $"http://localhost:{hostPort}";
     }
 
-    public IOlveAgentRuntimeManagerv1 CreateApiClient()
+    public HttpClient CreateAuthenticatedHttpClient()
     {
         var client = new HttpClient { BaseAddress = new Uri(_baseUrl) };
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", GenerateJwt());
-        return RestService.For<IOlveAgentRuntimeManagerv1>(client);
+        return client;
     }
 
     public HttpClient CreateUnauthenticatedHttpClient() =>

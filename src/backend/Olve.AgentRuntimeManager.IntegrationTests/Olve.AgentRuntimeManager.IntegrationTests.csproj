@@ -11,11 +11,6 @@
     <PackageReference Include="Olve.Results.TUnit" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="TUnit" />
-    <PackageReference Include="Refit" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="../../clients/Olve.AgentRuntimeManager.Client/Olve.AgentRuntimeManager.Client.csproj" />
   </ItemGroup>
 
 </Project>

@@ -2,14 +2,23 @@
 
 See [README.md](README.md) for project structure, endpoints, configuration, CI examples, and client generation.
 
+## Layout
+
+`src/backend/` (.NET solution root — run `dotnet` commands there), `src/frontend/` (SPA),
+`src/spec/main.tsp` (API contract, TypeSpec), `src/deploy/helm/` (chart). `Dockerfile` + `.pipelines/`
+stay at the repo root (the root is the image build context). Generated output (OpenAPI documents,
+clients) goes to the gitignored `artifacts/`, never into source folders.
+
 ## Commands
+
+Run from `src/backend/`:
 
 ```bash
 dotnet build                                                # Build
 dotnet test                                                 # Unit tests only
 dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false  # Integration tests only
 dotnet test -p:RunIntegrationTests=true                     # All tests
-dotnet run --project src/Olve.AgentRuntimeManager                  # Run locally
+dotnet run --project Olve.AgentRuntimeManager               # Run locally
 ```
 
 ## Conventions
@@ -17,7 +26,8 @@ dotnet run --project src/Olve.AgentRuntimeManager                  # Run locally
 - .NET 10, C# with file-scoped namespaces, nullable enabled, implicit usings
 - Package versions managed centrally in `Directory.Packages.props` — do not add `Version` attributes in csproj files
 - Local config via `dotnet user-secrets`, not appsettings files
-- OpenAPI spec `api.json` is generated on build by `Microsoft.Extensions.ApiDescription.Server`
+- OpenAPI is a build artifact: the backend build writes `artifacts/backend/api.json` (`Microsoft.Extensions.ApiDescription.Server`); P0 moves the contract to `src/spec/main.tsp` (`docs/P0-SPEC-FIRST.md`)
+- No C# client: integration tests use raw HTTP; the `arm` CLI will be generated from the spec
 
 ## Deployment (GitOps)
 
@@ -54,5 +64,4 @@ don't re-derive it. See [README.md](README.md#deployment-gitops) for the full wr
 - [Olve.Homelab](https://github.com/OliverVea/Olve.Homelab) — edge chart that owns all Ingress; register an app's public host + service here, not in the app chart
 - [TUnit](https://tunit.dev/docs/intro) — test framework, uses `await Assert.That(...)` fluent syntax (not xUnit/NUnit)
 - [Rocks](https://raw.githubusercontent.com/JasonBock/Rocks/refs/heads/main/docs/Overview.md) — source-generated mocking (AOT-compatible)
-- [Refitter](https://refitter.github.io/articles/refitter-file-format.html) — C# client source gen from OpenAPI via Refit (.refitter file format)
 - [Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview) — TypeScript client gen from OpenAPI
