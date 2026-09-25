@@ -24,6 +24,15 @@ re-evaluated and scoped when it's picked up.
   inline configuration.
 - **Streaming text**: `session.text` deltas for token-by-token rendering.
 
+## Classifications
+
+- **`/api/classifications`**: a third entity next to sessions and completions, Jev-style. Content
+  (text or JSON) plus predefined questions in (choice from a list, rubric score, yes/no); typed
+  JSON answers with calibrated confidence out.
+- **Backed by any provider**: providers declare capabilities (e.g. `probabilities`). A provider
+  with real probabilities (model API with token probabilities, or a local classifier) answers
+  directly; otherwise ARM falls back to vote sampling (N samples → vote shares).
+
 ## Server lifecycle
 
 - **Scheduled restart with drain**: announce, stop accepting, let sessions finish, restart.
