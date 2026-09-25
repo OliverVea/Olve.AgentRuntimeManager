@@ -16,7 +16,14 @@
     "verbatimModuleSyntax": true,
     "useDefineForClassFields": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+
+    // The API client is generated (never committed) into the repo-root artifacts/ folder by
+    // `npm run generate` at the root; the pre-hooks in package.json run it before build/test.
+    "paths": {
+      "@arm/client": ["../../artifacts/clients/ts/index.ts"],
+      "@arm/client/*": ["../../artifacts/clients/ts/*"]
+    }
   },
   "include": ["src"]
 }

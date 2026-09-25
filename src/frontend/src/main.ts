@@ -1,4 +1,4 @@
-import { createClient } from "./api-client.js";
+import { createApiClient } from "./api-client.js";
 import * as auth from "./auth/oidc.js";
 import { escapeHtml } from "./base-element.js";
 import { MessageList } from "./components/message-list.js";
@@ -9,7 +9,7 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
 
 // One client for the whole app. getAccessToken() returns null when logged out (so anonymous GET
 // keeps working) or a fresh bearer when logged in; onUnauthorized refreshes + retries on a 401.
-const client = createClient(baseUrl, {
+const client = createApiClient(baseUrl, {
   getToken: auth.getAccessToken,
   onUnauthorized: auth.refresh,
 });

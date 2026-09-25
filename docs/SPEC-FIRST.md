@@ -47,15 +47,15 @@ artifacts/           everything generated (gitignored)
 ```
 
 - [x] `src/spec/main.tsp`
-- [ ] `mise.toml` pinning node/dotnet/bun; tasks `spec`, `build`, `test`, `ci` delegating to native commands; `mise run ci` is exactly what the pipeline runs
-- [ ] Root `package.json` (workspaces, pinned `@typespec/*` 1.16, Hey API) + `tspconfig.yaml`
-- [ ] **Hey API replaces Kiota.** Frontend imports the generated client from `artifacts/`; the committed `src/frontend/src/api/` and the Kiota tool/runtime pin go away
-- [ ] Spec covers every `Message` operation the frontend uses (list/create/update/delete), or the frontend drops what the spec doesn't define
-- [ ] Server endpoints hand-written against the spec
-- [ ] **Route-coverage test**: every spec operation (method + path) maps to an endpoint in `EndpointDataSource`, and every `/api` endpoint is in the spec
-- [ ] **Contract test**: responses validate against the emitted schemas
-- [ ] Minimal `src/cli`: `arm message create/get` with `--pretty` (default) / `--json`, compiled to one binary with `bun build --compile`
-- [ ] Pipeline steps install mise and run its tasks (invoke `ovea-olve-pipelines` before touching `.pipelines/`); Dockerfile Node stage runs the frontend build (tsp + Hey API + vite); the .NET publish stage stays Node-free
+- [x] `mise.toml` pinning node/dotnet/bun; tasks `spec`, `build`, `test`, `ci` delegating to native commands; `mise run ci` is exactly what the pipeline runs
+- [x] Root `package.json` (workspaces, pinned `@typespec/*` 1.16, Hey API) + `tspconfig.yaml`
+- [x] **Hey API replaces Kiota.** Frontend imports the generated client from `artifacts/`; the committed `src/frontend/src/api/` and the Kiota tool/runtime pin go away
+- [x] Spec covers every `Message` operation the frontend uses (list/create/update/delete), or the frontend drops what the spec doesn't define
+- [x] Server endpoints hand-written against the spec
+- [x] **Route-coverage test**: every spec operation (method + path) maps to an endpoint in `EndpointDataSource`, and every `/api` endpoint is in the spec
+- [x] **Contract test**: responses validate against the emitted schemas
+- [x] Minimal `src/cli`: `arm message create/get` with `--pretty` (default) / `--json`, compiled to one binary with `bun build --compile`
+- [x] Pipeline `check` step installs mise and runs `mise run ci` (not yet exercised live: ARM isn't registered with Olve.Pipelines) (invoke `ovea-olve-pipelines` before touching `.pipelines/`); Dockerfile Node stage runs the frontend build (tsp + Hey API + vite); the .NET publish stage stays Node-free
 
 Exit: changing `main.tsp` without the server (or vice versa) turns `mise run ci` red, locally
 and in the pipeline.
@@ -108,6 +108,10 @@ TypeSpec has no `QUERY` verb decorator.
 
 ## M3 (part) — Errors & multi-status responses
 
+- [ ] Consistent not-found: `update`/`delete` of a missing id return 400 today (Olve.MinimalApi maps every failed Result to 400); make them 404 like `get`
+- [ ] `create` returns 201
+- [ ] Declare the bearer security scheme in the spec (clients then apply `auth` themselves)
+- [ ] `@format("uuid")` on path ids (non-UUID ids currently get an undeclared empty 400)
 - [ ] SPEC error envelope as shared `@error` models; A2 mapping layer in Olve.Results → HTTP
 - [ ] `201 | 202 {queuePosition} | 409 | 503` style unions round-trip through the client and CLI exit codes
 - [ ] `Idempotency-Key` header modelled once as a reusable parameter
@@ -132,6 +136,8 @@ TypeSpec has no `QUERY` verb decorator.
 
 ## Known constraints (from the spikes)
 
+- npm 11 blocks install scripts by default; `bun` and `@jdxcode/mise` are allowed via `allowScripts` in the root `package.json`. The Docker SPA stage uses `npm ci --ignore-scripts`.
+- The backend listens on 5000 today (SPEC says 18791); the CLI defaults to 5000 until that's reconciled.
 - Emit **OpenAPI 3.2**. 3.1 drops SSE `itemSchema`.
 - `@typespec/http-server-csharp` output is unusable (MVC, non-AOT, lossy, doesn't compile). Don't generate the server from it.
 - `@typespec/http-client-js` (preview) is not usable yet: wrong query key for `exclude_event`, SSE returned as `Promise<string>`, read-only fields sent on create. Re-check later.

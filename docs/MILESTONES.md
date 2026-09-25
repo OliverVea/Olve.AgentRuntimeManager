@@ -3,7 +3,7 @@
 Dependency-ordered. Toolchain details for M1, M2, M3 and M14: [`SPEC-FIRST.md`](SPEC-FIRST.md).
 The `arm` CLI grows with every milestone.
 
-- [ ] M1 — **Spec toolchain**: one POST + one GET on `Message`; mise, root `package.json`, Hey API client, route-coverage + contract tests, minimal `arm` binary
+- [x] M1 — **Spec toolchain**: one POST + one GET on `Message`; mise, root `package.json`, Hey API client, route-coverage + contract tests, minimal `arm` binary
 - [ ] M2 — **SSE**: typed events with `type`, server-side filters, `Last-Event-ID` replay, `arm events`
 - [ ] M3 — **Sessions core**: create/get/list/kill/delete, state machine, queue + slots, FakeProvider; `QUERY` + `queryMethod`; error envelope + multi-status responses
 - [ ] M4 — **Gentle restart**: persist session state; server exits, agents survive, new server re-attaches (event replay completes in M5)

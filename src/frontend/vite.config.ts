@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // In dev, the browser talks to the Vite dev server (same origin) and Vite proxies the
@@ -12,6 +13,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig(() => {
   const target = process.env.VITE_API_TARGET ?? "http://localhost:18080";
   return {
+    // `@arm/client` is the Hey API client generated from src/spec/main.tsp into the repo-root
+    // artifacts/ (never committed; `npm run generate` — run by the pre-hooks — rebuilds it).
+    // Mirrored by `paths` in tsconfig.json; applies to vitest too.
+    resolve: {
+      alias: {
+        "@arm/client": fileURLToPath(new URL("../../artifacts/clients/ts", import.meta.url)),
+      },
+    },
     server: {
       // The SPA calls the API under /api (same-origin); Vite forwards that to the backend.
       proxy: {

@@ -26,7 +26,8 @@ model PageOfMessage {
   totalCount: int32;
   totalPages?: int32;
   hasNextPage?: boolean;
-  next?: Pagination;
+  /** Null on the last page. */
+  next?: Pagination | null;
 }
 
 /**
@@ -62,21 +63,28 @@ model FrontendAuthConfig {
 
 @route("/messages")
 interface Messages {
-  /** List messages (1-based pages). */
-  @get list(@query page?: int32, @query pageSize?: int32):
-    | PageOfMessage
-    | BadRequest;
+  /** List messages (1-based pages); out-of-range page/pageSize values are clamped. */
+  @get list(@query page?: int32, @query pageSize?: int32): PageOfMessage;
 
-  @post create(@body body: Message): Message | BadRequest;
+  @post create(@body body: Message):
+    | Message
+    | BadRequest
+    | UnauthorizedResponse;
 
+  /** Get one message by id (anonymous, like `list`). */
   @get get(@path id: string): Message | NotFound;
 
+  /**
+   * A missing id is currently a 400 (Olve.MinimalApi maps every failed Result to 400), unlike
+   * `get`'s 404; the SPEC error envelope in M3 settles not-found handling for all operations.
+   */
   @put update(@path id: string, @body body: Message):
     | Message
     | BadRequest
-    | NotFound;
+    | UnauthorizedResponse;
 
-  @delete delete(@path id: string): OkResponse | BadRequest | NotFound;
+  /** A missing id is currently a 400 — see `update`. */
+  @delete delete(@path id: string): OkResponse | BadRequest | UnauthorizedResponse;
 }
 
 @route("/auth-config")

@@ -74,4 +74,6 @@ don't re-derive it. See [README.md](README.md#deployment-gitops) for the full wr
 - [Olve.Homelab](https://github.com/OliverVea/Olve.Homelab) — edge chart that owns all Ingress; register an app's public host + service here, not in the app chart
 - [TUnit](https://tunit.dev/docs/intro) — test framework, uses `await Assert.That(...)` fluent syntax (not xUnit/NUnit)
 - [Rocks](https://raw.githubusercontent.com/JasonBock/Rocks/refs/heads/main/docs/Overview.md) — source-generated mocking (AOT-compatible)
-- [Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview) — TypeScript client gen from OpenAPI
+- [TypeSpec](https://typespec.io/docs/) — API contract language (`src/spec/main.tsp`)
+- [Hey API](https://heyapi.dev/) — TypeScript client generation from the emitted OpenAPI
+- [mise](https://mise.jdx.dev/) — toolchain pinning + task runner (`mise run ci`)

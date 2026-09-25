@@ -17,6 +17,21 @@ public sealed class CreateMessageHandler(EntityStore<Message> store) : IHandler<
     }
 }
 
+/// <summary>Looks up a <see cref="Message"/> by id, or returns a not-found problem.</summary>
+public sealed class GetMessageHandler(EntityStore<Message> store) : IHandler<Id<Message>, Message>
+{
+    /// <inheritdoc />
+    public Task<Result<Message>> HandleAsync(Id<Message> request, CancellationToken cancellationToken)
+    {
+        if (!store.TryGet(request, out var message))
+        {
+            return Task.FromResult<Result<Message>>(new ResultProblem("Message with id '{0}' was not found.", request));
+        }
+
+        return Task.FromResult<Result<Message>>(message);
+    }
+}
+
 /// <summary>The handler input for an update — carries the route id alongside the validated body text.</summary>
 public sealed record UpdateMessageCommand(Id<Message> Id, string Text);
 

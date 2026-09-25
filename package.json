@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "spec": "tsp compile src/spec/main.tsp",
-    "client": "openapi-ts -i artifacts/spec/openapi.json -o artifacts/clients/ts",
+    "client": "openapi-ts -f openapi-ts.config.mjs",
     "generate": "npm run spec && npm run client"
   },
   "devDependencies": {

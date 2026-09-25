@@ -34,26 +34,14 @@ productionSteps:
     configuration:
       image: gcr.io/kaniko-project/executor:debug
       scriptFile: scripts/build.sh
-  # Runs the unit suite in parallel with the build (not inside it). If tests fail, the
-  # production job group fails and the deploy cascade never starts. This step produces no
-  # deploy artifacts (no version.txt), so the deploy scripts ignore its bundle dir by
-  # selecting the one that contains version.txt.
-  - name: code-test
+  # Runs `mise run ci` (backend unit + contract tests, frontend lint/test/build, CLI
+  # typecheck/test/build) in parallel with the build. If it fails, the production job group
+  # fails and the deploy cascade never starts. Produces no version.txt, so the deploy scripts
+  # ignore its bundle dir.
+  - name: check
     configuration:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-      scriptFile: scripts/test.sh
-  # --- frontend gate (DELETE-WITH-THE-FRONTEND) -------------------------------------------
-  # Lints (Biome), unit-tests (Vitest) and production-builds the SPA in frontend/, in
-  # parallel with the build and .NET tests. A failure fails the production group and gates
-  # the deploy cascade. Runs on a Node image because the dotnet SDK image above has no Node.
-  # This step + scripts/frontend-check.sh exist solely for the frontend/ folder — a headless
-  # microservice that removes frontend/ deletes this block and that script together. Produces
-  # no version.txt, so the deploy scripts ignore its bundle dir.
-  - name: frontend-check
-    configuration:
-      image: node:24-alpine
-      scriptFile: scripts/frontend-check.sh
-  # --- end frontend gate ------------------------------------------------------------------
+      scriptFile: scripts/check.sh
 
 # Processing steps run sequentially (order = list position), each receiving the
 # bundle. deploy-beta runs first and gates deploy (prod).

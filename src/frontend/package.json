@@ -5,12 +5,17 @@
   "type": "module",
   "description": "Vanilla Web Components + TypeScript frontend for Olve.AgentRuntimeManager",
   "scripts": {
+    "generate": "npm --prefix ../.. run generate",
+    "predev": "npm run generate",
     "dev": "vite",
+    "prebuild": "npm run generate",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretypecheck": "npm run generate",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "pretest": "npm run generate",
     "test": "vitest run",
     "test:watch": "vitest"
   },

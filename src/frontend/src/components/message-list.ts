@@ -1,12 +1,19 @@
-import type { Message } from "../api/models/index.js";
-import type { OlveAgentRuntimeManagerClient } from "../api/olveAgentRuntimeManagerClient.js";
+import {
+  type Message,
+  messagesCreate,
+  messagesDelete,
+  messagesList,
+  messagesUpdate,
+} from "@arm/client";
+import type { Client } from "@arm/client/client";
 import { BaseElement, escapeHtml } from "../base-element.js";
 
 type Status = "idle" | "loading" | "ready" | "error";
 
 /**
  * `<message-list>` — the template's first real component (DESIGN §2.4): a CRUD view over
- * the backend `Message` feature, driven entirely by the Kiota-generated TypeScript client.
+ * the backend `Message` feature, driven entirely by the TypeScript client Hey API generates
+ * from the TypeSpec contract (`@arm/client`).
  * Proves the client-gen → component → live-API loop end to end.
  *
  * Every state transition (load, create, edit, delete, page change) ends by calling
@@ -15,7 +22,7 @@ type Status = "idle" | "loading" | "ready" | "error";
 export class MessageList extends BaseElement {
   static readonly tagName = "message-list";
 
-  #client: OlveAgentRuntimeManagerClient | null = null;
+  #client: Client | null = null;
 
   // --- view state ---
   #messages: Message[] = [];
@@ -27,8 +34,8 @@ export class MessageList extends BaseElement {
   #hasNextPage = false;
   #editingId: string | null = null;
 
-  /** The Kiota client. Setting it (re)loads the first page if the element is connected. */
-  set client(value: OlveAgentRuntimeManagerClient) {
+  /** The API client (see `createApiClient`). Setting it (re)loads the first page if connected. */
+  set client(value: Client) {
     this.#client = value;
     if (this.isConnected) void this.load();
   }
@@ -46,12 +53,15 @@ export class MessageList extends BaseElement {
     this.#error = "";
     this.render();
     try {
-      const page = await this.#client.api.messages.get({
-        queryParameters: { page: String(this.#page), pageSize: String(this.#pageSize) },
-      });
-      this.#messages = page?.items ?? [];
-      this.#totalCount = untypedToNumber(page?.totalCount);
-      this.#hasNextPage = page?.hasNextPage ?? false;
+      const page = await unwrap(
+        messagesList({
+          client: this.#client,
+          query: { page: this.#page, pageSize: this.#pageSize },
+        }),
+      );
+      this.#messages = page.items ?? [];
+      this.#totalCount = page.totalCount ?? 0;
+      this.#hasNextPage = page.hasNextPage ?? false;
       this.#status = "ready";
     } catch (error) {
       this.#status = "error";
@@ -63,7 +73,7 @@ export class MessageList extends BaseElement {
   async create(text: string): Promise<void> {
     if (!this.#client || !text.trim()) return;
     try {
-      await this.#client.api.messages.post({ text });
+      await unwrap(messagesCreate({ client: this.#client, body: { text } }));
       this.#page = 1;
       await this.load();
     } catch (error) {
@@ -75,7 +85,7 @@ export class MessageList extends BaseElement {
   async saveEdit(id: string, text: string): Promise<void> {
     if (!this.#client || !text.trim()) return;
     try {
-      await this.#client.api.messages.byId(id).put({ text });
+      await unwrap(messagesUpdate({ client: this.#client, path: { id }, body: { text } }));
       this.#editingId = null;
       await this.load();
     } catch (error) {
@@ -87,7 +97,7 @@ export class MessageList extends BaseElement {
   async deleteMessage(id: string): Promise<void> {
     if (!this.#client) return;
     try {
-      await this.#client.api.messages.byId(id).delete();
+      await unwrap(messagesDelete({ client: this.#client, path: { id } }));
       await this.load();
     } catch (error) {
       this.#error = describeError(error);
@@ -239,24 +249,49 @@ export class MessageList extends BaseElement {
 }
 
 /**
- * `PageOfMessage.totalCount` arrives as an `UntypedNode` because the OpenAPI schema types
- * the counts as `integer | string` (an Olve.Results pagination quirk). Read its value
- * defensively and coerce to a number.
+ * A failed API call: the HTTP status (undefined when no response arrived, e.g. a network error)
+ * and the parsed error body — `ResultProblem[]` for the API's own 4xx responses.
  */
-function untypedToNumber(node: unknown): number {
-  const value = (node as { getValue?: () => unknown } | null | undefined)?.getValue?.();
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+export class ApiError extends Error {
+  constructor(
+    readonly status: number | undefined,
+    readonly body: unknown,
+  ) {
+    super(problemMessage(body) ?? (status ? `Request failed (${status}).` : "Request failed."));
+    this.name = "ApiError";
+  }
 }
 
-/** Turn a thrown Kiota error into a human-readable line, calling out the auth case. */
+/**
+ * The generated SDK returns `{ data, error, response }` instead of throwing (and a thrown error
+ * would carry only the body, not the status). Turn a failure into an {@link ApiError} with the
+ * status so the component's try/catch flow stays as simple as before.
+ */
+async function unwrap<T>(
+  call: Promise<{ data?: T; error?: unknown; response?: Response }>,
+): Promise<T> {
+  const { data, error, response } = await call;
+  if (error !== undefined || !response?.ok) throw new ApiError(response?.status, error);
+  return data as T;
+}
+
+/** The first `ResultProblem.message` of an error body, or a thrown Error's own message. */
+function problemMessage(body: unknown): string | undefined {
+  if (Array.isArray(body)) {
+    const first = body[0] as { message?: unknown } | undefined;
+    if (typeof first?.message === "string" && first.message) return first.message;
+  }
+  if (body instanceof Error && body.message) return body.message;
+  return undefined;
+}
+
+/** Turn a failed call into a human-readable line, calling out the auth case. */
 function describeError(error: unknown): string {
-  const status = (error as { responseStatusCode?: number } | undefined)?.responseStatusCode;
+  const status = error instanceof ApiError ? error.status : undefined;
   if (status === 401 || status === 403) {
     return "Authentication required — creating, editing and deleting need a bearer token (see “Authenticated writes”).";
   }
-  const problem = error as { messageEscaped?: string; message?: string } | undefined;
-  return problem?.messageEscaped || problem?.message || "Request failed.";
+  return (error as { message?: string } | undefined)?.message || "Request failed.";
 }
 
 /** Minimal CSS.escape fallback for attribute-selector-safe ids (GUIDs are already safe). */

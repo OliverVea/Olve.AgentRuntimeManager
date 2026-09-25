@@ -25,18 +25,24 @@ src/
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
 │   ├── Olve.AgentRuntimeManager.UnitTests/     # Unit tests (TUnit + Rocks)
+│   ├── Olve.AgentRuntimeManager.ContractTests/ # Route-coverage + contract tests against src/spec/main.tsp
 │   ├── Olve.AgentRuntimeManager.IntegrationTests/  # Integration tests (TUnit + Testcontainers, raw HTTP)
 │   ├── tools/version.cs                        # CalVer versioning script
-│   ├── .config/dotnet-tools.json               # Local tools (Kiota, dotnet-outdated)
+│   ├── .config/dotnet-tools.json               # Local tools (dotnet-outdated)
 │   ├── global.json                             # SDK pin
 │   ├── Directory.Build.props                   # Shared build properties (TFM, nullable, etc.)
 │   └── Directory.Packages.props                # Central package version management
 ├── frontend/                                   # Vanilla Web Components + TS frontend (see src/frontend/README.md)
+├── cli/                                        # `arm` CLI (TypeScript on the generated client; see src/cli/README.md)
 ├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
 └── deploy/
     └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
 Dockerfile                                      # Multi-stage build (AOT, chiseled); repo root is the build context
+mise.toml                                       # Toolchain pins + tasks (`mise run ci`)
+package.json                                    # npm workspace root: TypeSpec + Hey API tooling, frontend, cli
+tspconfig.yaml, openapi-ts.config.mjs           # Contract → OpenAPI → TS client generation config
+artifacts/                                      # Everything generated (gitignored)
 ```
 
 ## Endpoints
@@ -68,15 +74,22 @@ Run from `src/backend/` (the solution root):
 dotnet restore
 dotnet build
 
-# Unit tests only (default)
+# Unit + contract tests (default; the contract tests need Node for `npm run spec`)
 dotnet test
 
 # Integration tests only
-dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false
+dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false -p:RunContractTests=false
 
 # All tests
 dotnet test -p:RunIntegrationTests=true
 ```
+
+Contract tests host the API in-process (`WebApplicationFactory`) and check it against the contract:
+their build runs `npm run spec` from the repo root (incremental) and copies `artifacts/spec/openapi.json`
+next to the tests. A route-coverage test asserts every spec operation is mapped and every `/api`
+endpoint is in the spec; the contract tests exercise each operation's happy and error paths over raw
+HTTP and validate the status and body against the spec's schemas (objects closed, so undeclared
+fields fail).
 
 Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it over raw HTTP (no generated client, so the tests check the wire contract) — covering the AOT-published binary end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
 
@@ -104,6 +117,7 @@ To add a dependency (e.g. PostgreSQL):
 
 Test execution is controlled by MSBuild properties:
 - `RunUnitTests=false` skips unit tests
+- `RunContractTests=false` skips contract tests (and the spec compile)
 - `RunIntegrationTests=true` enables integration tests (disabled by default)
 
 ## Running
@@ -202,26 +216,24 @@ handlers. The `Stores/` module is written at library quality for later promotion
 
 ## Client Generation
 
-Generated output never lives in source folders. The backend build writes its OpenAPI document to
-`artifacts/backend/api.json` (gitignored); in M1 the contract moves to `src/spec/main.tsp` (see
-[`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md)).
-
-### TypeScript ([Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview))
-
-The frontend's client (`src/frontend/src/api/`) is generated from `artifacts/backend/api.json` and
-(for now) committed:
+The contract is `src/spec/main.tsp` (TypeSpec). Everything generated lives in the gitignored
+`artifacts/`, never in source folders:
 
 ```bash
-cd src/frontend && npm run generate-client
+npm run generate   # src/spec/main.tsp → artifacts/spec/openapi.json → artifacts/clients/ts (Hey API)
 ```
 
-There is no C# client: the integration tests speak raw HTTP, and the `arm` CLI will be generated
-from the spec.
+The frontend and CLI import the client as `@arm/client` and regenerate it as part of their own
+builds; the contract tests compile the spec as part of the .NET build. There is no C# client: the
+backend tests speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
+
+Run everything the pipeline runs with `npx mise run ci` (mise pins node + dotnet; `npx mise
+tasks` lists the tasks).
 
 ## Frontend
 
 `src/frontend/` is the template's companion UI: a no-framework, **vanilla Web Components** app in
-**TypeScript**, consuming the API through its own Kiota-generated client. It ships a
+**TypeScript**, consuming the API through the generated Hey API client. It ships a
 `<message-list>` CRUD view over the backend `Message` feature, proving the client-gen →
 component → API loop end to end.
 
@@ -239,7 +251,7 @@ cd src/frontend && npm install && npm run dev    # proxies /api to the API (VITE
 ```
 
 See [`src/frontend/README.md`](src/frontend/README.md) for the layout, run/build commands, auth for
-writes, and how to regenerate the client (including the Kiota-runtime version pin).
+writes, and how the API client is generated.
 
 ## Versioning
 
@@ -356,7 +368,7 @@ running instance/tooling, and the Claude Code skill that knows the model).
 | **Olve.Utilities** stack (Results, Validation, MinimalApi, Utilities) | Baked-in error handling, validation, result→HTTP mapping, `Id<T>`/`EntityStore<T>` primitives | [docs site](https://olivervea.github.io/Olve.Utilities/) | [OliverVea/Olve.Utilities](https://github.com/OliverVea/Olve.Utilities) | NuGet | *(none yet — gap)* |
 | **Olve.Pipelines** | GitOps CD — builds & deploys this repo via `.pipelines/` (see [Deployment](#deployment-gitops)) | in-repo `docs/setup/`, served at `/docs` + `llms.txt` | [OliverVea/Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines) | [`pipelines-private.ovea.pro`](https://pipelines-private.ovea.pro), beta `pipelines-beta.ovea.pro`, hooks `pipelines-hooks.ovea.pro`; **`pl` CLI** via `GET /download/{asset}` | `ovea-olve-pipelines` |
 | **Olve.Homelab** | Edge chart that owns all Ingress; public exposure is registered there, not in this chart | — | [OliverVea/Olve.Homelab](https://github.com/OliverVea/Olve.Homelab) | — | — |
-| **TUnit · Rocks · Kiota** | Test framework, AOT mocking, TS client generation | see per-library links below | — | — | — |
+| **TUnit · Rocks · TypeSpec · Hey API · mise** | Tests, AOT mocking, API contract, TS client generation, toolchain + tasks | see per-library links below | — | — | — |
 
 Per-library documentation:
 
@@ -366,4 +378,6 @@ Per-library documentation:
 - [Olve.Utilities](https://olivervea.github.io/Olve.Utilities/src/Olve.Utilities/README.html) — Meta-package bundling utility libraries including identifiers, collections, and graph types
 - [TUnit](https://tunit.dev/docs/intro) — Test framework (not xUnit/NUnit). Uses `await Assert.That(...)` fluent syntax
 - [Rocks](https://raw.githubusercontent.com/JasonBock/Rocks/refs/heads/main/docs/Overview.md) — Source-generated mocking library for AOT-compatible test doubles
-- [Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview) — Microsoft's OpenAPI client generator for TypeScript (and other languages)
+- [TypeSpec](https://typespec.io/docs/) — API contract language
+- [Hey API](https://heyapi.dev/) — OpenAPI → TypeScript client generator
+- [mise](https://mise.jdx.dev/) — toolchain pinning and task runner

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Olve.MinimalApi;
 using Olve.Results;
 using Olve.AgentRuntimeManager.Stores;
@@ -23,6 +24,7 @@ public static class MessageEndpoints
     public static void AddMessageServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton(new EntityStore<Message>([]));
+        services.AddSingleton<GetMessageHandler>();
         services.AddSingleton<CreateMessageHandler>();
         services.AddSingleton<UpdateMessageHandler>();
         services.AddSingleton<DeleteMessageHandler>();
@@ -59,6 +61,22 @@ public static class MessageEndpoints
             })
             .WithName("GetMessages")
             .WithResultMapping<Page<Message>>()
+            .AllowAnonymous();
+
+        // Olve.MinimalApi's WithResultMapping maps every failure to 400; a missing message is a 404,
+        // so this endpoint maps the handler's result itself (same ResultProblem[] body).
+        app.MapGet("/messages/{id}", async Task<Results<Ok<Message>, NotFound<ResultProblem[]>>> (
+                GetMessageHandler handler, Id<Message> id, CancellationToken ct) =>
+            {
+                var result = await handler.HandleAsync(id, ct);
+                if (result.TryPickProblems(out var problems, out var message))
+                {
+                    return TypedResults.NotFound(problems.ToArray());
+                }
+
+                return TypedResults.Ok(message);
+            })
+            .WithName("GetMessage")
             .AllowAnonymous();
 
         app.MapPost("/messages", (CreateMessageHandler handler, MessageRequest request, CancellationToken ct) =>

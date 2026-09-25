@@ -261,8 +261,8 @@ async function handleCallback(): Promise<void> {
 
 /**
  * Return a currently-valid access token, refreshing proactively if it's within the skew window.
- * Wired into the Kiota auth provider, so every API call rides a fresh token. Returns null when
- * logged out.
+ * Wired into the API client's request interceptor, so every API call rides a fresh token.
+ * Returns null when logged out.
  */
 export async function getAccessToken(): Promise<string | null> {
   const now = Math.floor(Date.now() / 1000);

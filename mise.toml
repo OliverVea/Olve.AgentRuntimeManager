@@ -4,3 +4,45 @@
 node = "24.14.0"
 dotnet = "10.0.200"
 
+
+# --- tasks -----------------------------------------------------------------------------------
+# `mise run ci` is exactly what the pipeline's `check` step runs. Tasks run sequentially within
+# `ci` because the per-project builds each regenerate the shared artifacts/.
+
+[tasks.install]
+description = "Install npm workspace dependencies (root lockfile)"
+run = "npm ci"
+
+[tasks.generate]
+description = "TypeSpec → artifacts/spec/openapi.json → artifacts/clients/ts"
+run = "npm run generate"
+
+[tasks."backend:test"]
+description = "Backend build + unit and contract tests"
+dir = "src/backend"
+run = ["dotnet build", "dotnet test"]
+
+[tasks."backend:integration"]
+description = "Integration tests against the real Docker image (needs Docker)"
+dir = "src/backend"
+run = "dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false -p:RunContractTests=false"
+
+[tasks."frontend:check"]
+description = "Frontend lint, tests, production build"
+dir = "src/frontend"
+run = ["npm run lint", "npm test", "npm run build"]
+
+[tasks."cli:check"]
+description = "CLI typecheck, tests, single-binary build"
+dir = "src/cli"
+run = ["npm run typecheck", "npm test", "npm run build"]
+
+[tasks.ci]
+description = "Everything the pipeline gate runs"
+run = [
+  { task = "install" },
+  { task = "generate" },
+  { task = "backend:test" },
+  { task = "frontend:check" },
+  { task = "cli:check" },
+]

@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!src/api", "!package-lock.json"]
+    "includes": ["**", "!dist", "!package-lock.json"]
   },
   "formatter": {
     "enabled": true,

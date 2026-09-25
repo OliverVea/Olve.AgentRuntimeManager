@@ -29,6 +29,32 @@ public class MessageHandlerTests
     }
 
     [Test]
+    public async Task Get_ExistingMessage_ReturnsIt()
+    {
+        var store = new EntityStore<Message>([]);
+        var existing = Seed(store, "hello");
+        var handler = new GetMessageHandler(store);
+
+        var result = await handler.HandleAsync(existing.Id, CancellationToken.None);
+
+        await Assert.That(result).Succeeded();
+        result.TryPickValue(out var found);
+        await Assert.That(found).IsEqualTo(existing);
+    }
+
+    [Test]
+    public async Task Get_MissingMessage_Fails()
+    {
+        var store = new EntityStore<Message>([]);
+        Seed(store, "other");
+        var handler = new GetMessageHandler(store);
+
+        var result = await handler.HandleAsync(Id.New<Message>(), CancellationToken.None);
+
+        await Assert.That(result).Failed();
+    }
+
+    [Test]
     public async Task Update_ExistingMessage_ChangesText()
     {
         var store = new EntityStore<Message>([]);
