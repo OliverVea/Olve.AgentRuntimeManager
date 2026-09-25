@@ -29,6 +29,12 @@ dotnet run --project Olve.AgentRuntimeManager               # Run locally
 - OpenAPI is a build artifact: the backend build writes `artifacts/backend/api.json` (`Microsoft.Extensions.ApiDescription.Server`); P0 moves the contract to `src/spec/main.tsp` (`docs/P0-SPEC-FIRST.md`)
 - No C# client: integration tests use raw HTTP; the `arm` CLI will be generated from the spec
 
+## Decisions are dated leanings
+
+`docs/OPEN-QUESTIONS.md` (and similar notes) record *dated leanings*, not binding decisions.
+Use them to orient when in doubt, but before relying on one that predates the current work,
+confirm with Oliver that it still holds. When a leaning changes, rewrite the entry and its date.
+
 ## Deployment (GitOps)
 
 This repo deploys via **Olve.Pipelines** — the `.pipelines/` directory is the live deploy config

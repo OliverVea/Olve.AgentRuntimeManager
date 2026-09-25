@@ -17,7 +17,7 @@ See [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) for the decisions that Phase 1 reso
 
 ## Phase 1 — Finish the HLD
 
-- [ ] Resolve every open question in `OPEN-QUESTIONS.md` and record the decision inline
+- [ ] Resolve every open question in `OPEN-QUESTIONS.md` and record the leaning inline (dated)
   - [ ] A1 — .NET version + `QUERY` routing
   - [ ] A2 — error envelope / result→HTTP mapping
   - [ ] A3 — auth & token model (local HMAC vs OIDC, agent tokens, permission tiers)
@@ -51,7 +51,7 @@ Establish that the scaffold produces every artifact ARM ships, before feature wo
 - [ ] **P0 — spec-first toolchain**, staged 0.1 (one POST/GET) → 0.2 (SSE) → … → 1.0; see
   [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md). The full ARM API is P1 and builds on it.
 
-- [ ] Install/pin the .NET 10 SDK so build/test run locally (OPEN-QUESTIONS C4)
+- [x] Install/pin the .NET 10 SDK so build/test run locally
 - [ ] `dotnet build` clean; unit + in-process API tests green (SQLite + FakeProvider)
 - [ ] Docker image builds (AOT, chiseled) and runs; `/health` responds
 - [ ] Helm chart renders (ClusterIP only) with `olve-arm` names
