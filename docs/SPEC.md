@@ -128,7 +128,7 @@ is checked against the session's policy:
 
 - **safe** → runs immediately, output returned
 - **blocked** → error with reason
-- **needs approval** → ARM emits `session.approval` and the call waits for a human decision
+- **needs approval** → ARM emits `session.approval.requested` and the call waits for a human decision
   (auto-deny after a configurable timeout)
 
 The check understands shell syntax (pipes, chains, subshells, quoting) and fails closed: anything
@@ -256,45 +256,49 @@ validates it and retries up to `retries` times (default 2), and if every attempt
 ## Events (SSE)
 
 `GET /api/events` (`arm events`) streams events. Every event has an `id`; reconnect with
-`Last-Event-ID` to replay what you missed, across the retention window and server restarts. Every
-event's JSON `data` has a `type` field equal to the event name. A `heartbeat` is sent every 30s.
+`Last-Event-ID` to replay what you missed, across the retention window and server restarts. A
+`heartbeat` is sent every 30s.
+
+**Envelope:** every event's JSON `data` has `type` (the event name), `at` (timestamp), and its
+subject ID (`sessionId`, `completionId`, or `provider`). The table lists the remaining fields.
 
 - **Session state:** there is one event per state, each carrying `previous`; the session's
   current status is the state named by its latest lifecycle event.
 - **Conversation:** `session.text` is the agent's output; `session.message` is every user↔agent
   message, in either direction. A frontend renders both, and nothing appears twice.
-- **Approvals:** every `session.approval` is closed by exactly one `session.approval_resolved`
+- **Approvals:** every `session.approval.requested` is closed by exactly one `session.approval.resolved`
   (`cancelled` when the session ends while waiting).
 
 | Event | Payload |
 |---|---|
-| `heartbeat` | timestamp |
+| `heartbeat` | — |
 | `session.created` | full session |
-| `session.queued` | id, position |
-| `session.started` | id, previous, providerSessionId |
-| `session.waiting` | id, previous |
-| `session.resumed` | id, previous |
-| `session.completed` | id, previous, exitCode, summary |
-| `session.failed` | id, previous, error |
-| `session.killed` | id, previous, reason, source (user\|system\|timeout) |
-| `session.revived` | id, newSessionId |
-| `session.text` | id, role (thinking\|assistant\|result), text (complete segment, not a delta) |
-| `session.tool` | id, name, toolId, args |
-| `session.tool_result` | id, toolId, result, error? |
-| `session.context` | id, tokens, percentage |
-| `session.context_threshold` | id, percentage, threshold |
-| `session.subcontext` | id, subcontextId, tokens |
-| `session.message` | id, messageId, direction (to_agent\|to_user), text |
-| `session.approval` | id, approvalId, kind (bash\|file\|tool), summary (human-readable), details (untyped JSON), purpose, deadline |
-| `session.approval_resolved` | id, approvalId, decision (approved\|denied\|expired\|cancelled), actor (`system` for expired/cancelled), reason? |
-| `completion.start` | id, model, provider |
-| `completion.done` | id, tokens, durationMs |
-| `completion.failed` | id, error |
+| `session.queued` | sessionId, position |
+| `session.started` | sessionId, previous, providerSessionId |
+| `session.waiting` | sessionId, previous |
+| `session.resumed` | sessionId, previous |
+| `session.completed` | sessionId, previous, exitCode, summary |
+| `session.failed` | sessionId, previous, error |
+| `session.killed` | sessionId, previous, reason, source (user\|system\|timeout) |
+| `session.revived` | sessionId, newSessionId |
+| `session.text` | sessionId, role (thinking\|assistant\|result), text (complete segment, not a delta) |
+| `session.tool.called` | sessionId, name, toolId, args |
+| `session.tool.result` | sessionId, toolId, result, error? |
+| `session.context.usage` | sessionId, tokens, percentage |
+| `session.context.threshold` | sessionId, percentage, threshold |
+| `session.subcontext` | sessionId, subcontextId, tokens |
+| `session.message` | sessionId, messageId, direction (to_agent\|to_user), text |
+| `session.approval.requested` | sessionId, approvalId, kind (bash\|file\|tool), summary (human-readable), details (untyped JSON), purpose, deadline |
+| `session.approval.resolved` | sessionId, approvalId, decision (approved\|denied\|expired\|cancelled), actor (`system` for expired/cancelled), reason? |
+| `completion.started` | completionId, model, provider |
+| `completion.completed` | completionId, tokens, durationMs |
+| `completion.failed` | completionId, error |
 | `provider.unavailable` | provider, error |
 | `server.restart_scheduled` | deadline |
 | `server.draining` | remainingSessions |
 
-**Filters** (server-side; each has an `exclude_` variant): `session`, `event` (comma list),
+**Filters** (server-side; each has an `exclude_` variant): `session`, `event` (comma list;
+a trailing `.*` matches a namespace, e.g. `session.approval.*`),
 `caller`, `tag` (`key:value`), `role` (for `session.text`), plus `children=true|false`.
 
 ---
@@ -335,7 +339,7 @@ event's JSON `data` has a `type` field equal to the event name. A `heartbeat` is
 
 ## Integration patterns
 
-- **Slack:** subscribe to `session.approval`, `session.text` and lifecycle events; render approvals
+- **Slack:** subscribe to `session.approval.*`, `session.text` and lifecycle events; render approvals
   as buttons; post decisions.
 - **Web UI:** dashboard over SSE with an approval queue across sessions.
 - **CI/scripting:** `arm session create --headless --tools arm-approved-bash --policy permissive`.
