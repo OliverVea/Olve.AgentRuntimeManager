@@ -20,7 +20,7 @@ No opinion on what agents do — ARM handles the plumbing (process lifecycle, ap
 
 `QUERY` replaces the traditional `GET` + query-string pattern for collection endpoints. It's safe and idempotent (like GET) but accepts a request body, making complex filters natural without URL encoding gymnastics.
 
-**Implementation:** .NET 11 supports QUERY natively — use `[AcceptVerbs("QUERY")]` on controller actions. The CSRF middleware treats QUERY as safe (aspnetcore#67839).
+**Implementation:** minimal API routes `QUERY` via `MapMethods` on .NET 10; .NET 11 supports it natively. The API contract (`src/spec/main.tsp`) defines each search operation once.
 
 **Query method is configurable** (`queryMethod: "query" | "get" | "post"`, default `"query"`). If deployed behind infrastructure that doesn't support QUERY, switch to `"get"` (query-string encoding) or `"post"` (POST to `/api/<resource>/search`).
 
@@ -65,9 +65,11 @@ All error responses use a consistent envelope:
 
 **Zero-config mode:** If no auth is configured, ARM generates a signed token on first login (HMAC-SHA256 with a server-generated secret key stored in the data directory). The token is handed to the user (printed to stdout / stored in a credential file). Suitable for single-user local dev.
 
-**Multi-user / remote mode:** ARM validates tokens against its configured auth backend. Tokens carry identity and permissions (read-only, operator, admin).
+**Multi-user / remote mode:** ARM validates tokens against its configured auth backend. Tokens carry identity and permissions.
 
-**Agent auth:** Sessions get a scoped token via env (`AGENT_RUNTIME_TOKEN`). The token grants only session-specific operations (approvals, messages, skill loads for that session). An agent cannot self-approve — approval decisions require a token with operator-level permissions.
+**Permissions:** fine-grained (`sessions:create`, `sessions:kill`, `approvals:decide`, …). The auth system composes them into roles. Default roles: read-only, operator (functional: start, kill, approve; no configuration) and admin.
+
+**Agent auth:** Sessions get a scoped token via env (`AGENT_RUNTIME_TOKEN`): a permission set limited to that session. The token grants only session-specific operations (approvals, messages, skill loads for that session). An agent cannot self-approve — approval decisions require `approvals:decide`.
 
 **Actor verification:** The `actor` field in approval decisions is derived from the auth token, not user-supplied. This ensures the audit trail is tied to identity.
 
@@ -405,6 +407,8 @@ Non-interactive task mode: streams output to stdout, exits with session exit cod
 
 **Heartbeat:** Server sends `heartbeat` event every 30s.
 
+**Payload discriminator:** every event's JSON `data` carries a `type` field equal to its event name, so generated clients get per-event types.
+
 ### Event Persistence
 
 Events are written to daily-rotated NDJSON files on disk. This serves as both audit log and replay source. Each event includes timestamp and monotonic event ID.
@@ -494,7 +498,7 @@ command → policy evaluation → safe | blocked | needs_approval
   needs_approval → return approvalToken → agent re-submits → SSE event → defer → decision → resume
 ```
 
-The classifier must be shell-aware with a fail-closed default. Covered by extensive unit tests including adversarial inputs.
+The classifier must be shell-aware with a fail-closed default. Covered by extensive unit tests including adversarial inputs. It ships as a separate, low-dependency package (preferably wrapping an existing shell parser).
 
 ### Policies (Application Data)
 
@@ -536,7 +540,7 @@ Rules are evaluated in order; first match wins. Unmatched commands require appro
 
 ## Persistence
 
-Storage layout TBD before implementation. ASP.NET app with a data store.
+Storage layout TBD before implementation. Leaning: one persistence port; locally SQLite + NDJSON files (self-contained, no daemon), in production an ARM-owned Postgres.
 
 **Requirements:**
 - Session metadata, logs, and conversations retained for at least 6 months
@@ -569,7 +573,7 @@ Location/filename TBD.
 | `contextThresholds` | [...] | Token alerts |
 | `providers` | [...] | Registered provider configs |
 
-**Deployment:** ARM is deployed as a containerized ASP.NET application. CI/CD via [Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines). For local development, runs as a host process with agent processes detached.
+**Deployment:** V0 runs as a host process (systemd user unit) with agent processes detached, so agents survive a server restart. CI/CD via [Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines). Containerized/k8s deployment is Future.
 
 **Future:** Composable dynamic configuration.
 
@@ -641,8 +645,6 @@ Any HTTP client can consume SSE and call REST. The approval contract is frontend
 
 ## Next Steps
 
-Following approval of this spec:
-1. OpenAPI document + JSON Schemas for all request/response payloads
-2. Contract tests against the schemas
-3. Full Gherkin scenarios (BDD) for all V0 functionality — human-written/edited, at minimum human-approved
-4. API version strategy (version prefix or negotiated header)
+See [`MILESTONES.md`](MILESTONES.md). The API contract is TypeSpec (`src/spec/main.tsp`); OpenAPI
+documents and clients are generated build artifacts. The backend is checked against the contract
+by route-coverage and contract tests. Open: API version strategy (version prefix or header).
