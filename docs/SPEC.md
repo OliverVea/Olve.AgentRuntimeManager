@@ -20,8 +20,6 @@ No opinion on what agents do — ARM handles the plumbing (process lifecycle, ap
 
 `QUERY` replaces the traditional `GET` + query-string pattern for collection endpoints. It's safe and idempotent (like GET) but accepts a request body, making complex filters natural without URL encoding gymnastics.
 
-**Implementation:** minimal API routes `QUERY` via `MapMethods` on .NET 10; .NET 11 supports it natively. The API contract (`src/spec/main.tsp`) defines each search operation once.
-
 **Query method is configurable** (`queryMethod: "query" | "get" | "post"`, default `"query"`). If deployed behind infrastructure that doesn't support QUERY, switch to `"get"` (query-string encoding) or `"post"` (POST to `/api/<resource>/search`).
 
 ### Error Model
@@ -498,7 +496,7 @@ command → policy evaluation → safe | blocked | needs_approval
   needs_approval → return approvalToken → agent re-submits → SSE event → defer → decision → resume
 ```
 
-The classifier must be shell-aware with a fail-closed default. Covered by extensive unit tests including adversarial inputs. It ships as a separate, low-dependency package (preferably wrapping an existing shell parser).
+The classifier must be shell-aware with a fail-closed default. Covered by extensive unit tests including adversarial inputs.
 
 ### Policies (Application Data)
 
@@ -540,8 +538,6 @@ Rules are evaluated in order; first match wins. Unmatched commands require appro
 
 ## Persistence
 
-Storage layout TBD before implementation. Leaning: one persistence port; locally SQLite + NDJSON files (self-contained, no daemon), in production an ARM-owned Postgres.
-
 **Requirements:**
 - Session metadata, logs, and conversations retained for at least 6 months
 - Hot storage for recent sessions (active + last N days)
@@ -572,8 +568,6 @@ Location/filename TBD.
 | `memoryLimitMB` | 0 | 0=auto (block when <2GB free) |
 | `contextThresholds` | [...] | Token alerts |
 | `providers` | [...] | Registered provider configs |
-
-**Deployment:** V0 runs as a host process (systemd user unit) with agent processes detached, so agents survive a server restart. CI/CD via [Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines). Containerized/k8s deployment is Future.
 
 **Future:** Composable dynamic configuration.
 
@@ -645,6 +639,4 @@ Any HTTP client can consume SSE and call REST. The approval contract is frontend
 
 ## Next Steps
 
-See [`MILESTONES.md`](MILESTONES.md). The API contract is TypeSpec (`src/spec/main.tsp`); OpenAPI
-documents and clients are generated build artifacts. The backend is checked against the contract
-by route-coverage and contract tests. Open: API version strategy (version prefix or header).
+See [`MILESTONES.md`](MILESTONES.md). Open: API version strategy (version prefix or header).
