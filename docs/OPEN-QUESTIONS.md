@@ -4,7 +4,7 @@
 move, and a leaning from weeks ago may no longer hold. Before relying on one, confirm it with
 Oliver. When something changes, rewrite the entry and its date rather than appending history.
 
-References: [`SPEC.md`](SPEC.md), [`PLAN.md`](PLAN.md), [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md).
+References: [`SPEC.md`](SPEC.md), [`MILESTONES.md`](MILESTONES.md), [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md).
 
 ---
 
@@ -23,7 +23,7 @@ we need a thin Result→HTTP mapping layer + error-code enum? Verify before M1.
 ### A3. Auth model — open
 SPEC: zero-config local HMAC tokens, session-scoped agent tokens, roles (operator approves).
 Scaffold: OIDC/Authentik only. **Leaning (2026-08-14):** pluggable seam (local HMAC default,
-OIDC optional); actor derived from the token. Permission model: see PLAN M4.
+OIDC optional); actor derived from the token. Permission model: see MILESTONES M4.
 
 ### A4. Deployment shape
 - **Leaning (2026-08-14):** host process (systemd user unit, like `pl`) for V0, so agents
