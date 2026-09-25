@@ -259,27 +259,34 @@ validates it and retries up to `retries` times (default 2), and if every attempt
 `Last-Event-ID` to replay what you missed, across the retention window and server restarts. Every
 event's JSON `data` has a `type` field equal to the event name. A `heartbeat` is sent every 30s.
 
+- **Session state:** there is one event per state, each carrying `previous`; the session's
+  current status is the state named by its latest lifecycle event.
+- **Conversation:** `session.text` is the agent's output; `session.message` is every user↔agent
+  message, in either direction. A frontend renders both, and nothing appears twice.
+- **Approvals:** every `session.approval` is closed by exactly one `session.approval_resolved`
+  (`cancelled` when the session ends while waiting).
+
 | Event | Payload |
 |---|---|
 | `heartbeat` | timestamp |
 | `session.created` | full session |
 | `session.queued` | id, position |
-| `session.started` | id, providerSessionId |
-| `session.status` | id, status, previous |
-| `session.completed` | id, exitCode, summary |
-| `session.failed` | id, error |
-| `session.killed` | id, reason, source (user\|system\|timeout) |
+| `session.started` | id, previous, providerSessionId |
+| `session.waiting` | id, previous |
+| `session.resumed` | id, previous |
+| `session.completed` | id, previous, exitCode, summary |
+| `session.failed` | id, previous, error |
+| `session.killed` | id, previous, reason, source (user\|system\|timeout) |
 | `session.revived` | id, newSessionId |
-| `session.text` | id, role (thinking\|assistant\|result\|user), text (complete segment, not a delta) |
+| `session.text` | id, role (thinking\|assistant\|result), text (complete segment, not a delta) |
 | `session.tool` | id, name, toolId, args |
 | `session.tool_result` | id, toolId, result, error? |
 | `session.context` | id, tokens, percentage |
 | `session.context_threshold` | id, percentage, threshold |
 | `session.subcontext` | id, subcontextId, tokens |
-| `session.message` | id, text (delivery of a user message; the conversation also gets `session.text` role=user) |
-| `session.approval` | id, approvalId, kind, command, purpose, deadline |
-| `session.approval_resolved` | id, approvalId, decision, actor |
-| `session.approval_expired` | id, approvalId |
+| `session.message` | id, messageId, direction (to_agent\|to_user), text |
+| `session.approval` | id, approvalId, kind, purpose, deadline, plus per kind: bash → command, workingDir; file → operation (read\|edit\|create\|delete), path, diff (edits); tool → tool, args |
+| `session.approval_resolved` | id, approvalId, decision (approved\|denied\|expired\|cancelled), actor (`system` for expired/cancelled), reason? |
 | `completion.start` | id, model, provider |
 | `completion.done` | id, tokens, durationMs |
 | `completion.failed` | id, error |
