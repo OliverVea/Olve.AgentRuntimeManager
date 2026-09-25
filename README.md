@@ -32,7 +32,7 @@ src/
 │   ├── Directory.Build.props                   # Shared build properties (TFM, nullable, etc.)
 │   └── Directory.Packages.props                # Central package version management
 ├── frontend/                                   # Vanilla Web Components + TS frontend (see src/frontend/README.md)
-├── spec/main.tsp                               # API contract (TypeSpec) — see docs/P0-SPEC-FIRST.md
+├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
 └── deploy/
     └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
@@ -203,8 +203,8 @@ handlers. The `Stores/` module is written at library quality for later promotion
 ## Client Generation
 
 Generated output never lives in source folders. The backend build writes its OpenAPI document to
-`artifacts/backend/api.json` (gitignored); in P0 the contract moves to `src/spec/main.tsp` (see
-[`docs/P0-SPEC-FIRST.md`](docs/P0-SPEC-FIRST.md)).
+`artifacts/backend/api.json` (gitignored); in M1 the contract moves to `src/spec/main.tsp` (see
+[`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md)).
 
 ### TypeScript ([Kiota](https://learn.microsoft.com/en-us/openapi/kiota/overview))
 

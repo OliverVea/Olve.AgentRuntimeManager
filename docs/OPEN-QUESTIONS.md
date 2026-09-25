@@ -4,7 +4,7 @@
 move, and a leaning from weeks ago may no longer hold. Before relying on one, confirm it with
 Oliver. When something changes, rewrite the entry and its date rather than appending history.
 
-References: [`SPEC.md`](SPEC.md), [`MILESTONES.md`](MILESTONES.md), [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md).
+References: [`SPEC.md`](SPEC.md), [`MILESTONES.md`](MILESTONES.md), [`SPEC-FIRST.md`](SPEC-FIRST.md).
 
 ---
 
@@ -23,7 +23,7 @@ we need a thin Result→HTTP mapping layer + error-code enum? Verify before M1.
 ### A3. Auth model — open
 SPEC: zero-config local HMAC tokens, session-scoped agent tokens, roles (operator approves).
 Scaffold: OIDC/Authentik only. **Leaning (2026-08-14):** pluggable seam (local HMAC default,
-OIDC optional); actor derived from the token. Permission model: see MILESTONES M4.
+OIDC optional); actor derived from the token. Permission model: see MILESTONES M6.
 
 ### A4. Deployment shape
 - **Leaning (2026-08-14):** host process (systemd user unit, like `pl`) for V0, so agents
@@ -50,8 +50,8 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   - Clients via OpenAPI 3.2 → Hey API; CLI is TypeScript on that client, `bun build --compile`.
   - No C# client. Generated output lives only in gitignored `artifacts/`.
   - mise as the single build entry point; one root `package.json`.
-- Plan, stages and spike findings: [`P0-SPEC-FIRST.md`](P0-SPEC-FIRST.md). Promote to the
-  `olve-api` template only after P0 1.0.
+- Details and spike findings: [`SPEC-FIRST.md`](SPEC-FIRST.md). Promote to the `olve-api`
+  template after M3.
 
 ---
 
@@ -73,7 +73,7 @@ From an event-type review; general agreement, details open:
 
 - **B1. Storage layout** — resolve with A5.
 - **B2. Config location / filename** — for the host-process deployment (A4).
-- **B3. API versioning** — `/api/v1/…` prefix vs header; TypeSpec `@versioned` (P0 0.6).
+- **B3. API versioning** — `/api/v1/…` prefix vs header; TypeSpec `@versioned` (M14).
 - **B4. `queryMethod` default** — confirm it stays `"query"` (A1).
 
 ---
@@ -82,5 +82,5 @@ From an event-type review; general agreement, details open:
 
 - **C1.** Authentik application slugs `olve-arm` / `olve-arm-spa` must be created when the app
   is registered.
-- **C3. `Message` example — open:** keep as the P0 test bed; remove when the first real ARM
+- **C3. `Message` example — open:** keep as the M1–M2 test bed; remove when the first real ARM
   entity lands?

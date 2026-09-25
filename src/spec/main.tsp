@@ -2,7 +2,7 @@ import "@typespec/http";
 
 using Http;
 
-/** ARM API contract. Source of truth — see docs/P0-SPEC-FIRST.md (stage 0.1). */
+/** ARM API contract. Source of truth — see docs/SPEC-FIRST.md (M1). */
 @service(#{ title: "Olve.AgentRuntimeManager" })
 @route("/api")
 namespace Arm;

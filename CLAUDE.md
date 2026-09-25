@@ -26,7 +26,7 @@ dotnet run --project Olve.AgentRuntimeManager               # Run locally
 - .NET 10, C# with file-scoped namespaces, nullable enabled, implicit usings
 - Package versions managed centrally in `Directory.Packages.props` — do not add `Version` attributes in csproj files
 - Local config via `dotnet user-secrets`, not appsettings files
-- OpenAPI is a build artifact: the backend build writes `artifacts/backend/api.json` (`Microsoft.Extensions.ApiDescription.Server`); P0 moves the contract to `src/spec/main.tsp` (`docs/P0-SPEC-FIRST.md`)
+- OpenAPI is a build artifact: the backend build writes `artifacts/backend/api.json` (`Microsoft.Extensions.ApiDescription.Server`); M1 moves the contract to `src/spec/main.tsp` (`docs/SPEC-FIRST.md`)
 - No C# client: integration tests use raw HTTP; the `arm` CLI will be generated from the spec
 
 ## Decisions are dated leanings

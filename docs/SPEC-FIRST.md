@@ -1,6 +1,7 @@
-# P0 — Spec-first toolchain
+# Spec-first toolchain
 
-Prove the spec-first pipeline on a tiny API before building the full ARM API (P1) on it.
+How the API contract drives the build, and the milestone details for the toolchain work (M1, M2,
+parts of M3, M14). The milestone list itself is [`MILESTONES.md`](MILESTONES.md).
 Decision context and spike findings: [`OPEN-QUESTIONS.md` A8](OPEN-QUESTIONS.md#a8-api-definition--code-first-vs-spec-first).
 
 ```
@@ -24,12 +25,9 @@ artifacts/spec/openapi.json  (OpenAPI 3.2, gitignored build artifact)
 - **Off-the-shelf generators only.** No custom TypeSpec emitter. The CLI is hand-written on the
   generated client.
 
-Stages are sequential; each is small enough for one PR. The stage list after 0.2 is a
-proposal: reorder freely.
-
 ---
 
-## 0.1 — One POST, one GET
+## M1 — One POST, one GET
 
 Scope: the scaffold's `Message` example, spec'd first. `POST /api/messages` and
 `GET /api/messages/{id}` (the GET-by-id endpoint is new; the example only has list). The spec
@@ -62,7 +60,7 @@ artifacts/           everything generated (gitignored)
 Exit: changing `main.tsp` without the server (or vice versa) turns `mise run ci` red, locally
 and in the pipeline.
 
-## 0.2 — SSE
+## M2 — SSE
 
 Scope: one typed event stream with filters and replay, modelled the way SPEC §Event Bus
 needs it.
@@ -96,7 +94,7 @@ union ArmEvent {
 
 Exit: a filter in the spec is enforced by the server and exposed by the CLI.
 
-## 0.3 — `QUERY` + `queryMethod`
+## M3 (part) — `QUERY` + `queryMethod`
 
 SPEC wants one search operation that can be served three ways (`query` | `get` | `post`).
 TypeSpec has no `QUERY` verb decorator.
@@ -106,15 +104,15 @@ TypeSpec has no `QUERY` verb decorator.
   aliases
 - [ ] Server maps the configured method via `MapMethods` (A1/B4), or natively on .NET 11; route-coverage test understands the alias
 - [ ] Check Hey API behaviour with a `query` operation before committing to it
-- [ ] `arm message list` with the search body as flags
+- [ ] `arm session list` with the search body as flags
 
-## 0.4 — Errors & multi-status responses
+## M3 (part) — Errors & multi-status responses
 
 - [ ] SPEC error envelope as shared `@error` models; A2 mapping layer in Olve.Results → HTTP
 - [ ] `201 | 202 {queuePosition} | 409 | 503` style unions round-trip through the client and CLI exit codes
 - [ ] `Idempotency-Key` header modelled once as a reusable parameter
 
-## 0.5 — CLI
+## CLI (packaging in M1; each milestone adds its commands)
 
 - [ ] Command structure matching the SPEC command tables (`arm <entity> <verb>`), hand-written on the generated client
 - [ ] Output modes: `--pretty` (default: tables for lists, key/value for objects), `--json`, NDJSON for streams; `--binary` if the protobuf path ever lands
@@ -122,15 +120,13 @@ TypeSpec has no `QUERY` verb decorator.
 - [ ] Release artifact: `bun build --compile` per target (linux-x64/arm64, darwin-arm64), downloadable like `pl`
 - [ ] Optional: Python / Bash clients from the same OpenAPI artifact, if a consumer wants them
 
-## 0.6 — Versioning
+## M14 — Versioning
 
 - [ ] B3 via TypeSpec `@versioned` (prefix vs header); breaking-change check between versions in CI
 
-## 1.0 — Done
+## Template write-up (after M3)
 
-- [ ] All of the above green in `mise run ci` and the pipeline; README / CLAUDE.md updated
-- [ ] Write-up: what to lift into the `olve-api` template (spec → artifacts → clients, mise, contract tests) and what stays ARM-specific
-- [ ] Then start P1: the full ARM API from SPEC.md on this toolchain
+- [ ] What to lift into the `olve-api` template (spec → artifacts → clients, mise, contract tests) and what stays ARM-specific
 
 ---
 
