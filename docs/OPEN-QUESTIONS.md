@@ -28,9 +28,11 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
 ### A4. Deployment shape
 - **Leaning (2026-08-14):** host process (systemd user unit, like `pl`) for V0, so agents
   survive a server restart and get adopted by PID. k8s/multi-replica only when needed (A7).
-- **Leaning (2026-09-25):** beta runs in a VM, deployed the same way as prod (systemd service
-  updated over SSH), so gentle restart is exercised before prod. Not a container: replacing the
-  image would kill running agents. Olve.Pipelines stays the CD driver, with its deploy steps
+- **Leaning (2026-09-25):** beta and prod each run in their own VM, deployed identically
+  (systemd service updated over SSH), so gentle restart is exercised before prod. The VM also
+  isolates agents from the homelab host (besides the approval policy), with snapshots and easy
+  rebuilds. The cost: two VMs to maintain, and the tools/repos agents need must live in them. Not
+  containers: replacing the image would kill running agents. Olve.Pipelines stays the CD driver, with its deploy steps
   changing from Helm to SSH + systemd; its steps call `mise` tasks, so the CD tool stays swappable.
 
 ### A5. Persistence
