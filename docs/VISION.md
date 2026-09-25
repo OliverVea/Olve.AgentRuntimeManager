@@ -41,6 +41,10 @@ re-evaluated and scoped when it's picked up.
 
 ## Approvals & policies
 
+- **Approval tokens (two-step escalation)**: on `needs approval` the tool returns a single-use,
+  command-bound token and the agent must re-submit with it to actually ask a human. Gives the
+  agent a chance to pick a safer command first. Parked: it didn't work well in practice (work
+  ARS), so it needs a better design before it returns.
 - **`suggest_safe`**: the agent proposes an auto-approval pattern alongside an approval request.
 - **Policy export/import** as JSON for sharing.
 

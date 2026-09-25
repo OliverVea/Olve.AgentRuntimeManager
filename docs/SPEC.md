@@ -128,9 +128,8 @@ is checked against the session's policy:
 
 - **safe** → runs immediately, output returned
 - **blocked** → error with reason
-- **needs approval** → error with an `approvalToken`; the agent re-submits with the token to
-  escalate, ARM emits `session.approval`, and the call waits for a human decision (auto-deny
-  after a configurable timeout)
+- **needs approval** → ARM emits `session.approval` and the call waits for a human decision
+  (auto-deny after a configurable timeout)
 
 The check understands shell syntax (pipes, chains, subshells, quoting) and fails closed: anything
 it can't parse needs approval.
@@ -140,9 +139,6 @@ it can't parse needs approval.
 | `arm approval list [--session X] [--status pending\|approved\|denied\|expired] [--kind bash\|file\|tool] [--after DATE] [--limit N]` | `QUERY /api/approvals` | Search |
 | `arm approval get <session-id> <approval-id>` | `GET /api/sessions/:id/approvals/:aid` | Get |
 | `arm approval approve\|deny <session-id> <approval-id> [--reason "..."]` | `POST /api/sessions/:id/approvals/:aid/decide` | Decide: `{ "decision": "approve" \| "deny", "reason": "…" }` |
-
-**Approval tokens** are single-use, session-scoped, expire after 15 minutes (configurable), and
-are bound to the exact command + working directory. They control escalation, not authorization.
 
 ### Agent tools
 
@@ -157,11 +153,11 @@ Enabled per session via `tools`; none are on by default (no tools = reasoning on
 
 ```json
 // approved_bash call
-{ "command": "git push origin main", "purpose": "Deploy fix", "working_dir": "/path/to/repo", "approvalToken": "optional" }
+{ "command": "git push origin main", "purpose": "Deploy fix", "working_dir": "/path/to/repo" }
 // blocked
 { "error": "BLOCKED", "reason": "rm commands are not allowed in this policy" }
-// needs approval
-{ "error": "NEEDS_APPROVAL", "reason": "npm install requires human approval", "approvalToken": "arm-tok-abc123" }
+// denied by a human (or timed out)
+{ "error": "DENIED", "reason": "Not now; run the tests first", "actor": "oliver" }
 ```
 
 ### Policies
