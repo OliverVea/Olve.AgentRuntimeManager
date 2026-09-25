@@ -213,18 +213,27 @@ MCP servers a session can enable.
 
 ---
 
-## Providers & completions
+## Providers
 
 | CLI | API | Purpose |
 |---|---|---|
 | `arm provider list` | `QUERY /api/providers` | List |
 | `arm provider get <name>` | `GET /api/providers/:name` | Config + status |
 | `arm provider health [<name>]` | `GET /api/providers/health`, `GET /api/providers/:name/health` | Health |
+
+Provider CLIs change quickly; re-evaluate each one when building its connector.
+
+---
+
+## Completions
+
+One-off LLM calls, no session.
+
+| CLI | API | Purpose |
+|---|---|---|
 | `arm completion create -p "prompt" [--provider X] [--model X] [--system "..."] [--schema <file\|inline>] [--timeout-seconds N] [--caller X] [--retries N]` | `POST /api/completions` | One-off LLM call, no session |
 | `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `QUERY /api/completions` | History |
 | `arm completion get <id>` | `GET /api/completions/:id` | Get |
-
-Provider CLIs change quickly; re-evaluate each one when building its connector.
 
 `provider` is optional (resolved from the model). With a `schema`, ARM validates the output and
 retries up to `retries` times (default 2); if every attempt fails it returns 422 with the raw
