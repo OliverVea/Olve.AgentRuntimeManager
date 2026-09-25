@@ -288,7 +288,7 @@ subject ID (`sessionId`, `completionId`, or `provider`). The table lists the rem
 | `session.context.threshold` | sessionId, percentage, threshold |
 | `session.subcontext` | sessionId, subcontextId, tokens |
 | `session.message` | sessionId, messageId, direction (to_agent\|to_user), text |
-| `session.approval.requested` | sessionId, approvalId, kind (bash\|file\|tool), summary (human-readable), details (untyped JSON), purpose, deadline |
+| `session.approval.requested` | sessionId, approvalId, toolId (the `session.tool.called` it gates), kind (bash\|file\|tool), summary (human-readable), details (untyped JSON), purpose, deadline |
 | `session.approval.resolved` | sessionId, approvalId, decision (approved\|denied\|expired\|cancelled), actor (`system` for expired/cancelled), reason? |
 | `completion.started` | completionId, model, provider |
 | `completion.completed` | completionId, tokens, durationMs |
