@@ -106,6 +106,8 @@ A provider implements: `spawn(session) → childProcess`, `parseStream(line) →
 
 **Approval mechanism:** Providers are spawned with their native permissions disabled (no stdin for interactive approval). All tool calls route through the ARM MCP server, which blocks the tool response until the approval engine resolves it. This is the sole approval path — provider-native approval doesn't work because there's no interactive terminal.
 
+> **Provider CLIs evolve rapidly.** The Claude Code and Codex details below are a snapshot. Re-evaluate each CLI (flags, stream format, resume, MCP config, permissions) when picking up its connector.
+
 ### Claude
 
 - CLI: `claude -p "..." --model '...' --output-format stream-json --verbose --dangerously-skip-permissions --mcp-config <path>`
