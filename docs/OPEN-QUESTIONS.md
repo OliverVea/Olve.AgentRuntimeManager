@@ -45,10 +45,6 @@ default), **B. Spec-declared TBDs** (the spec explicitly defers these), and
   **OIDC/Authentik JWT only**.
 - **Gap.** OIDC covers the "multi-user / remote" mode, but token *issuance*, agent-scoped
   tokens, and the tier model are all additive.
-- **Direction (2026-09-25):** fine-grained permissions (`sessions:create`, `sessions:kill`,
-  `approvals:decide`, …) that the auth system composes into roles. Read-only / operator / admin
-  are default role bundles; operator is functional (start, kill, approve), not configuration.
-  Agent tokens are a session-scoped permission set.
 - **Recommendation:** introduce a pluggable auth seam — local HMAC (default, single-user)
   *or* OIDC (configured backend) — plus a permission/scope model. Actor derived from token
   (SPEC §Auth), never user-supplied.
