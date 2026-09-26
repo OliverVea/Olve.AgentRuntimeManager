@@ -115,6 +115,7 @@ export async function runCli(
     onStdout?: (lines: string[]) => void;
     openBrowser?: (url: string) => void;
     now?: () => Date;
+    interactive?: boolean;
   } = {},
 ): Promise<CliResult> {
   const out: string[] = [];
@@ -129,6 +130,7 @@ export async function runCli(
     env: options.env ?? {},
     openBrowser: options.openBrowser,
     now: options.now,
+    interactive: options.interactive,
     sleep: async () => {},
     fetch:
       options.fetch ??

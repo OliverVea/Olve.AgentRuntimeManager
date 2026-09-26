@@ -32,6 +32,8 @@ export type CommandContext = {
   openBrowser(url: string): void;
   /** No browser the login redirect could reach: over SSH, or no display. */
   headless: boolean;
+  /** stderr is a terminal (not redirected), so it can show things like a QR code. */
+  interactive: boolean;
   now(): Date;
   sleep(ms: number): Promise<void>;
   /** The user's defaults: each setting's env variable (`ARM_MODEL`, …), else `~/.arm/config.json`. */

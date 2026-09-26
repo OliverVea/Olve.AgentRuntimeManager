@@ -17,6 +17,7 @@ import {
 } from "../auth/oidc";
 import { loadConfig, saveConfig } from "../config";
 import { credentialsPath, loadCredentials, saveCredentials, serverKey } from "../credentials";
+import { renderQr } from "../auth/terminal-qr";
 import { UsageError } from "../errors";
 import type { CommandContext, CommandGroup } from "../registry";
 
@@ -88,9 +89,13 @@ async function browserFlow(ctx: CommandContext, discovery: Discovery, clientId: 
 /** Device flow (RFC 8628), for SSH and headless machines: open a URL anywhere, approve, done. */
 async function deviceFlow(ctx: CommandContext, discovery: Discovery, clientId: string): Promise<TokenSet> {
   const device = await startDevice(ctx.fetch, discovery.deviceAuthorizationEndpoint!, clientId);
-  ctx.stderr("To log in, open this URL on any device and approve the request:");
+  const link = device.verificationUriComplete ?? device.verificationUri;
+  ctx.stderr("To log in, scan this QR code or open the URL below, then approve the request:");
   ctx.stderr("");
-  ctx.stderr(`  ${device.verificationUriComplete ?? device.verificationUri}`);
+  const qr = ctx.interactive ? renderQr(link) : undefined;
+  if (qr) ctx.stderr(qr);
+  ctx.stderr(`  URL:  ${device.verificationUri}`);
+  if (device.verificationUriComplete) ctx.stderr(`  Link: ${device.verificationUriComplete}`);
   ctx.stderr(`  Code: ${device.userCode}`);
   ctx.stderr("");
   ctx.stderr("Waiting for approval…");

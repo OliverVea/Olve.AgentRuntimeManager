@@ -29,6 +29,7 @@ process.exitCode = await run(process.argv.slice(2), {
   env: process.env,
   signal: interrupt.signal,
   openBrowser,
+  interactive: process.stderr.isTTY === true,
   onStreaming: () => {
     streaming = true;
   },

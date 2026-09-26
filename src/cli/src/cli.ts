@@ -37,6 +37,8 @@ export type Io = {
   openBrowser?(url: string): void;
   now?(): Date;
   sleep?(ms: number): Promise<void>;
+  /** stderr is a TTY (main.ts); decorations like the login QR code only go to a terminal. */
+  interactive?: boolean;
 };
 
 type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string }>;
@@ -200,6 +202,7 @@ export async function run(
       fetch: fetchFn,
       openBrowser: io.openBrowser ?? (() => {}),
       headless: isHeadless(io.env),
+      interactive: io.interactive ?? false,
       now,
       sleep: io.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       settings,

@@ -18,5 +18,11 @@
     "build:linux-x64": "npx bun build src/main.ts --compile --minify --target=bun-linux-x64 --outfile ../../artifacts/cli/arm-linux-x64",
     "build:linux-arm64": "npx bun build src/main.ts --compile --minify --target=bun-linux-arm64 --outfile ../../artifacts/cli/arm-linux-arm64",
     "build:darwin-arm64": "npx bun build src/main.ts --compile --minify --target=bun-darwin-arm64 --outfile ../../artifacts/cli/arm-darwin-arm64"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.6"
   }
 }

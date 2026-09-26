@@ -140,6 +140,18 @@ describe("arm login (device)", () => {
     expect(r.stderr).toContain("doesn't allow device code login");
   });
 
+  test("a terminal gets a QR code of the link; redirected output doesn't", async () => {
+    const approve = () => ({ body: { access_token: "at", expires_in: 60 } });
+    const tty = await runCli(["login", "--device"], { env: env(), fetch: provider(approve, { device: true }).fetch, interactive: true });
+    const piped = await runCli(["login", "--device"], { env: env(), fetch: provider(approve, { device: true }).fetch });
+
+    expect(tty.code).toBe(0);
+    expect(tty.stderr).toContain("▀");
+    expect(tty.stderr).toContain("Code: ABCD-EFGH");
+    expect(piped.stderr).not.toContain("▀");
+    expect(piped.stderr).toContain("Code: ABCD-EFGH");
+  });
+
   test("--device without a device endpoint is an error", async () => {
     const f = provider(() => ({ body: {} }));
     const r = await runCli(["login", "--device"], { env: env(), fetch: f.fetch });
