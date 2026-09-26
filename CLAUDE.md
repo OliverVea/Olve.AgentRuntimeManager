@@ -47,9 +47,12 @@ confirm with Oliver that it still holds. When a leaning changes, rewrite the ent
 ## Deployment (GitOps)
 
 This repo deploys via **Olve.Pipelines** — the `.pipelines/` directory is the live deploy config
-(single source of truth; pushing to `main` redeploys). Build+test run in parallel and gate
-`deploy-beta` → `deploy` (beta gates prod). The Helm chart is **ClusterIP-only**; public exposure is
-registered in the `Olve.Homelab` edge chart, not here. **Invoke the `ovea-olve-pipelines` skill** for
+(single source of truth; pushing to `main` redeploys). Build + `check` (`mise run ci`) run in
+parallel, then `deploy-beta` → `test-after-beta` (API tests against beta) → `deploy` (prod).
+ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`, `olve-arm-prod`), not in k8s:
+`src/deploy/vm/vm-deploy.sh` (run on the host by the deploy steps) creates the VM on first deploy,
+installs releases as a systemd service, and keeps a host relay (`100.100.117.17:18792` beta /
+`:18791` prod) that the `Olve.Homelab` route targets via `hostEndpoint`. **Invoke the `ovea-olve-pipelines` skill** for
 the authoritative model (config schema, secrets, promotion gates) before changing `.pipelines/` —
 don't re-derive it. See [README.md](README.md#deployment-gitops) for the full write-up.
 
@@ -59,12 +62,12 @@ don't re-derive it. See [README.md](README.md#deployment-gitops) for the full wr
   `OpenTelemetry__OAuth2__TokenUrl`/`ClientId` or the app crashes at startup. Prod OTLP auths as the
   shared **`otel`** client, so its secret is the `authentik-oidc-secrets` key **`otel-client-secret`**
   (NOT `<app>-client-secret` — a different client → `invalid_grant`).
-- **Authentik CA.** The chiseled base image can't validate `*.ovea.pro` TLS, so outbound HTTPS
-  (prod OTLP OAuth, JWKS, OpenBao) fails with "SSL connection could not be established". Mount the
-  shared `authentik-ca` configMap via `authentikCa.enabled` (`auth-prod-ca.crt`/`auth-beta-ca.crt`).
-- **Routing.** No route exists until the app is added to `Olve.Homelab`'s `values-{beta,prod}.yaml`
-  `apps:` list. Private/Tailscale host is `<app>-private.ovea.pro` (external-dns → `100.100.117.17`);
-  the `deploy-beta` health gate probes it from the homelab node over SSH.
+- **Authentik CA.** Outbound HTTPS to `*.ovea.pro` (prod OTLP OAuth, JWKS, OpenBao) needs the
+  Authentik CA; `vm-deploy.sh` installs it in the VM from the shared `authentik-ca` configMap
+  (`auth-prod-ca.crt`/`auth-beta-ca.crt`).
+- **Routing.** Routes live in `Olve.Homelab`'s `values-{beta,prod}.yaml` `apps:` list (`olve-arm-beta.ovea.pro`,
+  `olve-arm-private.ovea.pro`, Tailscale-private, `hostEndpoint` → the host relay). Pods can't open
+  new connections into libvirt's NAT network, hence the relay.
 - **Telemetry auth is opt-in, never fatal** — empty OAuth2 config disables it (see `TelemetryConfiguration`).
 
 ## References

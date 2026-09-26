@@ -32,8 +32,11 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   (systemd service updated over SSH), so gentle restart is exercised before prod. The VM also
   isolates agents from the homelab host (besides the approval policy), with snapshots and easy
   rebuilds. The cost: two VMs to maintain, and the tools/repos agents need must live in them. Not
-  containers: replacing the image would kill running agents. Olve.Pipelines stays the CD driver, with its deploy steps
-  changing from Helm to SSH + systemd; its steps call `mise` tasks, so the CD tool stays swappable.
+  containers: replacing the image would kill running agents. Olve.Pipelines stays the CD driver.
+- **Implemented (2026-09-26):** libvirt VMs created idempotently by the deploy steps
+  (`src/deploy/vm/vm-deploy.sh`: Ubuntu 24.04 cloud image + cloud-init, fixed IPs 192.168.122.50/.51,
+  autostart), systemd service with `KillMode=process`, host relay on the Tailscale IP for routing.
+  The Helm chart is no longer deployed.
 
 ### A5. Persistence
 - **Leaning (2026-08-14):** one EF Core persistence port + a notify port.
