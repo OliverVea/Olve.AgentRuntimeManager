@@ -160,8 +160,8 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
    the Authentik CA;
 4. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
 
-**Routing** lives in [`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab): `olve-arm-beta.ovea.pro`
-and `olve-arm-private.ovea.pro` (Tailscale-private) use `hostEndpoint` to target the relay — pods
+**Routing** lives in [`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab): `arm-beta.ovea.pro`
+and `arm-private.ovea.pro` (Tailscale-private) use `hostEndpoint` to target the relay — pods
 can't open new connections into libvirt's NAT network directly. Authentik applications `olve-arm`
 and `olve-arm-spa` are defined in `Olve.Authentik`.
 

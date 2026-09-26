@@ -26,7 +26,7 @@ ssh -o StrictHostKeyChecking=no "$HOST" "cd $REMOTE && bash vm-deploy.sh beta $V
 
 echo "Verifying /health via the private (Tailscale) route..."
 for i in 1 2 3 4 5; do
-  if ssh -o StrictHostKeyChecking=no "$HOST" "curl -skf -o /dev/null https://olve-arm-beta.ovea.pro/health"; then
+  if ssh -o StrictHostKeyChecking=no "$HOST" "curl -skf -o /dev/null https://arm-beta.ovea.pro/health"; then
     echo "beta health OK"
     exit 0
   fi

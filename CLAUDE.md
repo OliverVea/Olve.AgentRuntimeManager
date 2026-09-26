@@ -65,8 +65,8 @@ don't re-derive it. See [README.md](README.md#deployment-gitops) for the full wr
 - **Authentik CA.** Outbound HTTPS to `*.ovea.pro` (prod OTLP OAuth, JWKS, OpenBao) needs the
   Authentik CA; `vm-deploy.sh` installs it in the VM from the shared `authentik-ca` configMap
   (`auth-prod-ca.crt`/`auth-beta-ca.crt`).
-- **Routing.** Routes live in `Olve.Homelab`'s `values-{beta,prod}.yaml` `apps:` list (`olve-arm-beta.ovea.pro`,
-  `olve-arm-private.ovea.pro`, Tailscale-private, `hostEndpoint` → the host relay). Pods can't open
+- **Routing.** Routes live in `Olve.Homelab`'s `values-{beta,prod}.yaml` `apps:` list (`arm-beta.ovea.pro`,
+  `arm-private.ovea.pro`, Tailscale-private, `hostEndpoint` → the host relay). Pods can't open
   new connections into libvirt's NAT network, hence the relay.
 - **Telemetry auth is opt-in, never fatal** — empty OAuth2 config disables it (see `TelemetryConfiguration`).
 
