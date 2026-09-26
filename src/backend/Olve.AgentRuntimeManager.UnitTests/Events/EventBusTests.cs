@@ -12,7 +12,7 @@ public class EventBusTests
     private static EventBus Bus(int capacity = 1000, DateTimeOffset? start = null) =>
         new(new FakeTimeProvider(start ?? Start), Options.Create(new EventOptions { ReplayCapacity = capacity }));
 
-    private static MessageDeleted Deleted() => new() { At = Start, MessageId = Guid.NewGuid() };
+    private static SessionQueued Queued() => new() { At = Start, SessionId = Guid.NewGuid(), Position = 1 };
 
     private static List<StoredEvent> Drain(EventBus.Subscription subscription)
     {
@@ -30,7 +30,7 @@ public class EventBusTests
     {
         var bus = Bus();
 
-        var ids = Enumerable.Range(0, 5).Select(_ => bus.Publish(Deleted()).Id).ToList();
+        var ids = Enumerable.Range(0, 5).Select(_ => bus.Publish(Queued()).Id).ToList();
 
         await Assert.That(ids).IsInOrder();
         await Assert.That(ids.Distinct().Count()).IsEqualTo(5);
@@ -40,11 +40,11 @@ public class EventBusTests
     public async Task Ids_StartAfterEveryIdOfAnEarlierRun()
     {
         var earlier = Bus(start: Start);
-        var last = Enumerable.Range(0, 100).Select(_ => earlier.Publish(Deleted()).Id).Last();
+        var last = Enumerable.Range(0, 100).Select(_ => earlier.Publish(Queued()).Id).Last();
 
         var restarted = Bus(start: Start.AddSeconds(1));
 
-        await Assert.That(restarted.Publish(Deleted()).Id).IsGreaterThan(last);
+        await Assert.That(restarted.Publish(Queued()).Id).IsGreaterThan(last);
     }
 
     [Test]
@@ -59,10 +59,10 @@ public class EventBusTests
     public async Task Subscribe_WithoutAnId_GetsOnlyLiveEvents()
     {
         var bus = Bus();
-        bus.Publish(Deleted());
+        bus.Publish(Queued());
 
         using var subscription = bus.Subscribe();
-        var live = bus.Publish(Deleted());
+        var live = bus.Publish(Queued());
 
         await Assert.That(subscription.Replay).IsEmpty();
         await Assert.That(Drain(subscription)).IsEquivalentTo([live]);
@@ -72,12 +72,12 @@ public class EventBusTests
     public async Task Subscribe_AfterAnId_ReplaysLaterEventsThenLive()
     {
         var bus = Bus();
-        var first = bus.Publish(Deleted());
-        var second = bus.Publish(Deleted());
-        var third = bus.Publish(Deleted());
+        var first = bus.Publish(Queued());
+        var second = bus.Publish(Queued());
+        var third = bus.Publish(Queued());
 
         using var subscription = bus.Subscribe(first.Id);
-        var live = bus.Publish(Deleted());
+        var live = bus.Publish(Queued());
 
         await Assert.That(subscription.Replay).IsEquivalentTo([second, third]);
         await Assert.That(Drain(subscription)).IsEquivalentTo([live]);
@@ -87,8 +87,8 @@ public class EventBusTests
     public async Task Subscribe_AfterAnIdOlderThanTheBuffer_ReplaysTheWholeBuffer()
     {
         var bus = Bus(capacity: 2);
-        var evicted = bus.Publish(Deleted());
-        var kept = new[] { bus.Publish(Deleted()), bus.Publish(Deleted()) };
+        var evicted = bus.Publish(Queued());
+        var kept = new[] { bus.Publish(Queued()), bus.Publish(Queued()) };
 
         using var subscription = bus.Subscribe(evicted.Id - 1);
 
@@ -99,7 +99,7 @@ public class EventBusTests
     public async Task Subscribe_AfterTheNewestId_ReplaysNothing()
     {
         var bus = Bus();
-        var newest = bus.Publish(Deleted());
+        var newest = bus.Publish(Queued());
 
         using var subscription = bus.Subscribe(newest.Id);
 
@@ -114,7 +114,7 @@ public class EventBusTests
         await Assert.That(bus.SubscriberCount).IsEqualTo(1);
 
         subscription.Dispose();
-        bus.Publish(Deleted());
+        bus.Publish(Queued());
 
         await Assert.That(bus.SubscriberCount).IsEqualTo(0);
         await Assert.That(subscription.Live.Completion.IsCompleted).IsTrue();
@@ -126,7 +126,7 @@ public class EventBusTests
         var bus = Bus(capacity: 2);
         using var slow = bus.Subscribe();
 
-        var published = Enumerable.Range(0, 3).Select(_ => bus.Publish(Deleted())).ToList();
+        var published = Enumerable.Range(0, 3).Select(_ => bus.Publish(Queued())).ToList();
 
         await Assert.That(bus.SubscriberCount).IsEqualTo(0);
         await Assert.That(Drain(slow)).IsEquivalentTo(published.Take(2));

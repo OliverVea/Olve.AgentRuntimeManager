@@ -43,3 +43,18 @@ export function formatKeyValue(entries: ReadonlyArray<readonly [string, unknown]
 export function formatObject(value: object): string {
   return formatKeyValue(Object.entries(value));
 }
+
+/** At most `max` characters on one line, ending in `…` when cut. */
+export function truncate(value: string, max: number): string {
+  const line = value.replace(/\s+/g, " ").trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** `2026-09-01 14:03` in local time; the input as-is when it isn't a date. */
+export function localDateTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

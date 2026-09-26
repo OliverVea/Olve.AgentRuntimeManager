@@ -1,12 +1,10 @@
-using Olve.Results;
-
 namespace Olve.AgentRuntimeManager.Api;
 
 /// <summary>
 /// Answers request-binding failures (a <see cref="BadHttpRequestException"/>: a malformed or
 /// incomplete JSON body, <c>pageSize=abc</c>, a missing required parameter) in the contract's
-/// terms: when the matched operation declares a 400, the body is the contract's problem array;
-/// otherwise the status alone, as ASP.NET Core would. Requires
+/// terms: when the matched operation declares the status, the body is the error envelope
+/// (<c>INVALID_REQUEST</c>); otherwise the status alone, as ASP.NET Core would. Requires
 /// <c>RouteHandlerOptions.ThrowOnBadRequest</c> so the failures reach this middleware.
 /// </summary>
 public sealed class ArmBindingFailures(RequestDelegate next, ILogger<ArmBindingFailures> logger)
@@ -23,14 +21,8 @@ public sealed class ArmBindingFailures(RequestDelegate next, ILogger<ArmBindingF
 
             var operation = context.GetEndpoint()?.Metadata.GetMetadata<ArmOperation>();
             context.Response.Clear();
-            if (exception.StatusCode == StatusCodes.Status400BadRequest && operation?.Declares(StatusCodes.Status400BadRequest) == true)
-            {
-                var problem = new ResultProblem("{0}", exception.Message);
-                await ArmResults.Problems([problem], StatusCodes.Status400BadRequest).ExecuteAsync(context);
-                return;
-            }
-
-            context.Response.StatusCode = exception.StatusCode;
+            var error = ArmError.Create(ArmErrors.InvalidRequest, exception.Message);
+            await ArmErrors.ToHttpResult(error, exception.StatusCode, operation).ExecuteAsync(context);
         }
     }
 }

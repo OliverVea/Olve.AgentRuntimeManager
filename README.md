@@ -19,9 +19,10 @@ src/
 ├── backend/                                    # .NET — run dotnet commands from here
 │   ├── Olve.AgentRuntimeManager.slnx
 │   ├── Olve.AgentRuntimeManager/               # API application (minimal API)
-│   │   ├── Api/                                # Runtime for the generated API surface (ArmResults, binding failures, handler check)
+│   │   ├── Api/                                # Runtime for the generated API surface (typed responses, error envelope, validation, binding failures, handler check)
 │   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
-│   │   ├── Messages/                           # Message CRUD example feature
+│   │   ├── Events/                             # Event bus + GET /api/events (SSE)
+│   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (FakeProvider)
 │   │   ├── Stores/                             # EntityStore snapshot persistence (promotion-shaped)
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
@@ -54,11 +55,12 @@ artifacts/                                      # Everything generated (gitignor
 | GET | `/` | No | The SPA (`src/frontend/`), served from `wwwroot` — see [Frontend](#frontend) |
 | GET | `/health` | No | Health check, returns 200 |
 | GET | `/api/auth-config` | No | Public OIDC settings for the SPA login (authority, client id, scopes) |
-| GET | `/api/messages?page=<n>&pageSize=<n>` | No | List messages (paginated, 1-based) |
-| POST | `/api/messages` | Yes (JWT) | Create a message (`{ "text": "…" }`) |
-| PUT | `/api/messages/{id}` | Yes (JWT) | Update a message (`{ "text": "…" }`) |
-| DELETE | `/api/messages/{id}` | Yes (JWT) | Delete a message |
-| GET | `/api/events?event=<a,b>&exclude_event=<a,b>` | Yes (JWT) | Server-sent events: `message.created` / `.updated` / `.deleted`, heartbeats; `Last-Event-ID` replays missed events |
+| POST | `/api/sessions` | Yes (JWT) | Create a session: 201 started, 202 queued (`queuePosition`), 503 queue full; `Idempotency-Key` honoured |
+| POST | `/api/sessions/search` | Yes (JWT) | Search sessions (filters in the body), newest first |
+| GET | `/api/sessions/{id}` | Yes (JWT) | Get a session |
+| POST | `/api/sessions/{id}/kill` | Yes (JWT) | Kill a queued/working/waiting session (`{ "reason": "…" }`); 409 if it already ended |
+| DELETE | `/api/sessions/{id}` | Yes (JWT) | Delete a session that has ended; 409 otherwise |
+| GET | `/api/events?event=<a,b>&exclude_event=<a,b>` | Yes (JWT) | Server-sent events: `session.created` / `.queued` / `.started` / `.completed` / `.failed` / `.killed` (…), heartbeats; `Last-Event-ID` replays missed events |
 | GET | `/openapi/v1.json` | No | OpenAPI spec |
 
 The JSON API lives under `/api/` so the SPA can own the site root; `/health` stays at the root
@@ -66,15 +68,20 @@ for health probes. Unmatched non-API GETs fall back to `index.html` for SPA clie
 
 The `/api` endpoints are generated from the contract (see [Client Generation](#client-generation)):
 the app implements one generated `I…Handler` per operation and opts operations out of auth in
-`Program.cs`. The `Messages` feature is the worked example — handlers of the generated
-`Messages_*` interfaces over an `EntityStore<Message>` (domain `Message` with `Id<T>`), `Page<T>`
-pagination, and `IAsyncOnStartup` wiring (a welcome message is seeded on first run).
+`Program.cs`. Every error is the envelope `{ "error": { code, message, details } }`.
 
-`GET /api/events` (`Events/`) streams every message change as SSE (`arm events` tails it). Each
+Sessions (`Sessions/`) run in memory (persistence is M5): `SessionManager` keeps a FIFO queue in
+front of `Sessions:TotalSlots` slots, moves sessions through the state machine
+(`SessionLifecycle`), kills them at their timeout, and publishes a lifecycle event per change.
+Agents run through the `IAgentProvider` seam; the only provider so far is `fake`, which runs no
+LLM and follows `fake:` directives in the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`,
+`fake:summary=…`, `fake:fail=…`; see `FakeScript`).
+
+`GET /api/events` (`Events/`) streams every session change as SSE (`arm events` tails it). Each
 event's JSON data carries `type` (= the SSE event name), `at` and its subject id; every event but
 `heartbeat` has a monotonic id. Handlers publish on the in-process `EventBus`, which keeps the
 last `Events:ReplayCapacity` events in memory for `Last-Event-ID` replay (not across restarts
-yet). Filters are enforced server-side: `event` keeps only the listed names (`message.*` matches
+yet). Filters are enforced server-side: `event` keeps only the listed names (`session.*` matches
 a namespace), `exclude_event` then drops names; an unknown name is a 400, and heartbeats (sent
 on connect, then every `Events:HeartbeatInterval`) always pass.
 
@@ -194,13 +201,19 @@ Sources in priority order (highest wins):
 | `Storage:Directory` | `data` | Directory for `Persistent` snapshots |
 | `Events:HeartbeatInterval` | `00:00:30` | Heartbeat period of `GET /api/events` connections |
 | `Events:ReplayCapacity` | `1000` | Recent events kept for `Last-Event-ID` replay (and how far a connection may lag) |
+| `Sessions:TotalSlots` | `10` | Sessions that run at once; more are queued (202) |
+| `Sessions:MaxQueueSize` | `200` | Sessions that may wait for a slot; more are a 503 `QUEUE_FULL` |
+| `Sessions:DefaultTimeoutSeconds` | `600` | Timeout of a session without `timeoutSeconds` (then killed, source `timeout`) |
+| `Sessions:DefaultProvider` | `fake` | Provider of a session without `provider` |
+| `Sessions:IdempotencyWindow` | `1.00:00:00` | How long an `Idempotency-Key` replays its original response |
+| `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
 
 ### Persistence
 
-The `Messages` feature is backed by an in-memory `EntityStore<Message>`. By default storage is
-`Ephemeral` (state is lost on restart). Set `Storage:Mode=Persistent` to have the store load on
-startup and save a debounced whole-snapshot JSON to `Storage:Directory` via the BCL-only
-`FileSnapshotStore` — both wired in `Messages/MessageServices.cs`.
+Sessions are in memory for now (M5 persists them). The `Stores/` module (an `EntityStore<T>`
+snapshot persister: `Storage:Mode=Persistent` loads on startup and saves a debounced
+whole-snapshot JSON to `Storage:Directory` via the BCL-only `FileSnapshotStore`) is not wired to
+anything since the `Message` example was removed; M5 decides whether sessions use it.
 
 Everything sits behind the `ISnapshotStore` seam (`Stores/`), so the persistence ladder — in-memory →
 file → S3/MinIO → relational — is a one-line swap at registration without touching the store or
@@ -221,15 +234,15 @@ npm run codegen:test   # emitter snapshot tests (UPDATE_SNAPSHOTS=1 to accept ch
 The frontend and CLI import the client as `@arm/client` and regenerate it as part of their own
 builds. The **backend surface** is generated by our own emitter,
 [`src/codegen/typespec-arm-csharp`](src/codegen/typespec-arm-csharp) (plain ESM): records per
-model (request shapes split by visibility, e.g. `MessageWritable`), discriminated unions, one
-request record + `I…Handler : IHandler<Req, Res>` per operation, `MapArmApi()` with routes,
-`.WithValidation` (from `@maxLength` etc.) and declared statuses, a JSON source-gen context and
-`ArmApi.HandlerTypes`. Hand-written runtime pieces live in `Olve.AgentRuntimeManager/Api/`:
-`ArmResults` maps a handler's `Result` to a declared status (a problem tagged `http:404` → 404
-when the operation declares it; else 400 if declared; else the first declared error; else 500),
-`ArmBindingFailures` answers binding
-failures with the contract's error body, and `UseArmApi()` refuses to start if a handler is
-unregistered. The API build compiles the spec itself. The emitter's conformance suite proves the
+model (request shapes split by visibility, e.g. `WidgetWritable`), discriminated unions, and per
+operation a request record, a **response union** with one variant per declared status
+(`SessionsKillResponse.Ok | .NotFound | .Conflict …`) and `I…Handler : IArmHandler<Req, Response>`;
+plus `MapArmApi()` with routes, `.WithArmValidation` (from `@maxLength` etc.) and declared
+statuses, a JSON source-gen context and `ArmApi.HandlerTypes`. A handler returns a variant, so an
+undeclared status doesn't compile. Hand-written runtime pieces live in
+`Olve.AgentRuntimeManager/Api/`: the error envelope (`ArmErrorEnvelope`), `ArmValidation` and
+`ArmBindingFailures` (both answer `INVALID_REQUEST`), the SSE result, and `UseArmApi()`, which
+refuses to start if a handler is unregistered. The API build compiles the spec itself. The emitter's conformance suite proves the
 generated surface matches the spec (see [Build & Test](#build--test)). There is no C# client: the
 backend tests speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
 
@@ -240,8 +253,8 @@ tasks` lists the tasks).
 
 `src/frontend/` is the template's companion UI: a no-framework, **vanilla Web Components** app in
 **TypeScript**, consuming the API through the generated Hey API client. It ships a
-`<message-list>` CRUD view over the backend `Message` feature, proving the client-gen →
-component → API loop end to end.
+read-only `<session-list>` (the newest sessions, kept live from the event stream), proving the
+client-gen → component → API loop end to end.
 
 The stance is deliberate (DESIGN §2): standalone custom elements, ES modules, and a shared
 `BaseElement` that provides ergonomics only — **explicit `render()`, no automatic
@@ -369,14 +382,13 @@ running instance/tooling, and the Claude Code skill that knows the model).
 
 | Component | Role in the template | Docs | GitHub | Instance / tooling | Skill |
 |---|---|---|---|---|---|
-| **Olve.Utilities** stack (Results, Validation, MinimalApi, Utilities) | Baked-in error handling, validation, result→HTTP mapping, `Id<T>`/`EntityStore<T>` primitives | [docs site](https://olivervea.github.io/Olve.Utilities/) | [OliverVea/Olve.Utilities](https://github.com/OliverVea/Olve.Utilities) | NuGet | *(none yet — gap)* |
+| **Olve.Utilities** stack (Results, Validation, Utilities) | Baked-in error handling, validation, `Id<T>`/`EntityStore<T>` primitives | [docs site](https://olivervea.github.io/Olve.Utilities/) | [OliverVea/Olve.Utilities](https://github.com/OliverVea/Olve.Utilities) | NuGet | *(none yet — gap)* |
 | **Olve.Pipelines** | GitOps CD — builds & deploys this repo via `.pipelines/` (see [Deployment](#deployment-gitops)) | in-repo `docs/setup/`, served at `/docs` + `llms.txt` | [OliverVea/Olve.Pipelines](https://github.com/OliverVea/Olve.Pipelines) | [`pipelines-private.ovea.pro`](https://pipelines-private.ovea.pro), beta `pipelines-beta.ovea.pro`, hooks `pipelines-hooks.ovea.pro`; **`pl` CLI** via `GET /download/{asset}` | `ovea-olve-pipelines` |
 | **Olve.Homelab** | Edge chart that owns all Ingress; public exposure is registered there, not in this chart | — | [OliverVea/Olve.Homelab](https://github.com/OliverVea/Olve.Homelab) | — | — |
 | **TUnit · Rocks · TypeSpec · Hey API · mise** | Tests, AOT mocking, API contract, TS client generation, toolchain + tasks | see per-library links below | — | — | — |
 
 Per-library documentation:
 
-- [Olve.MinimalApi](https://olivervea.github.io/Olve.Utilities/src/Olve.MinimalApi/README.html) — Minimal API extensions for result mapping, validation, and JSON conversion
 - [Olve.Results](https://olivervea.github.io/Olve.Utilities/src/Olve.Results/README.html) — Functional result types for non-throwing error handling
 - [Olve.Validation](https://olivervea.github.io/Olve.Utilities/src/Olve.Validation/README.html) — Fluent input validation built on Olve.Results
 - [Olve.Utilities](https://olivervea.github.io/Olve.Utilities/src/Olve.Utilities/README.html) — Meta-package bundling utility libraries including identifiers, collections, and graph types

@@ -10,59 +10,310 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
-using Olve.MinimalApi;
-using Olve.Results;
 
 namespace Fixture.Api;
 
 /// <summary>Input of <c>Shapes_get</c> (GET /api/shapes/{id}).</summary>
 public sealed record ShapesGetRequest(string Id);
 
-public interface IShapesGetHandler : IHandler<ShapesGetRequest, Shape>;
+/// <summary>The responses <c>Shapes_get</c> declares; its handler returns one.</summary>
+public abstract record ShapesGetResponse : IArmResponse
+{
+    private ShapesGetResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>200.</summary>
+    public sealed record Ok(Shape Body) : ShapesGetResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 200;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 200);
+    }
+
+    /// <summary>404.</summary>
+    public sealed record NotFound(ArmErrorEnvelope Body) : ShapesGetResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 404;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 404);
+    }
+
+    public static implicit operator ShapesGetResponse(Shape body) => new Ok(body);
+}
+
+public interface IShapesGetHandler : IArmHandler<ShapesGetRequest, ShapesGetResponse>;
 
 /// <summary>Input of <c>Tags_echo</c> (GET /api/tags).</summary>
 public sealed record TagsEchoRequest(IReadOnlyList<string> Names);
 
+/// <summary>The responses <c>Tags_echo</c> declares; its handler returns one.</summary>
+public abstract record TagsEchoResponse : IArmResponse
+{
+    private TagsEchoResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>200.</summary>
+    public sealed record Ok(IReadOnlyList<string> Body) : TagsEchoResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 200;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 200);
+    }
+}
+
 /// <summary>Echoes a required `explode: false` list (`?names=a,b`).</summary>
-public interface ITagsEchoHandler : IHandler<TagsEchoRequest, IReadOnlyList<string>>;
+public interface ITagsEchoHandler : IArmHandler<TagsEchoRequest, TagsEchoResponse>;
 
 /// <summary>Input of <c>WidgetEvents_stream</c> (GET /api/widget-events).</summary>
 public sealed record WidgetEventsStreamRequest(IReadOnlyList<string>? Type, string? LastEventId);
 
+/// <summary>The responses <c>WidgetEvents_stream</c> declares; its handler returns one.</summary>
+public abstract record WidgetEventsStreamResponse : IArmResponse
+{
+    private WidgetEventsStreamResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>200.</summary>
+    public sealed record Ok(IAsyncEnumerable<ArmSseItem<WidgetEvent>> Events) : WidgetEventsStreamResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 200;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => new ArmServerSentEventsResult<WidgetEvent>(Events);
+    }
+
+    /// <summary>400.</summary>
+    public sealed record BadRequest(ArmErrorEnvelope Body) : WidgetEventsStreamResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 400;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 400);
+    }
+}
+
 /// <summary>Streams widget events; `type` limits them to these event names.</summary>
-public interface IWidgetEventsStreamHandler : IHandler<WidgetEventsStreamRequest, IAsyncEnumerable<ArmSseItem<WidgetEvent>>>;
+public interface IWidgetEventsStreamHandler : IArmHandler<WidgetEventsStreamRequest, WidgetEventsStreamResponse>;
 
 /// <summary>Input of <c>Widgets_create</c> (POST /api/widgets).</summary>
 public sealed record WidgetsCreateRequest(WidgetCreate Body);
 
-public interface IWidgetsCreateHandler : IHandler<WidgetsCreateRequest, Widget>;
+/// <summary>The responses <c>Widgets_create</c> declares; its handler returns one.</summary>
+public abstract record WidgetsCreateResponse : IArmResponse
+{
+    private WidgetsCreateResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>201.</summary>
+    public sealed record Created(Widget Body) : WidgetsCreateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 201;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 201);
+    }
+
+    /// <summary>202.</summary>
+    public sealed record Accepted(Widget Body) : WidgetsCreateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 202;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 202);
+    }
+
+    /// <summary>400.</summary>
+    public sealed record BadRequest(ArmErrorEnvelope Body) : WidgetsCreateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 400;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 400);
+    }
+}
+
+/// <summary>Creates a widget now (201), or accepts it for later (202).</summary>
+public interface IWidgetsCreateHandler : IArmHandler<WidgetsCreateRequest, WidgetsCreateResponse>;
 
 /// <summary>Input of <c>Widgets_delete</c> (DELETE /api/widgets/{id}).</summary>
 public sealed record WidgetsDeleteRequest(string Id);
 
-public interface IWidgetsDeleteHandler : IHandler<WidgetsDeleteRequest>;
+/// <summary>The responses <c>Widgets_delete</c> declares; its handler returns one.</summary>
+public abstract record WidgetsDeleteResponse : IArmResponse
+{
+    private WidgetsDeleteResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>204.</summary>
+    public sealed record NoContent() : WidgetsDeleteResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 204;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.StatusCode(204);
+    }
+
+    /// <summary>404.</summary>
+    public sealed record NotFound(ArmErrorEnvelope Body) : WidgetsDeleteResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 404;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 404);
+    }
+}
+
+public interface IWidgetsDeleteHandler : IArmHandler<WidgetsDeleteRequest, WidgetsDeleteResponse>;
 
 /// <summary>Input of <c>Widgets_list</c> (GET /api/widgets).</summary>
 public sealed record WidgetsListRequest(Color? Color, int? Limit, string? RequestId);
 
+/// <summary>The responses <c>Widgets_list</c> declares; its handler returns one.</summary>
+public abstract record WidgetsListResponse : IArmResponse
+{
+    private WidgetsListResponse()
+    {
+    }
+
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>200.</summary>
+    public sealed record Ok(IReadOnlyList<Widget> Body) : WidgetsListResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 200;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 200);
+    }
+}
+
 /// <summary>List widgets.</summary>
-public interface IWidgetsListHandler : IHandler<WidgetsListRequest, IReadOnlyList<Widget>>;
+public interface IWidgetsListHandler : IArmHandler<WidgetsListRequest, WidgetsListResponse>;
 
 /// <summary>Input of <c>Widgets_update</c> (PUT /api/widgets/{id}).</summary>
 public sealed record WidgetsUpdateRequest(string Id, bool? DryRun, WidgetWritable Body);
 
-public interface IWidgetsUpdateHandler : IHandler<WidgetsUpdateRequest, Widget>;
+/// <summary>The responses <c>Widgets_update</c> declares; its handler returns one.</summary>
+public abstract record WidgetsUpdateResponse : IArmResponse
+{
+    private WidgetsUpdateResponse()
+    {
+    }
 
-/// <summary>Every operation's id, success status and declared error statuses.</summary>
+    /// <inheritdoc />
+    public abstract int Status { get; }
+
+    /// <inheritdoc />
+    public abstract IResult ToHttpResult();
+
+    /// <summary>200.</summary>
+    public sealed record Ok(Widget Body) : WidgetsUpdateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 200;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 200);
+    }
+
+    /// <summary>400.</summary>
+    public sealed record BadRequest(ArmErrorEnvelope Body) : WidgetsUpdateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 400;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 400);
+    }
+
+    /// <summary>404.</summary>
+    public sealed record NotFound(ArmErrorEnvelope Body) : WidgetsUpdateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 404;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 404);
+    }
+
+    /// <summary>409.</summary>
+    public sealed record Conflict(ArmErrorEnvelope Body) : WidgetsUpdateResponse
+    {
+        /// <inheritdoc />
+        public override int Status => 409;
+
+        /// <inheritdoc />
+        public override IResult ToHttpResult() => TypedResults.Json(Body, statusCode: 409);
+    }
+
+    public static implicit operator WidgetsUpdateResponse(Widget body) => new Ok(body);
+}
+
+public interface IWidgetsUpdateHandler : IArmHandler<WidgetsUpdateRequest, WidgetsUpdateResponse>;
+
+/// <summary>Every operation's id, success statuses and declared error statuses.</summary>
 public static class ArmOperations
 {
-    public static readonly ArmOperation ShapesGet = new("Shapes_get", 200, [404]);
-    public static readonly ArmOperation TagsEcho = new("Tags_echo", 200, []);
-    public static readonly ArmOperation WidgetEventsStream = new("WidgetEvents_stream", 200, [400]);
-    public static readonly ArmOperation WidgetsCreate = new("Widgets_create", 200, [400]);
-    public static readonly ArmOperation WidgetsDelete = new("Widgets_delete", 204, [404]);
-    public static readonly ArmOperation WidgetsList = new("Widgets_list", 200, []);
-    public static readonly ArmOperation WidgetsUpdate = new("Widgets_update", 200, [400, 404]);
+    public static readonly ArmOperation ShapesGet = new("Shapes_get", [200], [404]);
+    public static readonly ArmOperation TagsEcho = new("Tags_echo", [200], []);
+    public static readonly ArmOperation WidgetEventsStream = new("WidgetEvents_stream", [200], [400]);
+    public static readonly ArmOperation WidgetsCreate = new("Widgets_create", [201, 202], [400]);
+    public static readonly ArmOperation WidgetsDelete = new("Widgets_delete", [204], [404]);
+    public static readonly ArmOperation WidgetsList = new("Widgets_list", [200], []);
+    public static readonly ArmOperation WidgetsUpdate = new("Widgets_update", [200], [400, 404, 409]);
 }
 
 /// <summary>The route builder of each mapped operation, for app-side conventions (auth, rate limits, …).</summary>
@@ -98,16 +349,16 @@ public static class ArmApi
                 [FromServices] IShapesGetHandler handler,
                 [FromRoute(Name = "id")] string id,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new ShapesGetRequest(id), ct), ArmOperations.ShapesGet))
+                (await handler.HandleAsync(new ShapesGetRequest(id), ct)).ToHttpResult())
             .WithName("Shapes_get")
             .WithMetadata(ArmOperations.ShapesGet)
             .Produces<Shape>(200)
-            .Produces<IReadOnlyList<ResultProblem>>(404),
+            .Produces<ArmErrorEnvelope>(404),
         TagsEcho = app.MapGet("/api/tags", async (
                 [FromServices] ITagsEchoHandler handler,
                 [FromQuery(Name = "names")] string names,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new TagsEchoRequest(ArmQuery.List(names)), ct), ArmOperations.TagsEcho))
+                (await handler.HandleAsync(new TagsEchoRequest(ArmQuery.List(names)), ct)).ToHttpResult())
             .WithName("Tags_echo")
             .WithMetadata(ArmOperations.TagsEcho)
             .Produces<IReadOnlyList<string>>(200),
@@ -116,37 +367,38 @@ public static class ArmApi
                 [FromQuery(Name = "type")] string? type,
                 [FromHeader(Name = "Last-Event-ID")] string? lastEventId,
                 CancellationToken ct) =>
-                ArmResults.Stream(await handler.HandleAsync(new WidgetEventsStreamRequest(ArmQuery.List(type), lastEventId), ct), ArmOperations.WidgetEventsStream))
+                (await handler.HandleAsync(new WidgetEventsStreamRequest(ArmQuery.List(type), lastEventId), ct)).ToHttpResult())
             .WithName("WidgetEvents_stream")
             .WithMetadata(ArmOperations.WidgetEventsStream)
             .Produces<WidgetEvent>(200, "text/event-stream")
-            .Produces<IReadOnlyList<ResultProblem>>(400),
+            .Produces<ArmErrorEnvelope>(400),
         WidgetsCreate = app.MapPost("/api/widgets", async (
                 [FromServices] IWidgetsCreateHandler handler,
                 [FromBody] WidgetCreate body,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new WidgetsCreateRequest(body), ct), ArmOperations.WidgetsCreate))
+                (await handler.HandleAsync(new WidgetsCreateRequest(body), ct)).ToHttpResult())
             .WithName("Widgets_create")
             .WithMetadata(ArmOperations.WidgetsCreate)
-            .WithValidation<WidgetCreate, WidgetCreateValidator>()
-            .Produces<Widget>(200)
-            .Produces<IReadOnlyList<ResultProblem>>(400),
+            .WithArmValidation<WidgetCreate, WidgetCreateValidator>(ArmOperations.WidgetsCreate)
+            .Produces<Widget>(201)
+            .Produces<Widget>(202)
+            .Produces<ArmErrorEnvelope>(400),
         WidgetsDelete = app.MapDelete("/api/widgets/{id}", async (
                 [FromServices] IWidgetsDeleteHandler handler,
                 [FromRoute(Name = "id")] string id,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.RunAsync(new WidgetsDeleteRequest(id), ct), ArmOperations.WidgetsDelete))
+                (await handler.HandleAsync(new WidgetsDeleteRequest(id), ct)).ToHttpResult())
             .WithName("Widgets_delete")
             .WithMetadata(ArmOperations.WidgetsDelete)
             .Produces(204)
-            .Produces<IReadOnlyList<ResultProblem>>(404),
+            .Produces<ArmErrorEnvelope>(404),
         WidgetsList = app.MapGet("/api/widgets", async (
                 [FromServices] IWidgetsListHandler handler,
                 [FromQuery(Name = "color")] string? color,
                 [FromQuery(Name = "limit")] int? limit,
                 [FromHeader(Name = "x-request-id")] string? requestId,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new WidgetsListRequest(color is null ? null : ArmParameters.ParseColor(color, "color"), limit, requestId), ct), ArmOperations.WidgetsList))
+                (await handler.HandleAsync(new WidgetsListRequest(color is null ? null : ArmParameters.ParseColor(color, "color"), limit, requestId), ct)).ToHttpResult())
             .WithName("Widgets_list")
             .WithMetadata(ArmOperations.WidgetsList)
             .Produces<IReadOnlyList<Widget>>(200),
@@ -156,13 +408,14 @@ public static class ArmApi
                 [FromQuery(Name = "dryRun")] bool? dryRun,
                 [FromBody] WidgetWritable body,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new WidgetsUpdateRequest(id, dryRun, body), ct), ArmOperations.WidgetsUpdate))
+                (await handler.HandleAsync(new WidgetsUpdateRequest(id, dryRun, body), ct)).ToHttpResult())
             .WithName("Widgets_update")
             .WithMetadata(ArmOperations.WidgetsUpdate)
-            .WithValidation<WidgetWritable, WidgetWritableValidator>()
+            .WithArmValidation<WidgetWritable, WidgetWritableValidator>(ArmOperations.WidgetsUpdate)
             .Produces<Widget>(200)
-            .Produces<IReadOnlyList<ResultProblem>>(400)
-            .Produces<IReadOnlyList<ResultProblem>>(404),
+            .Produces<ArmErrorEnvelope>(400)
+            .Produces<ArmErrorEnvelope>(404)
+            .Produces<ArmErrorEnvelope>(409),
     };
 }
 

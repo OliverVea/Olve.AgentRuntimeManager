@@ -1,15 +1,14 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Olve.Results;
 
 namespace Arm.Conformance;
 
 /// <summary>
 /// The rest of the generated surface: the operation table matches the contract, parameters bind
-/// from where the contract puts them, <see cref="ArmResults"/>' status rules (including the
-/// undeclared cases the response cases can't validate), binding failures on operations without a
-/// declared 400, and the startup check for missing handlers.
+/// from where the contract puts them, the response unions (variant statuses, the error envelope),
+/// binding failures on operations without a declared 400, and the startup check for missing
+/// handlers.
 /// </summary>
 [ClassDataSource<FixtureApp>(Shared = SharedType.PerAssembly)]
 public class GeneratedSurfaceTests(FixtureApp fixture)
@@ -21,7 +20,7 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
     public async Task OperationTable_MatchesContractStatuses()
     {
         var generated = GeneratedOperations
-            .Select(o => $"{o.OperationId}: {string.Join(",", o.ErrorStatuses.Prepend(o.SuccessStatus).Order())}")
+            .Select(o => $"{o.OperationId}: {string.Join(",", o.SuccessStatuses.Concat(o.ErrorStatuses).Order())}")
             .Order()
             .ToList();
         var spec = OpenApiContract.Operations
@@ -94,7 +93,7 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
         using var response = await fixture.CreateClient().PostAsync("/api/widgets", ResponseConformanceTests.Json(body));
         var widget = await response.Content.ReadFromJsonAsync<JsonElement>();
 
-        await Assert.That((int)response.StatusCode).IsEqualTo(200);
+        await Assert.That((int)response.StatusCode).IsEqualTo(201);
         await Assert.That(widget.GetProperty("shape").GetProperty("kind").GetString()).IsEqualTo("square");
         await Assert.That(widget.GetProperty("shape").GetProperty("side").GetDouble()).IsEqualTo(3);
         await Assert.That(widget.GetProperty("color").GetString()).IsEqualTo("red");
@@ -140,13 +139,44 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
     }
 
     [Test]
-    public async Task HandlerFailure_OnOperationDeclaringNoErrors_Is500WithProblems()
+    public async Task ErrorResponse_IsTheEnvelopeWithTheHandlersCode()
     {
-        using var response = await fixture.CreateClient().GetAsync("/api/widgets?limit=-1");
-        var problems = await response.Content.ReadFromJsonAsync<JsonElement>();
+        using var response = await fixture.CreateClient().PutAsync(
+            $"/api/widgets/{FixtureHandlers.Conflict}", ResponseConformanceTests.Json(ResponseConformanceTests.WidgetBody()));
+        var error = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error");
 
-        await Assert.That((int)response.StatusCode).IsEqualTo(500);
-        await Assert.That(problems[0].GetProperty("message").GetString()).IsEqualTo("'limit' cannot be negative.");
+        await Assert.That((int)response.StatusCode).IsEqualTo(409);
+        await Assert.That(error.GetProperty("code").GetString()).IsEqualTo("WIDGET_LOCKED");
+        await Assert.That(error.GetProperty("message").GetString()).IsEqualTo("'conflict' failed with WIDGET_LOCKED.");
+        await Assert.That(error.GetProperty("details").EnumerateObject().Count()).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ValidationFailures_ListEveryProblemInDetails()
+    {
+        var body = ResponseConformanceTests.WidgetBody(name: new string('x', 51), extra: """ "weight":101, """);
+
+        using var response = await fixture.CreateClient().PostAsync("/api/widgets", ResponseConformanceTests.Json(body));
+        var error = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error");
+
+        await Assert.That((int)response.StatusCode).IsEqualTo(400);
+        await Assert.That(error.GetProperty("code").GetString()).IsEqualTo(ArmErrors.InvalidRequest);
+        var problems = error.GetProperty("details").GetProperty("problems");
+        await Assert.That(problems.EnumerateArray().Select(p => p.GetProperty("message").GetString()!).ToList())
+            .IsEquivalentTo(["'name' cannot exceed 50 characters.", "'weight' cannot exceed 100."]);
+        await Assert.That(error.GetProperty("message").GetString()).IsEqualTo(problems[0].GetProperty("message").GetString());
+    }
+
+    [Test]
+    public async Task ResponseVariants_KnowTheirStatus()
+    {
+        WidgetsCreateResponse created = new WidgetsCreateResponse.Created(FixtureHandlers.SampleWidget());
+        WidgetsCreateResponse accepted = new WidgetsCreateResponse.Accepted(FixtureHandlers.SampleWidget());
+        WidgetsUpdateResponse implicitOk = FixtureHandlers.SampleWidget();
+
+        await Assert.That(created.Status).IsEqualTo(201);
+        await Assert.That(accepted.Status).IsEqualTo(202);
+        await Assert.That(implicitOk).IsTypeOf<WidgetsUpdateResponse.Ok>();
     }
 
     [Test]
@@ -165,25 +195,10 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
     public async Task BindingFailure_OnOperationWithDeclared400_ExplainsTheFailure()
     {
         using var response = await fixture.CreateClient().PostAsync("/api/widgets", ResponseConformanceTests.Json("{"));
-        var problems = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var error = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error");
 
         await Assert.That((int)response.StatusCode).IsEqualTo(400);
-        await Assert.That(problems.GetArrayLength()).IsEqualTo(1);
-        await Assert.That(problems[0].GetProperty("message").GetString()).IsNotNull().And.IsNotEmpty();
-    }
-
-    [Test]
-    [Arguments(new[] { "http:404" }, new[] { 400, 404 }, 404)]
-    [Arguments(new[] { "http:409" }, new[] { 400, 404 }, 400)]
-    [Arguments(new[] { "http:409" }, new[] { 404 }, 404)]
-    [Arguments(new[] { "other", "http:404" }, new[] { 400, 404 }, 404)]
-    [Arguments(new[] { "http:x" }, new[] { 404, 400 }, 400)]
-    [Arguments(new string[0], new int[0], 500)]
-    public async Task StatusFor_FollowsTheDeclaredStatusRules(string[] tags, int[] declared, int expected)
-    {
-        var operation = new ArmOperation("Op", 200, declared);
-        var problems = new[] { new ResultProblem("p") { Tags = tags } };
-
-        await Assert.That(ArmResults.StatusFor(problems, operation)).IsEqualTo(expected);
+        await Assert.That(error.GetProperty("code").GetString()).IsEqualTo(ArmErrors.InvalidRequest);
+        await Assert.That(error.GetProperty("message").GetString()).IsNotNull().And.IsNotEmpty();
     }
 }

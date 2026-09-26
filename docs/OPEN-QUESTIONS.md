@@ -11,14 +11,20 @@ References: [`SPEC.md`](SPEC.md), [`MILESTONES.md`](MILESTONES.md), [`SPEC-FIRST
 ## A. Architecture
 
 ### A1. .NET version + the `QUERY` verb
-- **Leaning (2026-08-14):** stay on .NET 10 minimal API; route `QUERY` via `MapMethods`; keep
-  `queryMethod` configurable (SPEC).
+- **Leaning (2026-09-26):** stay on .NET 10 minimal API. **No `QUERY`** for now: searches are
+  `POST /api/<resource>/search`, with no `queryMethod` switch. TypeSpec has no `QUERY` verb and
+  Hey API 0.99 silently drops OpenAPI 3.2 `query` operations (spike, M4). `QUERY` is in VISION.
 - **Note (2026-09-25):** .NET 11 (Nov 2026) adds native `QUERY` and OpenAPI 3.2 SSE output.
   Revisit the bump when it ships.
 
-### A2. Error envelope — open
-SPEC mandates `{ "error": { code, message, details } }`. Does Olve.MinimalApi emit this, or do
-we need a thin Result→HTTP mapping layer + error-code enum? Verify before M4.
+### A2. Error envelope
+- **Decided (2026-09-26, M4):** handlers return typed responses, not `Result`s: the emitter
+  generates one response union per operation from its declared statuses
+  (`SessionsKillResponse.Ok | .NotFound | .Conflict …`), error variants carry the runtime's
+  `ArmErrorEnvelope`, and an undeclared status can't compile. Domain code below the handlers
+  returns typed outcomes (`KillOutcome`, …) that handlers map explicitly. Binding and validation
+  failures are `INVALID_REQUEST` (every problem in `details.problems`). Olve.MinimalApi is no
+  longer used; Olve.Results stays for validation (Olve.Validation).
 
 ### A3. Auth model — open
 SPEC: zero-config local HMAC tokens, session-scoped agent tokens, roles (operator approves).
@@ -93,7 +99,7 @@ From an event-type review; general agreement, details open:
 - **B1. Storage layout** — resolve with A5.
 - **B2. Config location / filename** — for the host-process deployment (A4).
 - **B3. API versioning** — `/api/v1/…` prefix vs header; TypeSpec `@versioned` (M15).
-- **B4. `queryMethod` default** — confirm it stays `"query"` (A1).
+- **B4. `queryMethod` — dropped (2026-09-26):** searches are `POST …/search` only (A1).
 
 ---
 

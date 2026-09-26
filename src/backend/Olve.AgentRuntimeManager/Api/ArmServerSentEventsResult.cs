@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -7,34 +6,6 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 
 namespace Olve.AgentRuntimeManager.Api;
-
-/// <summary>
-/// An event of a generated SSE event union (an <c>@events</c> union in the contract). The event
-/// name on the wire is its <see cref="EventType"/>, which is also the <c>type</c> of its data.
-/// </summary>
-public interface IArmEvent
-{
-    /// <summary>The SSE event name, e.g. <c>message.created</c>.</summary>
-    string EventType { get; }
-}
-
-/// <summary>
-/// One event an SSE operation's handler yields: its data and its SSE id (<c>null</c> sends it
-/// without one, e.g. heartbeats, so clients' <c>Last-Event-ID</c> never points at it).
-/// </summary>
-public readonly record struct ArmSseItem<T>(T Data, string? Id = null);
-
-/// <summary>Query-string helpers the generated binding uses.</summary>
-public static class ArmQuery
-{
-    /// <summary>
-    /// An <c>explode: false</c> list (<c>?event=a,b</c>): comma-separated, entries trimmed, empty
-    /// entries dropped. Absent stays null.
-    /// </summary>
-    [return: NotNullIfNotNull(nameof(value))]
-    public static IReadOnlyList<string>? List(string? value) =>
-        value?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-}
 
 /// <summary>
 /// Writes a handler's events as <c>text/event-stream</c> (<see cref="TypedResults.ServerSentEvents{T}(IAsyncEnumerable{SseItem{T}})"/>):

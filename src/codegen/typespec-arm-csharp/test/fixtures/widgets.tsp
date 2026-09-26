@@ -61,24 +61,42 @@ model Widget {
   shape: Shape;
 }
 
-model ResultProblem {
+/** The error body (maps onto the runtime's ArmErrorEnvelope). */
+model ErrorEnvelope {
+  error: ErrorBody;
+}
+
+model ErrorBody {
+  code: string;
   message: string;
-  tags: string[] | null;
-  severity: int32;
-  source: string | null;
-  exceptionSummary: string | null;
+  details: ErrorDetails;
+}
+
+model ErrorDetails {
+  problems?: ErrorProblem[];
+}
+
+model ErrorProblem {
+  code: string;
+  message: string;
 }
 
 @error
 model BadRequest {
   @statusCode status: 400;
-  @body problems: ResultProblem[];
+  @body error: ErrorEnvelope;
 }
 
 @error
 model NotFound {
   @statusCode status: 404;
-  @body problems: ResultProblem[];
+  @body error: ErrorEnvelope;
+}
+
+@error
+model Conflict {
+  @statusCode status: 409;
+  @body error: ErrorEnvelope;
 }
 
 @route("/widgets")
@@ -90,12 +108,17 @@ interface Widgets {
     @header("x-request-id") requestId?: string,
   ): Widget[];
 
-  @post create(@body body: Widget): Widget | BadRequest;
+  /** Creates a widget now (201), or accepts it for later (202). */
+  @post create(@body body: Widget):
+    | (CreatedResponse & { @body body: Widget })
+    | (AcceptedResponse & { @body body: Widget })
+    | BadRequest;
 
   @put update(@path id: string, @query dryRun?: boolean, @body body: Widget):
     | Widget
     | BadRequest
-    | NotFound;
+    | NotFound
+    | Conflict;
 
   @delete delete(@path id: string): NoContentResponse | NotFound;
 }

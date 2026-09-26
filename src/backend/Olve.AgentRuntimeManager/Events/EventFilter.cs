@@ -5,7 +5,7 @@ namespace Olve.AgentRuntimeManager.Events;
 
 /// <summary>
 /// The server-side <c>event</c> / <c>exclude_event</c> filter of <c>GET /api/events</c>. Each entry
-/// is an event name (<c>message.created</c>) or a namespace (<c>message.*</c>); an event passes
+/// is an event name (<c>session.created</c>) or a namespace (<c>session.*</c>); an event passes
 /// if it matches an include entry (or there are none) and no exclude entry.
 /// </summary>
 /// <remarks>
@@ -43,7 +43,7 @@ public sealed class EventFilter
             foreach (var entry in entries.Where(e => !FilterableTypes.Any(type => Matches(e, type))))
             {
                 problems.Add(new ResultProblem(
-                    "'{0}' has unknown event '{1}'. Known events: {2} (or a namespace such as 'message.*').",
+                    "'{0}' has unknown event '{1}'. Known events: {2} (or a namespace such as 'session.*').",
                     parameter, entry, string.Join(", ", FilterableTypes)));
             }
         }

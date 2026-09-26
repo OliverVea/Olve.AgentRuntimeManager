@@ -4,7 +4,7 @@ import { type Command, type CommandGroup, type OptionSpec, globalOptions } from 
 function optionLines(options: Record<string, OptionSpec>): string {
   const entries = Object.entries(options).map(([name, spec]) => {
     const flag = `${spec.short ? `-${spec.short}, ` : "    "}--${name}${spec.type === "string" ? ` ${spec.valueName ?? "VALUE"}` : ""}`;
-    return [flag, spec.description] as const;
+    return [flag, spec.multiple ? `${spec.description} (repeatable)` : spec.description] as const;
   });
   return indent(formatKeyValue(entries));
 }
@@ -20,7 +20,8 @@ const footer = `Environment:
   ARM_URL     API base URL (overridden by --url)
   ARM_TOKEN   Bearer token (overridden by --token)
 
-Exit codes: 0 success, 1 API or network error, 2 usage error.
+Exit codes: 0 success, 1 other API error or network error, 2 usage error,
+            3 not found (404), 4 conflict (409), 5 unavailable (503: queue full, draining).
 Errors go to stderr; with --json the error body is printed there as JSON.`;
 
 export function rootHelp(groups: readonly CommandGroup[], defaultUrl: string): string {

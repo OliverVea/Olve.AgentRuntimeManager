@@ -1,7 +1,9 @@
 import { type ArmEventData, eventsStream } from "@arm/client";
 import type { Client } from "@arm/client/client";
 import { ApiError, NetworkError } from "../errors";
-import type { CommandGroup, OptionValues } from "../registry";
+import { commaList } from "../options";
+import { truncate } from "../output";
+import type { CommandGroup } from "../registry";
 
 /** One received event: the SSE name and id (none for heartbeats) and its typed data. */
 export type ReceivedEvent = {
@@ -126,22 +128,32 @@ export async function tailEvents(options: {
   if (failure) throw failure;
 }
 
-/** `12:03:04 message.created <messageId> "text"`: one readable line per event (local time). */
+/** `12:03:04 session.created <sessionId> "prompt"`: one readable line per event (local time). */
 export function formatEvent(e: ReceivedEvent): string {
   const data = e.data;
-  const time = clock(data.at);
+  const head = `${clock(data.at)} ${data.type}`;
   switch (data.type) {
     case "heartbeat":
-      return `${time} heartbeat`;
-    case "message.created":
-    case "message.updated":
-      return `${time} ${data.type} ${data.messageId} ${JSON.stringify(data.message.text)}`;
-    case "message.deleted":
-      return `${time} ${data.type} ${data.messageId}`;
+      return head;
+    case "session.created":
+      return `${head} ${data.sessionId} ${JSON.stringify(truncate(data.session.prompt, 60))}`;
+    case "session.queued":
+      return `${head} ${data.sessionId} position=${data.position}`;
+    case "session.started":
+      return `${head} ${data.sessionId} providerSessionId=${data.providerSessionId}`;
+    case "session.waiting":
+    case "session.resumed":
+      return `${head} ${data.sessionId}`;
+    case "session.completed":
+      return `${head} ${data.sessionId} exitCode=${data.exitCode}${data.summary ? ` ${JSON.stringify(truncate(data.summary, 60))}` : ""}`;
+    case "session.failed":
+      return `${head} ${data.sessionId} ${JSON.stringify(truncate(data.error, 60))}`;
+    case "session.killed":
+      return `${head} ${data.sessionId} source=${data.source}${data.reason ? ` ${JSON.stringify(truncate(data.reason, 60))}` : ""}`;
     default: {
       // An event this CLI doesn't know yet: its name and the rest of its data.
-      const { type, at: _at, ...rest } = data as { type?: string; at?: string };
-      return `${time} ${type ?? e.event} ${JSON.stringify(rest)}`;
+      const { type, at, ...rest } = data as { type?: string; at?: string };
+      return `${clock(at)} ${type ?? e.event} ${JSON.stringify(rest)}`;
     }
   }
 }
@@ -155,16 +167,6 @@ function clock(at: string | undefined): string {
   const date = at ? new Date(at) : undefined;
   if (!date || Number.isNaN(date.getTime())) return "--:--:--";
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
-}
-
-function list(options: OptionValues, name: string): string[] | undefined {
-  const raw = options[name];
-  if (raw === undefined) return undefined;
-  const entries = String(raw)
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return entries.length ? entries : undefined;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -208,7 +210,7 @@ export const eventsGroup: CommandGroup = {
       options: {
         event: {
           type: "string",
-          description: "Only these events, comma-separated; 'message.*' matches a namespace",
+          description: "Only these events, comma-separated; 'session.*' matches a namespace",
           valueName: "X,Y",
         },
         "exclude-event": {
@@ -225,8 +227,8 @@ export const eventsGroup: CommandGroup = {
       async run({ options, client, json, stdout, stderr, signal }) {
         await tailEvents({
           client,
-          event: list(options, "event"),
-          excludeEvent: list(options, "exclude-event"),
+          event: commaList(options, "event"),
+          excludeEvent: commaList(options, "exclude-event"),
           lastEventId: (options["last-event-id"] as string | undefined) || undefined,
           signal,
           onEvent: (e) => {

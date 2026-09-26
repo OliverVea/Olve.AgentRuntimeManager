@@ -32,13 +32,17 @@ export type Io = {
   onStreaming?(): void;
 };
 
-type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string }>;
+type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }>;
 
 function toParseArgs(options: Record<string, OptionSpec>): ParseArgsOptions {
   return Object.fromEntries(
     Object.entries(options).map(([name, spec]) => [
       name,
-      spec.short ? { type: spec.type, short: spec.short } : { type: spec.type },
+      {
+        type: spec.type,
+        ...(spec.short ? { short: spec.short } : {}),
+        ...(spec.multiple ? { multiple: true } : {}),
+      },
     ]),
   );
 }
@@ -173,7 +177,7 @@ export async function run(
     if (error instanceof UsageError) return usage(new UsageError(error.message, error.help ?? hint));
     if (error instanceof ApiError || error instanceof NetworkError) {
       io.stderr(wantsJson ? formatJson(error.toJSON()) : `error: ${error.message}`);
-      return ExitCode.Failure;
+      return error.exitCode;
     }
     const message = error instanceof Error ? error.message : String(error);
     io.stderr(
@@ -185,7 +189,7 @@ export async function run(
   }
 }
 
-/** How the command is invoked: `arm message list`, or `arm events` for a group's default command. */
+/** How the command is invoked: `arm session list`, or `arm events` for a group's default command. */
 export function commandPath(group: CommandGroup, command: { name: string }): string {
   return group.defaultCommand === command.name ? `arm ${group.name}` : `arm ${group.name} ${command.name}`;
 }

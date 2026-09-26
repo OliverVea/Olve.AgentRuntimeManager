@@ -1,5 +1,4 @@
 using Olve.AgentRuntimeManager.Api;
-using Olve.Results;
 
 namespace Olve.AgentRuntimeManager.Configuration;
 
@@ -11,12 +10,12 @@ namespace Olve.AgentRuntimeManager.Configuration;
 /// </summary>
 public sealed class GetAuthConfigHandler(IConfiguration config) : IAuthConfigGetHandler
 {
-    public Task<Result<FrontendAuthConfig>> HandleAsync(AuthConfigGetRequest request, CancellationToken cancellationToken)
+    public Task<AuthConfigGetResponse> HandleAsync(AuthConfigGetRequest request, CancellationToken cancellationToken)
     {
         // Login runs against the SPA's own public provider (separate client from the confidential
         // one used for machine tokens). Fall back to the resource authority if no dedicated
         // frontend provider is configured (e.g. local dev). `offline_access` yields a refresh token.
-        return Task.FromResult<Result<FrontendAuthConfig>>(new FrontendAuthConfig
+        return Task.FromResult<AuthConfigGetResponse>(new FrontendAuthConfig
         {
             Authority = config["Auth:Frontend:Authority"] ?? config["Auth:Authority"],
             ClientId = config["Auth:Frontend:ClientId"],

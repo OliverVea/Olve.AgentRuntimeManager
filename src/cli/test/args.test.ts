@@ -4,14 +4,15 @@ import { groups } from "../src/commands";
 import { allOptions } from "../src/registry";
 import { fakeFetch, runCli } from "./helpers";
 
-const page = { items: [], pageNumber: 1, pageSize: 20, totalCount: 0 };
+const page = { items: [], total: 0, limit: 20, offset: 0 };
 
 describe("help and version", () => {
   test("--help prints root help to stdout, exit 0", async () => {
     const r = await runCli(["--help"]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("arm <group> <command>");
-    expect(r.stdout).toContain("message");
+    expect(r.stdout).toContain("session");
+    expect(r.stdout).toContain("4 conflict (409)");
     expect(r.stderr).toBe("");
   });
 
@@ -33,40 +34,41 @@ describe("help and version", () => {
   });
 
   test("group --help lists the group's commands", async () => {
-    const r = await runCli(["message", "--help"]);
+    const r = await runCli(["session", "--help"]);
     expect(r.code).toBe(0);
-    for (const verb of ["list", "get", "create", "update", "delete"]) expect(r.stdout).toContain(verb);
+    for (const verb of ["create", "list", "get", "kill", "delete"]) expect(r.stdout).toContain(verb);
   });
 
   test("group without a command prints group help to stderr, exit 2", async () => {
-    const r = await runCli(["message"]);
+    const r = await runCli(["session"]);
     expect(r.code).toBe(2);
-    expect(r.stderr).toContain("arm message list");
+    expect(r.stderr).toContain("arm session list");
   });
 
   test("command --help shows its arguments and options, even with missing args", async () => {
-    const r = await runCli(["message", "update", "--help"]);
+    const r = await runCli(["session", "kill", "--help"]);
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("arm message update <id> <text>");
-    const list = await runCli(["message", "list", "-h"]);
-    expect(list.stdout).toContain("--page-size N");
+    expect(r.stdout).toContain("arm session kill <id> [options]");
+    expect(r.stdout).toContain("--reason TEXT");
+    const create = await runCli(["session", "create", "-h"]);
+    expect(create.stdout).toContain("-p, --prompt TEXT");
+    expect(create.stdout).toContain("--tag K:V");
+    expect(create.stdout).toContain("(repeatable)");
   });
 });
 
 describe("usage errors exit 2", () => {
   const cases: Array<[string, string[], string]> = [
     ["unknown group", ["nope"], "unknown command group 'nope'"],
-    ["unknown command", ["message", "frob"], "unknown command 'message frob'"],
-    ["unknown option", ["message", "list", "--bogus"], "--bogus"],
-    ["option of another command", ["message", "get", "x", "--page", "2"], "--page"],
-    ["missing argument", ["message", "get"], "missing argument <id>"],
-    ["missing second argument", ["message", "update", "id"], "missing argument <text>"],
-    ["extra argument", ["message", "create", "a", "b"], "unexpected argument 'b'"],
-    ["non-numeric page", ["message", "list", "--page", "two"], "--page must be a positive integer"],
-    ["zero page size", ["message", "list", "--page-size", "0"], "--page-size must be a positive integer"],
-    ["json and pretty", ["message", "list", "--json", "--pretty"], "mutually exclusive"],
-    ["invalid url", ["message", "list", "--url", "ftp://x"], "invalid URL"],
-    ["missing option value", ["message", "list", "--url"], "--url"],
+    ["unknown command", ["session", "frob"], "unknown command 'session frob'"],
+    ["unknown option", ["session", "list", "--bogus"], "--bogus"],
+    ["option of another command", ["session", "get", "x", "--offset", "2"], "--offset"],
+    ["missing argument", ["session", "get"], "missing argument <id>"],
+    ["extra argument", ["session", "get", "a", "b"], "unexpected argument 'b'"],
+    ["non-numeric limit", ["session", "list", "--limit", "two"], "--limit must be an integer from 1 to 100"],
+    ["json and pretty", ["session", "list", "--json", "--pretty"], "mutually exclusive"],
+    ["invalid url", ["session", "list", "--url", "ftp://x"], "invalid URL"],
+    ["missing option value", ["session", "list", "--url"], "--url"],
   ];
   for (const [name, argv, message] of cases) {
     test(name, async () => {
@@ -78,7 +80,7 @@ describe("usage errors exit 2", () => {
   }
 
   test("with --json the usage error is a JSON envelope", async () => {
-    const r = await runCli(["message", "get", "--json"]);
+    const r = await runCli(["session", "get", "--json"]);
     expect(r.code).toBe(2);
     expect(JSON.parse(r.stderr)).toEqual({
       error: { code: "USAGE", message: "missing argument <id> (expected <id>)", details: null },
@@ -89,42 +91,42 @@ describe("usage errors exit 2", () => {
 describe("option parsing", () => {
   test("global options may come before the group, in --opt=value form", async () => {
     const { fetch, requests } = fakeFetch(() => ({ body: page }));
-    const r = await runCli(["--url=http://a.test:1", "--json", "message", "list"], { fetch });
+    const r = await runCli(["--url=http://a.test:1", "--json", "session", "list"], { fetch });
     expect(r.code).toBe(0);
-    expect(requests[0]!.url).toBe("http://a.test:1/api/messages");
+    expect(requests[0]!.url).toBe("http://a.test:1/api/sessions/search");
   });
 
   test("an option value is never taken for the group or command", async () => {
     const { fetch, requests } = fakeFetch(() => ({ body: page }));
-    const r = await runCli(["--token", "message", "message", "list"], { fetch });
+    const r = await runCli(["--token", "session", "session", "list"], { fetch });
     expect(r.code).toBe(0);
-    expect(requests[0]!.headers.get("authorization")).toBe("Bearer message");
+    expect(requests[0]!.headers.get("authorization")).toBe("Bearer session");
   });
 
-  test("'--' lets text start with a dash", async () => {
-    const { fetch, requests } = fakeFetch((req) => ({ body: { id: "1", ...(req.body as object) } }));
-    const r = await runCli(["message", "create", "--", "-5 degrees"], { fetch });
+  test("'--' lets an argument start with a dash", async () => {
+    const { fetch, requests } = fakeFetch(() => ({ body: { id: "-1" } }));
+    const r = await runCli(["session", "get", "--", "-1"], { fetch });
     expect(r.code).toBe(0);
-    expect(requests[0]!.body).toEqual({ text: "-5 degrees" });
+    expect(requests[0]!.url).toBe(`${DEFAULT_URL}/api/sessions/-1`);
   });
 
   test("URL precedence: --url over ARM_URL over the default", async () => {
     const { fetch, requests } = fakeFetch(() => ({ body: page }));
-    await runCli(["message", "list"], { fetch });
-    await runCli(["message", "list"], { fetch, env: { ARM_URL: "http://env.test/" } });
-    await runCli(["message", "list", "--url", "http://flag.test"], { fetch, env: { ARM_URL: "http://env.test" } });
+    await runCli(["session", "list"], { fetch });
+    await runCli(["session", "list"], { fetch, env: { ARM_URL: "http://env.test/" } });
+    await runCli(["session", "list", "--url", "http://flag.test"], { fetch, env: { ARM_URL: "http://env.test" } });
     expect(requests.map((r) => r.url)).toEqual([
-      `${DEFAULT_URL}/api/messages`,
-      "http://env.test/api/messages",
-      "http://flag.test/api/messages",
+      `${DEFAULT_URL}/api/sessions/search`,
+      "http://env.test/api/sessions/search",
+      "http://flag.test/api/sessions/search",
     ]);
   });
 
   test("token precedence: --token over ARM_TOKEN; none means no Authorization header", async () => {
     const { fetch, requests } = fakeFetch(() => ({ body: page }));
-    await runCli(["message", "list"], { fetch });
-    await runCli(["message", "list"], { fetch, env: { ARM_TOKEN: "env-tok" } });
-    await runCli(["message", "list", "--token", "flag-tok"], { fetch, env: { ARM_TOKEN: "env-tok" } });
+    await runCli(["session", "list"], { fetch });
+    await runCli(["session", "list"], { fetch, env: { ARM_TOKEN: "env-tok" } });
+    await runCli(["session", "list", "--token", "flag-tok"], { fetch, env: { ARM_TOKEN: "env-tok" } });
     expect(requests.map((r) => r.headers.get("authorization"))).toEqual([
       null,
       "Bearer env-tok",

@@ -12,28 +12,28 @@ public class EventFilterTests
     }
 
     [Test]
-    [Arguments(null, null, "message.created", true)]
-    [Arguments(new[] { "message.created" }, null, "message.created", true)]
-    [Arguments(new[] { "message.created" }, null, "message.deleted", false)]
-    [Arguments(new[] { "message.*" }, null, "message.deleted", true)]
-    [Arguments(null, new[] { "message.deleted" }, "message.deleted", false)]
-    [Arguments(null, new[] { "message.deleted" }, "message.created", true)]
-    [Arguments(new[] { "message.*" }, new[] { "message.updated" }, "message.updated", false)]
-    [Arguments(new[] { "message.*" }, new[] { "message.updated" }, "message.created", true)]
-    [Arguments(new[] { "message.created" }, new[] { "message.*" }, "message.created", false)]
+    [Arguments(null, null, "session.created", true)]
+    [Arguments(new[] { "session.created" }, null, "session.created", true)]
+    [Arguments(new[] { "session.created" }, null, "session.killed", false)]
+    [Arguments(new[] { "session.*" }, null, "session.killed", true)]
+    [Arguments(null, new[] { "session.killed" }, "session.killed", false)]
+    [Arguments(null, new[] { "session.killed" }, "session.created", true)]
+    [Arguments(new[] { "session.*" }, new[] { "session.started" }, "session.started", false)]
+    [Arguments(new[] { "session.*" }, new[] { "session.started" }, "session.created", true)]
+    [Arguments(new[] { "session.created" }, new[] { "session.*" }, "session.created", false)]
     public async Task Matches_IncludesThenExcludes(string[]? include, string[]? exclude, string eventType, bool expected) =>
         await Assert.That(Filter(include, exclude).Matches(eventType)).IsEqualTo(expected);
 
     [Test]
-    [Arguments(new[] { "message.created" }, null)]
-    [Arguments(null, new[] { "message.*" })]
+    [Arguments(new[] { "session.created" }, null)]
+    [Arguments(null, new[] { "session.*" })]
     public async Task Heartbeats_AlwaysPass(string[]? include, string[]? exclude) =>
         await Assert.That(Filter(include, exclude).Matches("heartbeat")).IsTrue();
 
     [Test]
-    [Arguments("message.exploded")]
-    [Arguments("messages.*")]
-    [Arguments("message")]
+    [Arguments("session.exploded")]
+    [Arguments("sessions.*")]
+    [Arguments("session")]
     [Arguments(".*")]
     [Arguments("*")]
     [Arguments("heartbeat")]
@@ -46,7 +46,7 @@ public class EventFilterTests
     [Test]
     public async Task EveryUnknownName_IsReported()
     {
-        var result = EventFilter.Parse(["nope", "message.created"], ["nada"]);
+        var result = EventFilter.Parse(["nope", "session.created"], ["nada"]);
 
         result.TryPickProblems(out var problems);
         await Assert.That(problems!.Count()).IsEqualTo(2);
@@ -54,5 +54,8 @@ public class EventFilterTests
 
     [Test]
     public async Task FilterableTypes_AreTheContractsEventsButTheHeartbeat() =>
-        await Assert.That(EventFilter.FilterableTypes).IsEquivalentTo(["message.created", "message.updated", "message.deleted"]);
+        await Assert.That(EventFilter.FilterableTypes).IsEquivalentTo([
+            "session.created", "session.queued", "session.started", "session.waiting", "session.resumed",
+            "session.completed", "session.failed", "session.killed",
+        ]);
 }

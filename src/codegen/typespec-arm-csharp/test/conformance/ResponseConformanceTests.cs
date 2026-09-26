@@ -16,9 +16,9 @@ public sealed record ConformanceCase(
 }
 
 /// <summary>
-/// Drives every declared response of every fixture operation (success, handler failures mapped by
-/// <see cref="ArmResults"/>, validator and binding failures) and checks the status is declared and
-/// the body validates against the contract's schema for it.
+/// Drives every declared response of every fixture operation (each response variant a handler can
+/// answer with, validator and binding failures) and checks the status is declared and the body
+/// validates against the contract's schema for it.
 /// </summary>
 [ClassDataSource<FixtureApp>(Shared = SharedType.PerAssembly)]
 public class ResponseConformanceTests(FixtureApp fixture)
@@ -34,35 +34,38 @@ public class ResponseConformanceTests(FixtureApp fixture)
             return c.SendAsync(request);
         });
 
-        // POST /api/widgets
-        yield return () => new("Widgets_create", "valid body", 200, c => c.PostAsync("/api/widgets", Json(WidgetBody())));
-        yield return () => new("Widgets_create", "all optional properties", 200, c => c.PostAsync("/api/widgets", Json(
+        // POST /api/widgets (201 | 202 | 400)
+        yield return () => new("Widgets_create", "valid body", 201, c => c.PostAsync("/api/widgets", Json(WidgetBody())));
+        yield return () => new("Widgets_create", "accepted for later (a second success status)", 202, c => c.PostAsync("/api/widgets", Json(WidgetBody(serial: FixtureHandlers.Queued))));
+        yield return () => new("Widgets_create", "all optional properties", 201, c => c.PostAsync("/api/widgets", Json(
             WidgetBody(extra: """ "color":"green","parent":null,"tags":["a"],"labels":{"k":"v"},"weight":7, """))));
-        yield return () => new("Widgets_create", "discriminator not first", 200, c => c.PostAsync("/api/widgets", Json(
+        yield return () => new("Widgets_create", "discriminator not first", 201, c => c.PostAsync("/api/widgets", Json(
             WidgetBody(shape: """{"side":3,"kind":"square"}"""))));
         yield return () => new("Widgets_create", "validator failure (name too long)", 400, c => c.PostAsync("/api/widgets", Json(
             WidgetBody(name: new string('x', 51)))));
-        yield return () => new("Widgets_create", "handler failure without a status tag", 400, c => c.PostAsync("/api/widgets", Json(
-            WidgetBody(serial: FixtureHandlers.Untagged))));
+        yield return () => new("Widgets_create", "validator failures (several problems)", 400, c => c.PostAsync("/api/widgets", Json(
+            WidgetBody(name: new string('x', 51), extra: """ "weight":101, """))));
+        yield return () => new("Widgets_create", "handler answers 400", 400, c => c.PostAsync("/api/widgets", Json(
+            WidgetBody(serial: FixtureHandlers.Invalid))));
         yield return () => new("Widgets_create", "malformed JSON (binding failure)", 400, c => c.PostAsync("/api/widgets", Json("{")));
         yield return () => new("Widgets_create", "missing required property (binding failure)", 400, c => c.PostAsync("/api/widgets", Json("""{"name":"w"}""")));
 
         // PUT /api/widgets/{id}
         yield return () => new("Widgets_update", "valid body", 200, c => c.PutAsync("/api/widgets/w1?dryRun=true", Json(WidgetBody(extra: """ "note":"n", """))));
-        yield return () => new("Widgets_update", "declared tag http:404", 404, c => c.PutAsync($"/api/widgets/{FixtureHandlers.Missing}", Json(WidgetBody())));
-        yield return () => new("Widgets_update", "undeclared tag http:409 falls back to 400", 400, c => c.PutAsync($"/api/widgets/{FixtureHandlers.Conflict}", Json(WidgetBody())));
+        yield return () => new("Widgets_update", "handler answers 404", 404, c => c.PutAsync($"/api/widgets/{FixtureHandlers.Missing}", Json(WidgetBody())));
+        yield return () => new("Widgets_update", "handler answers 409", 409, c => c.PutAsync($"/api/widgets/{FixtureHandlers.Conflict}", Json(WidgetBody())));
+        yield return () => new("Widgets_update", "handler answers 400", 400, c => c.PutAsync($"/api/widgets/{FixtureHandlers.Invalid}", Json(WidgetBody())));
         yield return () => new("Widgets_update", "validator failure (weight over 100)", 400, c => c.PutAsync("/api/widgets/w1", Json(WidgetBody(extra: """ "weight":101, """))));
         yield return () => new("Widgets_update", "bad query value (binding failure)", 400, c => c.PutAsync("/api/widgets/w1?dryRun=maybe", Json(WidgetBody())));
 
-        // DELETE /api/widgets/{id} (declares 404 only)
+        // DELETE /api/widgets/{id} (204 | 404)
         yield return () => new("Widgets_delete", "success", 204, c => c.DeleteAsync("/api/widgets/w1"));
-        yield return () => new("Widgets_delete", "declared tag http:404", 404, c => c.DeleteAsync($"/api/widgets/{FixtureHandlers.Missing}"));
-        yield return () => new("Widgets_delete", "undeclared tag falls back to the first declared error", 404, c => c.DeleteAsync($"/api/widgets/{FixtureHandlers.Conflict}"));
+        yield return () => new("Widgets_delete", "handler answers 404", 404, c => c.DeleteAsync($"/api/widgets/{FixtureHandlers.Missing}"));
 
         // GET /api/shapes/{id} (a discriminated union response)
         yield return () => new("Shapes_get", "circle", 200, c => c.GetAsync("/api/shapes/circle"));
         yield return () => new("Shapes_get", "square", 200, c => c.GetAsync("/api/shapes/square"));
-        yield return () => new("Shapes_get", "untagged failure falls back to the first declared error", 404, c => c.GetAsync($"/api/shapes/{FixtureHandlers.Untagged}"));
+        yield return () => new("Shapes_get", "handler answers 404", 404, c => c.GetAsync($"/api/shapes/{FixtureHandlers.Missing}"));
 
         // GET /api/tags (a required explode:false list)
         yield return () => new("Tags_echo", "a comma list", 200, c => c.GetAsync("/api/tags?names=a,b"));

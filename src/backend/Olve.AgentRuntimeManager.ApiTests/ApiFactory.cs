@@ -8,7 +8,7 @@ namespace Olve.AgentRuntimeManager.ApiTests;
 /// test signing key plus issuer/audience (the same settings a base-URL target is started with),
 /// so tests mint their own JWTs (<see cref="TestTokens"/>).
 /// </summary>
-public sealed class ApiFactory : WebApplicationFactory<Program>
+public class ApiFactory : WebApplicationFactory<Program>
 {
     public static readonly TestTokens Tokens = new(
         SigningKey: "api-test-signing-key-that-is-long-enough-for-hs256",
@@ -28,7 +28,20 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Auth:SigningKey", Tokens.SigningKey);
         builder.UseSetting("Auth:Authority", Tokens.Issuer);
         builder.UseSetting("Auth:Audience", Tokens.Audience);
+        foreach (var (key, value) in Settings)
+        {
+            builder.UseSetting(key, value);
+        }
     }
+
+    /// <summary>
+    /// Extra configuration. By default enough slots that concurrently running tests never queue
+    /// (a specialised host, e.g. <see cref="SmallQueueFactory"/>, sets its own).
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, string> Settings { get; } = new Dictionary<string, string>
+    {
+        ["Sessions:TotalSlots"] = "1000",
+    };
 
     public override async ValueTask DisposeAsync()
     {

@@ -10,7 +10,7 @@ public class SchemaValidationTests
 
     [Test]
     public async Task ValidWidget_Passes() =>
-        await Assert.That(Validate("Widgets_create", 200, ValidWidget)).IsEmpty();
+        await Assert.That(Validate("Widgets_create", 201, ValidWidget)).IsEmpty();
 
     [Test]
     public async Task ValidShapes_Pass()
@@ -36,12 +36,25 @@ public class SchemaValidationTests
     [Arguments($$$"""{"id":"{{{Id}}}","serial":"SN","name":"w","priority":1,"description":null,"createdAt":"2026-01-01T00:00:00Z","shape":{"kind":"triangle","radius":1}}""")]
     [Arguments("[]")]
     public async Task InvalidWidget_Fails(string body) =>
-        await Assert.That(Validate("Widgets_create", 200, body)).IsNotEmpty();
+        await Assert.That(Validate("Widgets_create", 201, body)).IsNotEmpty();
 
     [Test]
-    public async Task ProblemArray_Passes() =>
-        await Assert.That(Validate("Widgets_update", 404,
-            """[{"message":"nope","tags":null,"severity":0,"source":null,"exceptionSummary":null}]""")).IsEmpty();
+    public async Task ErrorEnvelope_Passes()
+    {
+        await Assert.That(Validate("Widgets_update", 404, """{"error":{"code":"NOPE","message":"nope","details":{}}}""")).IsEmpty();
+        await Assert.That(Validate("Widgets_update", 400,
+            """{"error":{"code":"A","message":"a","details":{"problems":[{"code":"A","message":"a"},{"code":"B","message":"b"}]}}}""")).IsEmpty();
+    }
+
+    [Test]
+    // No code.
+    [Arguments("""{"error":{"message":"nope","details":{}}}""")]
+    // Details missing.
+    [Arguments("""{"error":{"code":"NOPE","message":"nope"}}""")]
+    // The old problem array.
+    [Arguments("""[{"message":"nope"}]""")]
+    public async Task InvalidErrorEnvelope_Fails(string body) =>
+        await Assert.That(Validate("Widgets_update", 404, body)).IsNotEmpty();
 
     [Test]
     public async Task BodyOnBodylessResponse_Fails() =>

@@ -1,0 +1,29 @@
+using Olve.AgentRuntimeManager.Api;
+
+namespace Olve.AgentRuntimeManager.Sessions;
+
+/// <summary>
+/// The session state machine (SPEC §Sessions): <c>queued → working → completed</c>;
+/// <c>working ⇄ waiting</c>; <c>queued|working|waiting → killed</c>; <c>queued|working → failed</c>.
+/// Terminal: completed, killed, failed.
+/// </summary>
+public static class SessionLifecycle
+{
+    private static readonly IReadOnlyDictionary<SessionStatus, SessionStatus[]> Next = new Dictionary<SessionStatus, SessionStatus[]>
+    {
+        [SessionStatus.Queued] = [SessionStatus.Working, SessionStatus.Killed, SessionStatus.Failed],
+        [SessionStatus.Working] = [SessionStatus.Waiting, SessionStatus.Completed, SessionStatus.Killed, SessionStatus.Failed],
+        [SessionStatus.Waiting] = [SessionStatus.Working, SessionStatus.Killed],
+        [SessionStatus.Completed] = [],
+        [SessionStatus.Killed] = [],
+        [SessionStatus.Failed] = [],
+    };
+
+    public static bool IsTerminal(SessionStatus status) => Next[status].Length == 0;
+
+    public static bool CanMove(SessionStatus from, SessionStatus to) => Next[from].Contains(to);
+
+    /// <summary>Throws on a move the state machine doesn't allow: a bug, never an expected failure.</summary>
+    public static SessionStatus Move(SessionStatus from, SessionStatus to) =>
+        CanMove(from, to) ? to : throw new InvalidOperationException($"A session can't move from {from} to {to}.");
+}

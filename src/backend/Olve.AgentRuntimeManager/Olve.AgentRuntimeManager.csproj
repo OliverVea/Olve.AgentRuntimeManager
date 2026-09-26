@@ -53,7 +53,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Olve.MinimalApi" />
     <PackageReference Include="Olve.Results" />
     <PackageReference Include="Olve.Validation" />
     <PackageReference Include="Olve.Utilities" />

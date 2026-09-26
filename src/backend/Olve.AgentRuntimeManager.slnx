@@ -6,4 +6,11 @@
     <Project Path="Olve.AgentRuntimeManager.UnitTests/Olve.AgentRuntimeManager.UnitTests.csproj" />
     <Project Path="Olve.AgentRuntimeManager.ApiTests/Olve.AgentRuntimeManager.ApiTests.csproj" />
   </Folder>
+  <!-- Build output of the contract (npm run spec / the API project's build), for browsing: never edit. -->
+  <Folder Name="/generated/">
+    <File Path="../../artifacts/generated/backend/ArmApi.g.cs" />
+    <File Path="../../artifacts/generated/backend/ArmJsonContext.g.cs" />
+    <File Path="../../artifacts/generated/backend/ArmModels.g.cs" />
+    <File Path="../../artifacts/spec/openapi.json" />
+  </Folder>
 </Solution>

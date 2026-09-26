@@ -96,8 +96,8 @@ export abstract class BaseElement extends HTMLElement {
 
 /**
  * Escape a string for safe interpolation into an HTML template. Component templates are
- * built with string concatenation and `innerHTML`, so any user-supplied text (message
- * bodies, error messages) MUST pass through this to avoid breaking markup / XSS.
+ * built with string concatenation and `innerHTML`, so any user-supplied text (session
+ * prompts, error messages) MUST pass through this to avoid breaking markup / XSS.
  */
 export function escapeHtml(value: string): string {
   return value

@@ -96,8 +96,6 @@ export function renderApi(ir, namespace) {
       "Microsoft.AspNetCore.Http",
       "Microsoft.AspNetCore.Mvc",
       "Microsoft.AspNetCore.Routing",
-      "Olve.MinimalApi",
-      "Olve.Results",
     ]),
   ];
 
@@ -105,15 +103,16 @@ export function renderApi(ir, namespace) {
     const fields = [...o.params.map((p) => `${p.type} ${p.name}`), ...(o.body ? [`${o.body.type} Body`] : [])];
     let s = `/// <summary>Input of <c>${o.operationId}</c> (${o.verb.toUpperCase()} ${o.path}).</summary>\n`;
     s += `public sealed record ${o.name}Request${fields.length ? `(${fields.join(", ")})` : ""};\n\n`;
+    s += renderResponseUnion(o);
     s += summary(o.doc);
-    s += `public interface I${o.name}Handler : IHandler<${o.name}Request${o.success.type ? `, ${responseType(o.success)}` : ""}>;\n`;
+    s += `public interface I${o.name}Handler : IArmHandler<${o.name}Request, ${o.name}Response>;\n`;
     out.push(s);
   }
 
-  let table = "/// <summary>Every operation's id, success status and declared error statuses.</summary>\n";
+  let table = "/// <summary>Every operation's id, success statuses and declared error statuses.</summary>\n";
   table += "public static class ArmOperations\n{\n";
   for (const o of ir.operations) {
-    table += `    public static readonly ArmOperation ${o.name} = new(${str(o.operationId)}, ${o.success.status}, [${o.errors.map((e) => e.status).join(", ")}]);\n`;
+    table += `    public static readonly ArmOperation ${o.name} = new(${str(o.operationId)}, [${o.successes.map((r) => r.status).join(", ")}], [${o.errors.map((e) => e.status).join(", ")}]);\n`;
   }
   out.push(`${table}}\n`);
 
@@ -135,11 +134,6 @@ export function renderApi(ir, namespace) {
   if (parsed.length) out.push(renderEnumParsers(parsed.map((name) => ir.enums.get(name))));
 
   return out.join("\n");
-}
-
-/** What a handler returns on success: the body, or for an SSE stream the events with their ids. */
-function responseType(success) {
-  return success.stream ? `IAsyncEnumerable<ArmSseItem<${success.type}>>` : success.type;
 }
 
 /** The string enum a parameter binds to, if any (minimal APIs would parse it by C# member name). */
@@ -186,21 +180,68 @@ function renderEndpoint(o, ir) {
     return p.type.endsWith("?") ? `${p.local} is null ? null : ${parse}` : parse;
   };
   const args = [...o.params.map(arg), ...(o.body ? ["body"] : [])].join(", ");
-  const call = o.success.type ? "HandleAsync" : "RunAsync";
-  const map = o.success.stream ? "ArmResults.Stream" : "ArmResults.Map";
   const i = "        ";
   let s = `${i}${o.name} = ${route}async (\n`;
   s += lambdaParams.map((p) => `${i}        ${p}`).join(",\n");
   s += ") =>\n";
-  s += `${i}        ${map}(await handler.${call}(new ${o.name}Request(${args}), ct), ArmOperations.${o.name}))\n`;
+  s += `${i}        (await handler.HandleAsync(new ${o.name}Request(${args}), ct)).ToHttpResult())\n`;
   s += `${i}    .WithName(${str(o.operationId)})\n`;
   s += `${i}    .WithMetadata(ArmOperations.${o.name})`;
-  if (o.body?.validator) s += `\n${i}    .WithValidation<${o.body.type}, ${o.body.validator}>()`;
-  s += o.success.stream
-    ? `\n${i}    .Produces<${o.success.type}>(${o.success.status}, "text/event-stream")`
-    : `\n${i}    .Produces${o.success.type ? `<${o.success.type}>` : ""}(${o.success.status})`;
-  for (const e of o.errors) s += `\n${i}    .Produces${e.type ? `<${e.type}>` : ""}(${e.status})`;
+  if (o.body?.validator) s += `\n${i}    .WithArmValidation<${o.body.type}, ${o.body.validator}>(ArmOperations.${o.name})`;
+  for (const r of [...o.successes, ...o.errors]) {
+    s += r.stream
+      ? `\n${i}    .Produces<${r.type}>(${r.status}, "text/event-stream")`
+      : `\n${i}    .Produces${r.type ? `<${r.type}>` : ""}(${r.status})`;
+  }
   return `${s},\n`;
+}
+
+// Variant names of a response union, by status.
+const STATUS_NAMES = {
+  200: "Ok", 201: "Created", 202: "Accepted", 204: "NoContent",
+  400: "BadRequest", 401: "Unauthorized", 403: "Forbidden", 404: "NotFound", 409: "Conflict", 410: "Gone",
+  422: "UnprocessableEntity", 429: "TooManyRequests", 500: "InternalServerError", 503: "ServiceUnavailable",
+};
+const variantName = (status) => STATUS_NAMES[status] ?? `Status${status}`;
+
+/** Interfaces can't take part in user-defined conversions (CS0552). */
+const isInterface = (type) => /^(IReadOnlyList|IReadOnlyDictionary|IAsyncEnumerable)</.test(type) || type === "System.Text.Json.JsonElement";
+
+/**
+ * Every response an operation declares, as a closed union: one nested variant per status that
+ * writes itself (its body as JSON, an SSE stream, or the status alone). Handlers return a
+ * variant, so an undeclared status can't compile. A success body type no other variant carries
+ * converts implicitly (`return session;` for `Ok`); errors are always named
+ * (`new NotFound(error)`).
+ */
+function renderResponseUnion(o) {
+  const union = `${o.name}Response`;
+  let s = `/// <summary>The responses <c>${o.operationId}</c> declares; its handler returns one.</summary>\n`;
+  s += `public abstract record ${union} : IArmResponse\n{\n`;
+  s += `    private ${union}()\n    {\n    }\n\n`;
+  s += "    /// <inheritdoc />\n    public abstract int Status { get; }\n\n";
+  s += "    /// <inheritdoc />\n    public abstract IResult ToHttpResult();\n";
+  const responses = [...o.successes, ...o.errors];
+  for (const r of responses) {
+    const name = variantName(r.status);
+    const field = r.stream ? `IAsyncEnumerable<ArmSseItem<${r.type}>> Events` : r.type ? `${r.type} Body` : "";
+    const write = r.stream
+      ? `new ArmServerSentEventsResult<${r.type}>(Events)`
+      : r.type
+        ? `TypedResults.Json(Body, statusCode: ${r.status})`
+        : `TypedResults.StatusCode(${r.status})`;
+    s += `\n    /// <summary>${r.status}.</summary>\n`;
+    s += `    public sealed record ${name}(${field}) : ${union}\n    {\n`;
+    s += `        /// <inheritdoc />\n        public override int Status => ${r.status};\n\n`;
+    s += `        /// <inheritdoc />\n        public override IResult ToHttpResult() => ${write};\n    }\n`;
+  }
+  const counts = new Map();
+  for (const r of responses) if (r.type && !r.stream) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
+  for (const r of o.successes) {
+    if (!r.type || r.stream || counts.get(r.type) !== 1 || isInterface(r.type)) continue;
+    s += `\n    public static implicit operator ${union}(${r.type} body) => new ${variantName(r.status)}(body);\n`;
+  }
+  return `${s}}\n\n`;
 }
 
 /** The System.Text.Json source-generation context for every DTO. */

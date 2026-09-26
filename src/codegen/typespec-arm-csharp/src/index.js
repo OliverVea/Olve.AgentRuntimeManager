@@ -3,15 +3,17 @@
 //   ArmModels.g.cs       records (request shapes split by visibility), enums, discriminated
 //                        unions, SSE event unions (IArmEvent, EventTypes), and IValidator<T>s
 //                        for request bodies from @maxLength etc.
-//   ArmApi.g.cs          per operation: a request record + I…Handler : IHandler<Req, Res> (an SSE
-//                        operation's Res is IAsyncEnumerable<ArmSseItem<TEvent>>);
-//                        ArmOperations (declared statuses), ArmApi.HandlerTypes, MapArmApi(),
-//                        and ArmParameters (string-enum parameters parsed by wire value)
+//   ArmApi.g.cs          per operation: a request record, a response union with one variant per
+//                        declared status (an SSE variant carries IAsyncEnumerable<ArmSseItem<TEvent>>)
+//                        and I…Handler : IArmHandler<Req, Response>; ArmOperations (declared
+//                        statuses), ArmApi.HandlerTypes, MapArmApi(), and ArmParameters
+//                        (string-enum parameters parsed by wire value)
 //   ArmJsonContext.g.cs  System.Text.Json source-gen context for every DTO
 //
 // The generated code relies on hand-written types in the same namespace, kept in the backend
-// source (Api/): ArmOperation (the operation table's row), ArmResults (Result → declared status,
-// and SSE streams), ArmServerSentEvents.cs (IArmEvent, ArmSseItem, ArmQuery, the SSE result).
+// source (Api/): IArmHandler, IArmResponse, ArmOperation (the operation table's row), the error
+// envelope (ArmErrorEnvelope, ArmErrors), ArmValidation, ArmBindingFailures, and the SSE pieces
+// (IArmEvent, ArmSseItem, ArmQuery, ArmServerSentEventsResult).
 // test/conformance compiles the output with that runtime and proves it matches the spec over HTTP.
 
 import { emitFile, resolvePath } from "@typespec/compiler";

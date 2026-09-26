@@ -15,4 +15,4 @@ options:
     emitter-output-dir: "{output-dir}/generated/backend"
     namespace: "Olve.AgentRuntimeManager.Api"
     external-types:
-      ResultProblem: "ResultProblem"
+      ErrorEnvelope: "ArmErrorEnvelope"

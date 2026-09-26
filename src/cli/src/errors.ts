@@ -1,4 +1,4 @@
-/** Bad invocation: unknown command/option, wrong arguments. Exit code 2. */
+/** Bad invocation: unknown command/option, wrong arguments, malformed option values. Exit code 2. */
 export class UsageError extends Error {
   constructor(
     message: string,
@@ -10,7 +10,7 @@ export class UsageError extends Error {
   }
 }
 
-/** The API answered with a non-2xx status. Exit code 1. */
+/** The API answered with a non-2xx status. Exit code by status: see {@link exitCodeForStatus}. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -22,12 +22,14 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 
-  /** The error as JSON: the body when there is one, else a SPEC-style error envelope. */
+  get exitCode(): number {
+    return exitCodeForStatus(this.status);
+  }
+
+  /** The error as JSON: the API's error envelope, or one built from the status when there is none. */
   toJSON(): unknown {
-    if (isEmptyBody(this.body)) {
-      return envelope(`HTTP_${this.status}`, this.message, { status: this.status });
-    }
-    return this.body;
+    if (errorEnvelope(this.body)) return this.body;
+    return envelope(`HTTP_${this.status}`, this.message, { status: this.status });
   }
 }
 
@@ -41,6 +43,8 @@ export class NetworkError extends Error {
     this.name = "NetworkError";
   }
 
+  readonly exitCode: number = ExitCode.Failure;
+
   toJSON(): unknown {
     return envelope("NETWORK_ERROR", this.message, { url: this.url });
   }
@@ -48,17 +52,43 @@ export class NetworkError extends Error {
 
 export const ExitCode = {
   Ok: 0,
+  /** Any other API error (400, 401, 5xx, ...), a network error, or an unexpected failure. */
   Failure: 1,
   Usage: 2,
+  NotFound: 3,
+  Conflict: 4,
+  /** 503: the session queue is full, or the server is draining. */
+  Unavailable: 5,
 } as const;
+
+/** 404 → 3, 409 → 4, 503 → 5; every other error status → 1. */
+export function exitCodeForStatus(status: number): number {
+  switch (status) {
+    case 404:
+      return ExitCode.NotFound;
+    case 409:
+      return ExitCode.Conflict;
+    case 503:
+      return ExitCode.Unavailable;
+    default:
+      return ExitCode.Failure;
+  }
+}
 
 function envelope(code: string, message: string, details: unknown) {
   return { error: { code, message, details } };
 }
 
-function isEmptyBody(body: unknown): boolean {
-  if (body === undefined || body === null || body === "") return true;
-  return typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 0;
+type Problem = { code?: unknown; message?: unknown };
+type EnvelopeError = { code?: unknown; message?: unknown; details?: { problems?: unknown } };
+
+/** The `error` of the API's error envelope `{ error: { code, message, details } }`, if `body` is one. */
+function errorEnvelope(body: unknown): EnvelopeError | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const error = (body as { error?: unknown }).error;
+  if (!error || typeof error !== "object" || Array.isArray(error)) return undefined;
+  const { code, message } = error as EnvelopeError;
+  return typeof code === "string" || typeof message === "string" ? (error as EnvelopeError) : undefined;
 }
 
 function causeMessage(cause: unknown): string {
@@ -83,32 +113,23 @@ const statusNames: Record<number, string> = {
   503: "Service Unavailable",
 };
 
-/** Turns any of the error shapes the API returns into one readable line. */
+/**
+ * Describes an error response: `404 Not Found: SESSION_NOT_FOUND: …` from the error envelope, then
+ * one `  - CODE: message` line per problem when there are several. Any other body (none, or e.g.
+ * an HTML page from the edge) gives just the status.
+ */
 export function describeApiError(status: number, statusText: string, body: unknown): string {
   const head = `${status} ${statusText || statusNames[status] || "Error"}`;
-  const detail = extractDetail(body);
-  return detail ? `${head}: ${detail}` : head;
-}
-
-function extractDetail(body: unknown): string | undefined {
-  if (typeof body === "string") return body.trim() || undefined;
-  // Current shape (Olve.MinimalApi): ResultProblem[]
-  if (Array.isArray(body)) {
-    const messages = body
-      .map((p) => (p && typeof p === "object" && "message" in p ? String(p.message) : undefined))
-      .filter((m): m is string => !!m);
-    return messages.length ? messages.join("; ") : undefined;
-  }
-  if (body && typeof body === "object") {
-    // SPEC envelope: { error: { code, message, details } }
-    const error = (body as { error?: unknown }).error;
-    if (error && typeof error === "object") {
-      const { code, message } = error as { code?: unknown; message?: unknown };
-      if (message) return code ? `${String(code)}: ${String(message)}` : String(message);
+  const error = errorEnvelope(body);
+  if (!error) return head;
+  const summary = [error.code, error.message].filter((p) => typeof p === "string" && p).join(": ");
+  const lines = [summary ? `${head}: ${summary}` : head];
+  const problems = Array.isArray(error.details?.problems) ? (error.details.problems as Problem[]) : [];
+  if (problems.length > 1) {
+    for (const p of problems) {
+      const text = [p?.code, p?.message].filter((part) => typeof part === "string" && part).join(": ");
+      if (text) lines.push(`  - ${text}`);
     }
-    // RFC 7807 problem details
-    const { title, detail } = body as { title?: unknown; detail?: unknown };
-    if (detail || title) return String(detail ?? title);
   }
-  return undefined;
+  return lines.join("\n");
 }

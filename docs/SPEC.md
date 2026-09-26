@@ -16,19 +16,23 @@ This spec covers V0 at user/API level. Later ideas: [`VISION.md`](VISION.md). Or
 | Method | Use |
 |---|---|
 | `GET` | Retrieve one resource by ID |
-| `QUERY` | Search/list; the request body carries the filter (RFC 10008) |
+| `POST /api/<resource>/search` | Search/list; the request body carries the filter |
 | `POST` | Create a resource or trigger an action |
 | `PATCH` | Partial update |
 | `DELETE` | Remove a resource |
 
-`queryMethod` (`query` \| `get` \| `post`, default `query`) switches search endpoints to
-query-string `GET` or `POST /api/<resource>/search` for infrastructure without `QUERY`.
+Searches are `POST`s: no clients or proxies we use support `QUERY` (RFC 10008) yet (see
+[`VISION.md`](VISION.md#api)).
 
 **Errors** always use one envelope:
 
 ```json
 { "error": { "code": "APPROVAL_EXPIRED", "message": "Approval arm-apv-xyz expired after 30 minutes", "details": {} } }
 ```
+
+`code` is stable per failure (`SESSION_NOT_FOUND`, `QUEUE_FULL`, …); malformed or invalid input is
+`INVALID_REQUEST`, with every problem in `details.problems` when there are several. Each operation
+declares the statuses it can answer in the contract.
 
 | Status | Meaning |
 |---|---|
@@ -68,7 +72,7 @@ a repeated key within 24 hours returns the original response.
 | CLI | API | Purpose |
 |---|---|---|
 | `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create (starts, or queues: 202 + position) |
-| `arm session list [--status X] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `QUERY /api/sessions` | Search |
+| `arm session list [--status X] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `POST /api/sessions/search` | Search |
 | `arm session get <id>` | `GET /api/sessions/:id` | Get |
 | `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill a queued/working/waiting session |
 | `arm session delete <id>` | `DELETE /api/sessions/:id` | Delete (terminal sessions only) |
@@ -137,7 +141,7 @@ it can't parse needs approval.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm approval list [--session X] [--status pending\|approved\|denied\|expired] [--kind bash\|file\|tool] [--after DATE] [--limit N]` | `QUERY /api/approvals` | Search |
+| `arm approval list [--session X] [--status pending\|approved\|denied\|expired] [--kind bash\|file\|tool] [--after DATE] [--limit N]` | `POST /api/approvals/search` | Search |
 | `arm approval get <session-id> <approval-id>` | `GET /api/sessions/:id/approvals/:aid` | Get |
 | `arm approval approve\|deny <session-id> <approval-id> [--reason "..."]` | `POST /api/sessions/:id/approvals/:aid/decide` | Decide: `{ "decision": "approve" \| "deny", "reason": "…" }` |
 
@@ -169,7 +173,7 @@ policy allow reads broadly while restricting writes.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm policy list [--text "..."]` | `QUERY /api/policies` | List |
+| `arm policy list [--text "..."]` | `POST /api/policies/search` | List |
 | `arm policy get <name> [--version N]` | `GET /api/policies/:name` | Get (latest or a version) |
 | `arm policy create <name> [--from <file>]` | `POST /api/policies` | Create |
 | `arm policy update <name> [--from <file>]` | `PATCH /api/policies/:name` | Update (new version) |
@@ -197,11 +201,11 @@ policy allow reads broadly while restricting writes.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm skill list [--text "..."] [--source github\|local]` | `QUERY /api/skills` | Search |
+| `arm skill list [--text "..."] [--source github\|local]` | `POST /api/skills/search` | Search |
 | `arm skill get <name>` | `GET /api/skills/:name` | Metadata + content |
 | `arm skill install <source> [--name override]` | `POST /api/skills` | Install/upsert (`github:user/repo[/path]` or a local directory) |
 | `arm skill remove <name>` | `DELETE /api/skills/:name` | Remove |
-| `arm tool list [--text "..."]` | `QUERY /api/tools` | Search |
+| `arm tool list [--text "..."]` | `POST /api/tools/search` | Search |
 | `arm tool get <name>` | `GET /api/tools/:name` | Get |
 | `arm tool add <name> --command "..." [--args "..."] [--env K=V]` | `POST /api/tools` | Add an external MCP server |
 | `arm tool update <name> [--command …] [--args …] [--env …]` | `PATCH /api/tools/:name` | Update |
@@ -218,7 +222,7 @@ MCP servers a session can enable.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm provider list` | `QUERY /api/providers` | List |
+| `arm provider list` | `POST /api/providers/search` | List |
 | `arm provider get <name>` | `GET /api/providers/:name` | Config + status |
 | `arm provider health [<name>]` | `GET /api/providers/health`, `GET /api/providers/:name/health` | Health |
 
@@ -233,7 +237,7 @@ One-off LLM calls, no session.
 | CLI | API | Purpose |
 |---|---|---|
 | `arm completion create -p "prompt" [--provider X] [--model X] [--system "..."] [--schema <file\|inline>] [--timeout-seconds N] [--caller X] [--retries N]` | `POST /api/completions` | One-off LLM call, no session |
-| `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `QUERY /api/completions` | History |
+| `arm completion list [--caller X] [--provider X] [--model X] [--after DATE] [--limit N]` | `POST /api/completions/search` | History |
 | `arm completion get <id>` | `GET /api/completions/:id` | Get |
 
 `provider` is optional (resolved from the model). `schema` is optional: without it the response
@@ -328,7 +332,6 @@ a trailing `.*` matches a namespace, e.g. `session.approval.*`),
 | Setting | Default | Description |
 |---|---|---|
 | `port` | 18791 | Listen port |
-| `queryMethod` | `query` | Search method (`query`, `get`, `post`) |
 | `totalSlots` | 10 | Max concurrent sessions |
 | `maxQueueSize` | 200 | Max queued sessions |
 | `backgroundTimeout` | 600 | Background session timeout (s) |

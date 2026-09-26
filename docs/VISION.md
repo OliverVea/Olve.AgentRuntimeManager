@@ -71,6 +71,13 @@ re-evaluated and scoped when it's picked up.
   TypeSpec models) behind `--binary`.
 - **Python / Bash clients** generated from the same contract.
 
+## API
+
+- **`QUERY` (RFC 10008)** for searches, next to or instead of `POST /api/<resource>/search`
+  (optionally a `queryMethod` switch: `query` | `post`). Blocked until the toolchain carries it:
+  TypeSpec has no `QUERY` verb and Hey API drops OpenAPI 3.2 `query` operations (M4 spike,
+  2026-09-26); .NET 11 routes it natively.
+
 ## Standards
 
 - **OpenAI-compatible endpoint** (`/v1/chat/completions`) so any OpenAI SDK can use ARM.

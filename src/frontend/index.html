@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Olve.AgentRuntimeManager — messages</title>
+    <title>Olve.AgentRuntimeManager — sessions</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -61,19 +61,19 @@
   </head>
   <body>
     <header>
-      <h1>Messages</h1>
+      <h1>Sessions</h1>
       <p>
-        A vanilla Web Component (<code>&lt;message-list&gt;</code>) talking to the live
-        <code>Olve.AgentRuntimeManager</code> through a TypeScript client generated from its
-        TypeSpec contract.
+        The newest agent sessions, kept live from the event stream — a vanilla Web Component
+        (<code>&lt;session-list&gt;</code>) talking to <code>Olve.AgentRuntimeManager</code> through
+        a TypeScript client generated from its TypeSpec contract.
       </p>
     </header>
 
-    <!-- Log in / who's-logged-in + log out, populated by main.ts. GET is anonymous so the list
-         loads either way; creating, editing and deleting need a login (OIDC + PKCE via Authentik). -->
+    <!-- Log in / who's-logged-in + log out, populated by main.ts. Every session endpoint needs a
+         login (OIDC + PKCE via Authentik), so the list shows a sign-in prompt until then. -->
     <div id="auth" class="auth-bar"></div>
 
-    <message-list></message-list>
+    <session-list></session-list>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

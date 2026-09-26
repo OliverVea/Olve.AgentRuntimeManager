@@ -6,7 +6,7 @@ The `arm` CLI grows with every milestone.
 - [x] M1 — **Spec toolchain**: one POST + one GET on `Message`; mise, root `package.json`, Hey API client, route-coverage + contract tests, minimal `arm` binary
 - [x] M2 — **Backend generator**: our own TypeSpec emitter generating the backend surface (records, typed `IHandler` interfaces, route mapping, validators, result → status mapping) into `artifacts/`; migrate `Message` onto it
 - [x] M3 — **SSE**: typed events with `type`, server-side filters, `Last-Event-ID` replay, `arm events`
-- [ ] M4 — **Sessions core**: create/get/list/kill/delete, state machine, queue + slots, FakeProvider; `QUERY` + `queryMethod`; error envelope + multi-status responses; **remove the `Message` example entirely** (spec, backend, tests, frontend, CLI) — the API contains only ARM entities
+- [x] M4 — **Sessions core**: create/get/search/kill/delete, state machine, queue + slots, timeouts, FakeProvider; search as `POST …/search` (`QUERY` moved to VISION); error envelope + typed multi-status responses; `Idempotency-Key`; **`Message` example removed entirely** — the API contains only ARM entities. In memory until M5
 - [ ] M5 — **Gentle restart**: persist session state; server exits, agents survive, new server re-attaches (event replay completes in M6)
 - [ ] M6 — **Event bus**: all SPEC event types, filters, replay incl. across restart
 - [ ] M7 — **Auth**: fine-grained permissions composed into roles; default roles read-only / operator (start, kill, approve; no configuration) / admin; session-scoped agent tokens; local tokens (A3)

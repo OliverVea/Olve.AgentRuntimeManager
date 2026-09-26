@@ -59,7 +59,7 @@
   <ItemGroup>
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
-    <PackageReference Include="Olve.MinimalApi" />
+    
     <PackageReference Include="Olve.Results" />
     <PackageReference Include="Olve.Validation" />
     <PackageReference Include="TUnit" />

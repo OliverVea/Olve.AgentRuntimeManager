@@ -3,25 +3,8 @@ using System.Text;
 
 namespace Olve.AgentRuntimeManager.ApiTests;
 
-// The wire shapes the tests read, declared here on purpose: raw HTTP, no generated client, so
-// the tests see what a client sees.
-
-public sealed record MessageBody(Guid Id, string Text);
-
-public sealed record PaginationBody(int Page, int PageSize, int Offset);
-
-public sealed record PageBody(
-    List<MessageBody> Items,
-    int PageNumber,
-    int PageSize,
-    int TotalCount,
-    int? TotalPages,
-    bool? HasNextPage,
-    PaginationBody? Next);
-
-public sealed record ProblemBody(string Message, List<string>? Tags);
-
-public sealed record AuthConfigBody(string? Authority, string? ClientId, string Scopes);
+// The wire shapes the tests read are declared here on purpose (SessionBody, ErrorEnvelopeBody, …):
+// raw HTTP, no generated client, so the tests see what a client sees.
 
 public static class Wire
 {
@@ -30,33 +13,43 @@ public static class Wire
 
     public static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
-    public static StringContent TextBody(string text) => JsonContent(new { text });
-
     public static StringContent JsonContent<T>(T value) =>
-        new(System.Text.Json.JsonSerializer.Serialize(value), Encoding.UTF8, "application/json");
+        new(System.Text.Json.JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
 
-    public static async Task<MessageBody> CreateMessageAsync(this HttpClient client, string text)
+    /// <summary>POST /api/sessions; fails unless the session was created (201 or 202).</summary>
+    public static async Task<SessionBody> CreateSessionAsync(this HttpClient client, object body)
     {
-        using var response = await client.PostAsync("/api/messages", TextBody(text));
+        using var response = await client.PostAsync("/api/sessions", JsonContent(body));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<MessageBody>())!;
+        return (await response.Content.ReadFromJsonAsync<SessionBody>(JsonOptions))!;
     }
 
-    public static async Task<List<string>> ProblemMessagesAsync(this HttpResponseMessage response) =>
-        [.. (await response.Content.ReadFromJsonAsync<List<ProblemBody>>())!.Select(p => p.Message)];
+    /// <summary>A session whose (fake) agent runs until killed (or its timeout).</summary>
+    public static Task<SessionBody> CreateHangingSessionAsync(this HttpClient client, string? caller = null) =>
+        client.CreateSessionAsync(new { prompt = "Wait. fake:hang", caller });
 
-    /// <summary>Every message, following the pages (the store is shared, so never assume a count).</summary>
-    public static async Task<List<MessageBody>> ListAllMessagesAsync(this HttpClient client)
+    public static async Task<SessionBody> GetSessionAsync(this HttpClient client, Guid id) =>
+        (await client.GetFromJsonAsync<SessionBody>($"/api/sessions/{id}", JsonOptions))!;
+
+    public static async Task<HttpResponseMessage> KillSessionAsync(this HttpClient client, Guid id, string? reason = null) =>
+        await client.PostAsync($"/api/sessions/{id}/kill", JsonContent(new { reason }));
+
+    /// <summary>Polls the session until <paramref name="condition"/> holds (agents end asynchronously).</summary>
+    public static async Task<SessionBody> WaitForSessionAsync(this HttpClient client, Guid id, Func<SessionBody, bool> condition)
     {
-        var all = new List<MessageBody>();
-        for (var page = 1; ; page++)
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        while (true)
         {
-            var body = (await client.GetFromJsonAsync<PageBody>($"/api/messages?page={page}&pageSize=100"))!;
-            all.AddRange(body.Items);
-            if (body.HasNextPage != true)
+            var session = await client.GetSessionAsync(id);
+            if (condition(session))
             {
-                return all;
+                return session;
             }
+
+            await Task.Delay(50, timeout.Token);
         }
     }
+
+    public static async Task<ErrorBody> ErrorAsync(this HttpResponseMessage response) =>
+        (await response.Content.ReadFromJsonAsync<ErrorEnvelopeBody>(JsonOptions))!.Error;
 }

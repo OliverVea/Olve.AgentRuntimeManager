@@ -10,10 +10,12 @@ export type UnauthorizedHandler = () => Promise<string | null>;
  * Build a Hey API client for the generated SDK (`@arm/client`) — pass it as `client` to every
  * SDK call. `baseUrl` is the API origin (same-origin by default in `main.ts`).
  *
- * - `getToken` enables authenticated writes: a request interceptor attaches
- *   `Authorization: Bearer <token>` when a token is available and nothing otherwise, so anonymous
- *   `GET /api/messages` keeps working. The spec declares no security scheme, so the client's
- *   `auth` option would never fire — the interceptor is the hook.
+ * - `getToken` supplies the bearer: a request interceptor attaches `Authorization: Bearer <token>`
+ *   when a token is available and nothing otherwise (only `GET /api/auth-config` is anonymous).
+ *   The spec now declares the bearer scheme, so Hey API's `auth` option *would* fire — but it is
+ *   resolved once per SDK call, and an `eventsStream` call reconnects many times on that one
+ *   resolution, replaying a token that may have expired. Interceptors run on every request and
+ *   every SSE (re)connect, so the interceptor stays the hook.
  * - `onUnauthorized` adds a 401 → refresh → retry-once safety net (for the rare case a token is
  *   revoked or expires between the proactive refresh and the request).
  *

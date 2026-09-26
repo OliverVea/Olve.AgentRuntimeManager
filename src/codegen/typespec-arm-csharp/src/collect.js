@@ -330,7 +330,7 @@ export function collect(program, options = {}) {
     if (b?.bodyKind === "multipart") unsupported("multipart bodies are not supported");
     else if (b?.type) body = { type: csType(b.type, reqVis, undefined, `${name}Body`) };
 
-    let success;
+    const successes = [];
     const errors = [];
     for (const r of http.responses) {
       if (typeof r.statusCodes !== "number") {
@@ -341,15 +341,19 @@ export function collect(program, options = {}) {
       const bodyType = r.responses.find((x) => x.body)?.body?.type;
       const response = stream
         ? { status: r.statusCodes, type: eventsType(getStreamOf(program, r.type), unsupported), stream: true }
-        : { status: r.statusCodes, type: bodyType ? csType(bodyType, READ, undefined, `${name}Response`) : undefined };
+        : { status: r.statusCodes, type: bodyType ? csType(bodyType, READ, undefined, `${name}${r.statusCodes}Body`) : undefined };
       if (stream && !response.type) continue;
       if (r.statusCodes >= 300) errors.push(response);
-      else if (!success) success = response;
-      else unsupported("multiple success statuses are not supported yet; only the first is generated");
+      else successes.push(response);
     }
-    success ??= { status: 204 };
-
-    operations.push({ name, operationId, verb: http.verb, path: http.path, doc: getDoc(program, op), params, body, success, errors });
+    if (!successes.length) successes.push({ status: 204 });
+    if (successes.length > 1 && successes.some((s) => s.stream)) {
+      unsupported("an SSE stream must be the operation's only success response");
+      successes.splice(1);
+    }
+    // Handlers return a generated response union with one variant per declared status
+    // (render.js), so several success statuses (`201 | 202`) are just more variants.
+    operations.push({ name, operationId, verb: http.verb, path: http.path, doc: getDoc(program, op), params, body, successes, errors });
   }
   operations.sort((a, b) => ordinal(a.name, b.name));
 
@@ -372,7 +376,7 @@ export function collect(program, options = {}) {
     ...[...models.keys()].filter((n) => !variantNames.has(n)),
     ...unions.keys(),
     ...enums.keys(),
-    ...operations.flatMap((o) => [o.body?.type, o.success.type, ...o.errors.map((e) => e.type)]).filter(Boolean),
+    ...operations.flatMap((o) => [o.body?.type, ...o.successes.map((r) => r.type), ...o.errors.map((e) => e.type)]).filter(Boolean),
   ]);
 
   return {

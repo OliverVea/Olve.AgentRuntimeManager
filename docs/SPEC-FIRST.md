@@ -75,23 +75,23 @@ A TypeSpec emitter (local workspace package, plain ESM) that reads the TypeSpec 
 writes C# to `artifacts/generated/backend/`. Prototyped in a spike (~190 LOC for Message + a
 union). Lives in [`src/codegen/typespec-arm-csharp`](../src/codegen/typespec-arm-csharp):
 `collect.js` walks the HTTP program into a small C#-shaped model, `render.js` formats it, and
-`test/` holds the fixture specs, their snapshots and the conformance suite. The hand-written runtime it targets (`ArmOperation`,
-`ArmResults`, `ArmBindingFailures`, `UseArmApi`) is backend source in
+`test/` holds the fixture specs, their snapshots and the conformance suite. The hand-written runtime it targets (`IArmHandler`, `IArmResponse`, `ArmOperation`,
+the error envelope, `ArmValidation`, `ArmBindingFailures`, `UseArmApi`) is backend source in
 `src/backend/Olve.AgentRuntimeManager/Api/`.
 
 - [x] Emitter package + `tspconfig.yaml` wiring; output never in `src/`
 - [x] Records per model: `required`/`T?` right, read-only split into request models (per visibility: `…Writable` for Create|Update, `…Create`/`…Update` when the property sets differ), `Guid`/`int`/dates/enums/dictionaries, `JsonIgnore(WhenWritingNull)` for optional
 - [x] Discriminated unions → abstract record + `[JsonPolymorphic]`/`[JsonDerivedType]`
-- [x] Per operation: request record + `IHandler<Req, Res>` interface; generated `MapArmApi` with verbs/routes, `.WithValidation` (validators from `@maxLength` etc.), `.Produces<T>(status)`, and Result → declared status mapping (e.g. `http:404` tag → 404 when declared)
+- [x] Per operation: request record + `IHandler<Req, Res>` interface; generated `MapArmApi` with verbs/routes, `.WithValidation` (validators from `@maxLength` etc.), `.Produces<T>(status)`, and Result → declared status mapping (e.g. `http:404` tag → 404 when declared). *M4 replaced the interfaces and the mapping with typed response unions (below).*
 - [x] Generated JSON source-gen context covering all DTOs
 - [x] `HandlerTypes` list + startup/test check that every operation has a registered handler
 - [x] Binding failures (`BadHttpRequestException`) mapped to the contract's error body
 - [x] Snapshot tests of the emitter output
-- [x] **Tooling conformance suite** (`test/conformance/`, .NET, run by `npm test` / `mise run codegen:test`): the widgets fixture (unions, nullables, visibility split, path/query/header/body params, several error statuses) is emitted with its OpenAPI into `artifacts/codegen/conformance/`, compiled with the runtime linked from the backend's `Api/`, and hosted with trivial handlers; over HTTP it checks route coverage both ways, every response against the schema for its status, `ArmResults`' status rules, binding failures, parameter binding and the missing-handler check. Replaces ARM's contract tests; the backend keeps plain **API tests**
+- [x] **Tooling conformance suite** (`test/conformance/`, .NET, run by `npm test` / `mise run codegen:test`): the widgets fixture (unions, nullables, visibility split, path/query/header/body params, several error statuses) is emitted with its OpenAPI into `artifacts/codegen/conformance/`, compiled with the runtime linked from the backend's `Api/`, and hosted with trivial handlers; over HTTP it checks route coverage both ways, every response against the schema for its status, the status rules (since M4: every response-union variant), binding failures, parameter binding and the missing-handler check. Replaces ARM's contract tests; the backend keeps plain **API tests**
 - [x] String-enum parameters bind by wire value (`?color=red`), not C# member name (found by the conformance suite)
 - [x] Build wiring: MSBuild target runs `tsp compile` (Inputs `src/spec/**`, Outputs the `.g.cs`); Docker copies the generated `.cs` from the Node stage (`-p:SkipSpecGen=true` in the .NET stage)
 - [x] Migrate `Message` + auth-config onto the generated surface; delete the hand-written DTOs/mapping
-- [ ] Later milestones extend it: PATCH tri-state, `QUERY` decorator, multiple 2xx, `Id<T>` decorator, M4 error envelope (`explode:false` string arrays in the query and SSE landed in M3)
+- [ ] Later milestones extend it: PATCH tri-state, `Id<T>` decorator (`explode:false` string arrays in the query and SSE landed in M3; several 2xx and the error envelope in M4, as typed response unions)
 
 Not yet covered (reported as `typespec-arm-csharp/unsupported-*` warnings where the spec uses
 them, so nothing is silently mistyped): untagged unions, enveloped discriminated unions and
@@ -139,7 +139,7 @@ model EventFilter {
 }
 ```
 
-- [x] Server: SSE endpoint (`TypedResults.ServerSentEvents`), server-enforced include/exclude filter, `Last-Event-ID` replay from an in-memory buffer. The emitter turns an `SSEStream<@events union>` response into `I…Handler : IHandler<Req, IAsyncEnumerable<ArmSseItem<TUnion>>>` and maps it with `ArmResults.Stream` (runtime `Api/ArmServerSentEvents.cs`): event name = the variant's `type`, id from the item (none for heartbeats), data serialized as the union so `type` is always written; a failed `Result` before streaming is a normal declared error (400); streams end on disconnect or app shutdown. The backend (`Events/`) has an `EventBus` (monotonic ids seeded from the start time, so they keep rising across restarts; bounded replay buffer without heartbeats; a subscriber that falls a buffer behind is disconnected rather than blocking publishers), `EventFilter` (unknown names are a 400; heartbeats always pass and can't be named) and a heartbeat on connect plus every `Events:HeartbeatInterval` (30s)
+- [x] Server: SSE endpoint (`TypedResults.ServerSentEvents`), server-enforced include/exclude filter, `Last-Event-ID` replay from an in-memory buffer. The emitter turns an `SSEStream<@events union>` response into `I…Handler : IHandler<Req, IAsyncEnumerable<ArmSseItem<TUnion>>>` (since M4, the `Ok` variant of its response union) (runtime `Api/ArmServerSentEventsResult.cs`): event name = the variant's `type`, id from the item (none for heartbeats), data serialized as the union so `type` is always written; a failed `Result` before streaming is a normal declared error (400); streams end on disconnect or app shutdown. The backend (`Events/`) has an `EventBus` (monotonic ids seeded from the start time, so they keep rising across restarts; bounded replay buffer without heartbeats; a subscriber that falls a buffer behind is disconnected rather than blocking publishers), `EventFilter` (unknown names are a 400; heartbeats always pass and can't be named) and a heartbeat on connect plus every `Events:HeartbeatInterval` (30s)
 - [x] **Every event payload carries a `type` discriminator.** The emitter enforces it: each `@events` variant must be JSON and a model whose `type` literal is its variant name (else `unsupported-operation`)
 - [x] Clients use Hey API's SSE stream (`for await`, built-in reconnect + `Last-Event-ID` + backoff). The CLI wraps it: non-2xx and a refused first connection fail instead of retrying forever, a stream the server ends is reopened from the last id, and each event's own id is recovered (the client reports the last id seen, heartbeats included)
 - [x] Conformance suite: each emitted event's `data` validates against its `event`'s schema (fixture SSE operation `WidgetEvents_stream`): the event name must be declared, the data valid for that branch's `contentSchema`, and `data.type` equal to the name; plus `explode:false` list and header binding
@@ -151,33 +151,41 @@ Deferred to M6: replay across server restarts (SPEC §Events) needs a persistent
 buffer is in memory. `@typespec/openapi3` 0.86 fails (`duplicate-type-name`) when an event nests
 a model with properties invisible on read (e.g. update-only); none of ARM's do yet.
 
-## M4 (part) — `QUERY` + `queryMethod`
+## M4 (part) — Search without `QUERY`
 
-SPEC wants one search operation that can be served three ways (`query` | `get` | `post`).
-TypeSpec has no `QUERY` verb decorator.
+SPEC wanted one search operation served three ways (`query` | `get` | `post`). The spike
+(2026-09-26): TypeSpec has no `QUERY` verb, and Hey API 0.99 silently drops an OpenAPI 3.2 `query`
+operation (no client function at all). So searches are plain `@post @route("/search")`
+operations; `QUERY` and `queryMethod` moved to [`VISION.md`](VISION.md#api) (OPEN-QUESTIONS A1, B4).
 
-- [ ] Choose the modelling: custom decorator that rewrites the operation into an OpenAPI 3.2
-  `query` op, vs. `@post /…/search` in the spec with `QUERY` + `GET` routed by the server as
-  aliases
-- [ ] Server maps the configured method via `MapMethods` (A1/B4), or natively on .NET 11; the conformance suite's route coverage understands the alias
-- [ ] Check Hey API behaviour with a `query` operation before committing to it
-- [ ] `arm session list` with the search body as flags
+- [x] Spike: TypeSpec verbs and Hey API with a hand-added `query` operation
+- [x] `POST /api/sessions/search` with the search body (`SessionSearch`); `arm session list` maps its flags onto it
 
 ## M4 (part) — Errors & multi-status responses
 
-- [ ] Consistent not-found: `update`/`delete` of a missing id return 400 today (Olve.MinimalApi maps every failed Result to 400); make them 404 like `get`
-- [ ] `create` returns 201
-- [ ] Declare the bearer security scheme in the spec (clients then apply `auth` themselves)
-- [ ] `@format("uuid")` on path ids (non-UUID ids currently get an undeclared empty 400)
-- [ ] SPEC error envelope as shared `@error` models; A2 mapping layer in Olve.Results → HTTP
-- [ ] `201 | 202 {queuePosition} | 409 | 503` style unions round-trip through the client and CLI exit codes
-- [ ] `Idempotency-Key` header modelled once as a reusable parameter
+As built: every operation's handler returns a **generated response union** with one variant per
+declared status (`SessionsCreateResponse.Created | .Accepted | .BadRequest | .Unauthorized |
+.ServiceUnavailable`), each writing its own status and body (`IArmResponse.ToHttpResult`). An
+undeclared status can't compile, so there is no Result → status mapping anymore (OPEN-QUESTIONS
+A2). A success body only one variant carries converts implicitly (`return session;`); errors are
+always named (`new NotFound(SessionErrors.NotFound(id))`). The runtime answers binding and
+validation failures itself (`INVALID_REQUEST`, 400 when declared, bodyless otherwise).
+
+- [x] `ErrorEnvelope` + `BadRequest`/`NotFound`/`Conflict`/`ServiceUnavailable` `@error` models; `ErrorEnvelope` maps onto the runtime's `ArmErrorEnvelope` (`external-types`)
+- [x] Emitter: per-operation response unions, several success statuses (`201 | 202`), `ArmOperation` with every success status; `WithArmValidation` replaces Olve.MinimalApi's `WithValidation` (which wrote `ResultProblem[]`)
+- [x] Consistent not-found: every id operation declares and answers 404 (`SESSION_NOT_FOUND`)
+- [x] `create` returns 201 (started) or 202 (queued, with `queuePosition`); 503 `QUEUE_FULL`
+- [x] Bearer security scheme declared in the spec (`@useAuth(BearerAuth)`, `NoAuth` on auth-config)
+- [x] `@format("uuid")` on path ids, with a declared 400 for malformed ones
+- [x] `Idempotency-Key` modelled once (`IdempotencyKey`) and honoured by `create` (in memory, 24h; successes only)
+- [x] Conformance suite: every variant of every fixture operation (201/202/400/404/409), the envelope schema, several validation problems in `details.problems`
+- [x] `201 | 202 | 409 | 503` round-trip through the client and CLI exit codes
 
 ## CLI (packaging in M1; each milestone adds its commands)
 
 - [ ] Command structure matching the SPEC command tables (`arm <entity> <verb>`), hand-written on the generated client
 - [ ] Output modes: `--pretty` (default: tables for lists, key/value for objects), `--json`, NDJSON for streams; `--binary` if the protobuf path ever lands
-- [ ] Exit codes mapped from error envelope / status
+- [x] Exit codes mapped from status (M4: 3 = 404, 4 = 409, 5 = 503)
 - [ ] Release artifact: `bun build --compile` per target (linux-x64/arm64, darwin-arm64), downloadable like `pl`
 - [ ] Optional: Python / Bash clients from the same OpenAPI artifact, if a consumer wants them
 
@@ -198,6 +206,7 @@ TypeSpec has no `QUERY` verb decorator.
 - The backend listens on 5000 today (SPEC says 18791); the CLI defaults to 5000 until that's reconciled.
 - Emit **OpenAPI 3.2**. 3.1 drops SSE `itemSchema`.
 - `@typespec/http-server-csharp` output (1.16) was lossy and didn't compile. MVC itself is no longer a blocker since AOT was dropped (2026-09-26).
+- No `QUERY` in the toolchain (2026-09-26): TypeSpec's `HttpVerb` has none, and Hey API 0.99 drops OpenAPI 3.2 `query` operations without a warning.
 - `@typespec/http-client-js` (preview) is not usable yet: wrong query key for `exclude_event`, SSE returned as `Promise<string>`, read-only fields sent on create. Re-check later.
 - Hey API 0.99 reads 3.2, honours read-only (`MessageWritable`), serializes query params correctly, and has real SSE streaming; it types the stream as `unknown` (ignores `itemSchema`), hence the `type` discriminator. It crashed with the newest TypeScript and worked on TypeScript 5, so pin TypeScript.
 - A `bun build --compile` CLI on the Hey API client is ~81 MB and depends only on libc (a .NET AOT binary would be ~10–15 MB).

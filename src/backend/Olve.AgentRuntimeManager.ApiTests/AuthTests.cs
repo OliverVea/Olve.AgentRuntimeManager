@@ -5,8 +5,8 @@ using System.Net.Http.Json;
 namespace Olve.AgentRuntimeManager.ApiTests;
 
 /// <summary>
-/// Which operations need a user: writes and the event stream do, reads and the SPA's auth
-/// config don't. Also the auth config ARM serves.
+/// Which operations need a user: all of them but the SPA's auth config (and <c>/health</c>).
+/// Also the auth config ARM serves.
 /// </summary>
 [ClassDataSource<ApiTarget>(Shared = SharedType.PerAssembly)]
 public class AuthTests(ApiTarget target)
@@ -15,9 +15,11 @@ public class AuthTests(ApiTarget target)
 
     public static IEnumerable<Func<(string Method, string Path)>> ProtectedOperations()
     {
-        yield return () => ("POST", "/api/messages");
-        yield return () => ("PUT", $"/api/messages/{SomeId}");
-        yield return () => ("DELETE", $"/api/messages/{SomeId}");
+        yield return () => ("POST", "/api/sessions");
+        yield return () => ("POST", "/api/sessions/search");
+        yield return () => ("GET", $"/api/sessions/{SomeId}");
+        yield return () => ("POST", $"/api/sessions/{SomeId}/kill");
+        yield return () => ("DELETE", $"/api/sessions/{SomeId}");
         yield return () => ("GET", "/api/events");
     }
 
@@ -43,8 +45,6 @@ public class AuthTests(ApiTarget target)
     }
 
     [Test]
-    [Arguments("/api/messages", HttpStatusCode.OK)]
-    [Arguments($"/api/messages/{SomeId}", HttpStatusCode.NotFound)]
     [Arguments("/api/auth-config", HttpStatusCode.OK)]
     [Arguments("/health", HttpStatusCode.OK)]
     public async Task AnonymousOperation_WithoutToken_IsServed(string path, HttpStatusCode expected)
@@ -78,5 +78,5 @@ public class AuthTests(ApiTarget target)
     }
 
     private static HttpRequestMessage Request(string method, string path) =>
-        new(new HttpMethod(method), path) { Content = method is "POST" or "PUT" ? Wire.TextBody("hello") : null };
+        new(new HttpMethod(method), path) { Content = method is "POST" ? Wire.Json("""{"prompt":"hello"}""") : null };
 }

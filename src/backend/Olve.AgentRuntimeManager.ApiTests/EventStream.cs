@@ -9,7 +9,7 @@ public sealed record ReceivedEvent(string Event, string? Id, JsonElement Data)
 {
     public string Type => Data.GetProperty("type").GetString()!;
 
-    public Guid? MessageId => Data.TryGetProperty("messageId", out var id) ? id.GetGuid() : null;
+    public Guid? SessionId => Data.TryGetProperty("sessionId", out var id) ? id.GetGuid() : null;
 
     public override string ToString() => $"{Event}#{Id} {Data}";
 }

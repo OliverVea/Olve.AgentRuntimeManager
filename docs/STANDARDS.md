@@ -5,10 +5,14 @@ reason. Back a rule with a test where possible.
 
 ## API behaviour
 
-- `GET` and `QUERY` MUST NOT have side effects beyond logging, metrics and tracing.
-- `PUT`, `DELETE` and `QUERY` MUST be idempotent; creating `POST`s SHOULD accept `Idempotency-Key`.
+- `GET` and searches (`POST /api/<resource>/search`) MUST NOT have side effects beyond logging,
+  metrics and tracing.
+- `PUT`, `DELETE` and searches MUST be idempotent; creating `POST`s SHOULD accept `Idempotency-Key`.
 - Every error MUST use the `{ "error": { code, message, details } }` envelope; codes are
   `SCREAMING_SNAKE_CASE` and stable once published.
+- Every status an operation can answer MUST be declared in the contract. Handlers return the
+  generated per-operation response union (`SessionsKillResponse.Conflict(…)`), so an undeclared
+  status doesn't compile; expected failures are declared responses, never exceptions.
 - The contract (`src/spec/main.tsp`) is the source of truth: every operation MUST be implemented,
   and every `/api` endpoint MUST be in the contract. The generated surface guarantees this (and
   the declared statuses and schemas); the emitter's conformance suite tests it once for all services.

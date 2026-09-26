@@ -11,8 +11,8 @@ using Olve.Results;
 namespace Fixture.Api;
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, AllowOutOfOrderMetadataProperties = true)]
+[JsonSerializable(typeof(ArmErrorEnvelope))]
 [JsonSerializable(typeof(Color))]
-[JsonSerializable(typeof(IReadOnlyList<ResultProblem>))]
 [JsonSerializable(typeof(IReadOnlyList<Widget>))]
 [JsonSerializable(typeof(IReadOnlyList<string>))]
 [JsonSerializable(typeof(Priority))]

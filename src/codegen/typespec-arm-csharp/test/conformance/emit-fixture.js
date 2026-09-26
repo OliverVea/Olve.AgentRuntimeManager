@@ -23,7 +23,7 @@ const program = await compile(NodeHost, join(here, "..", "fixtures", "widgets.ts
     "typespec-arm-csharp": {
       "emitter-output-dir": join(outDir, "generated"),
       namespace: "Fixture.Api",
-      "external-types": { ResultProblem: "ResultProblem" },
+      "external-types": { ErrorEnvelope: "ArmErrorEnvelope" },
     },
   },
 });

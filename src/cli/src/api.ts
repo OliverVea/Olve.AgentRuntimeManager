@@ -9,15 +9,14 @@ export type ApiSettings = {
 
 /** One client per invocation, so tests (and future multi-server use) never share global state. */
 export function createApiClient(settings: ApiSettings): Client {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  // The contract declares no security scheme yet, so the client's `auth` hook never fires;
-  // send the bearer explicitly on every request instead.
-  if (settings.token) headers.Authorization = `Bearer ${settings.token}`;
-
   return createClient(
     createConfig({
       baseUrl: settings.baseUrl.replace(/\/+$/, ""),
-      headers,
+      headers: { Accept: "application/json" },
+      // The contract declares bearer auth (`@useAuth(BearerAuth)`), so every secured operation
+      // (including the SSE stream) runs the client's `auth` hook, which sends `Authorization:
+      // Bearer <token>`; public ones (`@useAuth(NoAuth)`, e.g. auth-config) never get it.
+      auth: settings.token,
       ...(settings.fetch ? { fetch: settings.fetch } : {}),
     }),
   );
@@ -31,10 +30,14 @@ type SdkResult<T> = {
 };
 
 /**
- * Unwraps a Hey API call: returns the data on 2xx, throws {@link ApiError} on a non-2xx response
- * and {@link NetworkError} when no response arrived at all.
+ * Sends a Hey API call: returns the data and the HTTP status on 2xx (for operations whose success
+ * statuses differ in meaning, like 201 started vs 202 queued), throws {@link ApiError} on a
+ * non-2xx response and {@link NetworkError} when no response arrived at all.
  */
-export async function unwrap<T>(call: Promise<SdkResult<T>>, client: Client): Promise<T> {
+export async function send<T>(
+  call: Promise<SdkResult<T>>,
+  client: Client,
+): Promise<{ data: T; status: number }> {
   const result = await call;
   if (!result.response) {
     const url = result.request?.url ?? client.getConfig().baseUrl ?? "(unknown)";
@@ -43,5 +46,10 @@ export async function unwrap<T>(call: Promise<SdkResult<T>>, client: Client): Pr
   if (!result.response.ok) {
     throw new ApiError(result.response.status, result.response.statusText, result.error);
   }
-  return result.data as T;
+  return { data: result.data as T, status: result.response.status };
+}
+
+/** Like {@link send}, for when only the data matters. */
+export async function unwrap<T>(call: Promise<SdkResult<T>>, client: Client): Promise<T> {
+  return (await send(call, client)).data;
 }

@@ -47,13 +47,13 @@ async function matchSnapshots(fixture, files) {
 const diagnosticCodes = (diagnostics) => diagnostics.map((d) => `${d.severity} ${d.code}: ${d.message}`);
 
 test("widgets fixture matches its snapshots", async () => {
-  const { diagnostics, files } = await emit("widgets", { namespace: "Fixture.Api", "external-types": { ResultProblem: "ResultProblem" } });
+  const { diagnostics, files } = await emit("widgets", { namespace: "Fixture.Api", "external-types": { ErrorEnvelope: "ArmErrorEnvelope" } });
   assert.deepEqual(diagnosticCodes(diagnostics), []);
   await matchSnapshots("widgets", files);
 });
 
 test("output is deterministic", async () => {
-  const options = { "external-types": { ResultProblem: "ResultProblem" } };
+  const options = { "external-types": { ErrorEnvelope: "ArmErrorEnvelope" } };
   const [a, b] = [await emit("widgets", options), await emit("widgets", options)];
   assert.deepEqual(a.files, b.files);
 });
@@ -82,15 +82,36 @@ test("unsupported shapes are reported, not silently mistyped", async () => {
 });
 
 test("SSE operations stream their @events union with ids; explode:false lists bind from one string", async () => {
-  const { files } = await emit("widgets", { "external-types": { ResultProblem: "ResultProblem" } });
+  const { files } = await emit("widgets", { "external-types": { ErrorEnvelope: "ArmErrorEnvelope" } });
   const api = files["ArmApi.g.cs"];
   const models = files["ArmModels.g.cs"];
-  assert.match(api, /IWidgetEventsStreamHandler : IHandler<WidgetEventsStreamRequest, IAsyncEnumerable<ArmSseItem<WidgetEvent>>>/);
-  assert.match(api, /ArmResults\.Stream\(await handler\.HandleAsync\(new WidgetEventsStreamRequest\(ArmQuery\.List\(type\), lastEventId\)/);
+  assert.match(api, /IWidgetEventsStreamHandler : IArmHandler<WidgetEventsStreamRequest, WidgetEventsStreamResponse>/);
+  assert.match(api, /record Ok\(IAsyncEnumerable<ArmSseItem<WidgetEvent>> Events\) : WidgetEventsStreamResponse/);
+  assert.match(api, /ToHttpResult\(\) => new ArmServerSentEventsResult<WidgetEvent>\(Events\)/);
+  assert.match(api, /await handler\.HandleAsync\(new WidgetEventsStreamRequest\(ArmQuery\.List\(type\), lastEventId\), ct\)\)\.ToHttpResult\(\)/);
   assert.match(api, /\.Produces<WidgetEvent>\(200, "text\/event-stream"\)/);
   assert.match(models, /\[JsonPolymorphic\(TypeDiscriminatorPropertyName = "type"\)\]\n\[JsonDerivedType\(typeof\(Ping\), "ping"\)\]/);
   assert.match(models, /public abstract record WidgetEvent : IArmEvent/);
   assert.match(record(models, "WidgetChanged : WidgetEvent"), /override string EventType => "widget\.changed"/);
   // The discriminator is written by the polymorphism, not a property of its own.
   assert.doesNotMatch(record(models, "WidgetChanged : WidgetEvent"), /"type"/);
+});
+
+test("every declared response is a variant of the operation's response union", async () => {
+  const { files } = await emit("widgets", { "external-types": { ErrorEnvelope: "ArmErrorEnvelope" } });
+  const api = files["ArmApi.g.cs"];
+  // 201 | 202 | 400: one variant each, named by status, each writing its own status.
+  assert.match(api, /public abstract record WidgetsCreateResponse : IArmResponse/);
+  assert.match(api, /public sealed record Created\(Widget Body\) : WidgetsCreateResponse[\s\S]*?Status => 201;/);
+  assert.match(api, /public sealed record Accepted\(Widget Body\) : WidgetsCreateResponse[\s\S]*?Status => 202;/);
+  assert.match(api, /public sealed record BadRequest\(ArmErrorEnvelope Body\) : WidgetsCreateResponse/);
+  assert.match(api, /new\("Widgets_create", \[201, 202\], \[400\]\)/);
+  // A success body only one variant carries converts implicitly; Widget is carried twice here.
+  assert.doesNotMatch(api, /implicit operator WidgetsCreateResponse/);
+  assert.match(api, /implicit operator WidgetsUpdateResponse\(Widget body\) => new Ok\(body\)/);
+  // Errors never convert implicitly; interfaces can't.
+  assert.doesNotMatch(api, /implicit operator \w+\(ArmErrorEnvelope/);
+  assert.doesNotMatch(api, /implicit operator \w+\(IReadOnlyList/);
+  // A bodyless response.
+  assert.match(api, /public sealed record NoContent\(\) : WidgetsDeleteResponse[\s\S]*?TypedResults\.StatusCode\(204\)/);
 });

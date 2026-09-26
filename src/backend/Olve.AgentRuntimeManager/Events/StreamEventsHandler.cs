@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
-using Olve.Results;
 
 namespace Olve.AgentRuntimeManager.Events;
 
@@ -14,11 +13,11 @@ namespace Olve.AgentRuntimeManager.Events;
 /// </summary>
 public sealed class StreamEventsHandler(EventBus bus, TimeProvider time, IOptions<EventOptions> options) : IEventsStreamHandler
 {
-    public Task<Result<IAsyncEnumerable<ArmSseItem<ArmEvent>>>> HandleAsync(EventsStreamRequest request, CancellationToken cancellationToken)
+    public Task<EventsStreamResponse> HandleAsync(EventsStreamRequest request, CancellationToken cancellationToken)
     {
         if (EventFilter.Parse(request.Event, request.ExcludeEvent).TryPickProblems(out var problems, out var filter))
         {
-            return Task.FromResult<Result<IAsyncEnumerable<ArmSseItem<ArmEvent>>>>(problems);
+            return Task.FromResult<EventsStreamResponse>(new EventsStreamResponse.BadRequest(ArmErrors.Invalid([.. problems])));
         }
 
         long? after = null;
@@ -26,14 +25,14 @@ public sealed class StreamEventsHandler(EventBus bus, TimeProvider time, IOption
         {
             if (!long.TryParse(lastEventId, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
             {
-                return Task.FromResult<Result<IAsyncEnumerable<ArmSseItem<ArmEvent>>>>(
-                    new ResultProblem("'Last-Event-ID' is not an event id of this stream: '{0}'.", lastEventId));
+                return Task.FromResult<EventsStreamResponse>(new EventsStreamResponse.BadRequest(ArmError.Create(
+                    ArmErrors.InvalidRequest, $"'Last-Event-ID' is not an event id of this stream: '{lastEventId}'.")));
             }
 
             after = id;
         }
 
-        return Task.FromResult(Result.Success(Stream(filter, after, cancellationToken)));
+        return Task.FromResult<EventsStreamResponse>(new EventsStreamResponse.Ok(Stream(filter, after, cancellationToken)));
     }
 
     private async IAsyncEnumerable<ArmSseItem<ArmEvent>> Stream(
