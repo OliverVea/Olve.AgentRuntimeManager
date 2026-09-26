@@ -142,7 +142,7 @@ export function formatEvent(e: ReceivedEvent): string {
     case "session.started":
       return `${head} ${data.sessionId} providerSessionId=${data.providerSessionId}`;
     case "session.completed":
-      return `${head} ${data.sessionId} exitCode=${data.exitCode}${data.summary ? ` ${JSON.stringify(truncate(data.summary, 60))}` : ""}`;
+      return `${head} ${data.sessionId} exitCode=${data.exitCode}`;
     case "session.failed":
       return `${head} ${data.sessionId} ${JSON.stringify(truncate(data.error, 60))}`;
     case "session.cancelled":

@@ -15,7 +15,6 @@ public sealed record SessionBody(
     DateTimeOffset? EndedAt,
     string? ProviderSessionId,
     int? ExitCode,
-    string? Summary,
     string? Error,
     string? KillReason,
     string? KillSource,

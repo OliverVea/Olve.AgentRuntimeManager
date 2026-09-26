@@ -72,11 +72,11 @@ public class EventTests(ApiTarget target)
         await using var events = await EventStream.OpenAsync(client, "?event=session.completed");
         await events.NextAsync(IsHeartbeat);
 
-        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=2 fake:summary=all_done");
+        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=2");
 
         var completed = await events.NextAsync(About(session, "session.completed"));
         await Assert.That(completed.Data.GetProperty("exitCode").GetInt32()).IsEqualTo(2);
-        await Assert.That(completed.Data.GetProperty("summary").GetString()).IsEqualTo("all done");
+        await Assert.That(completed.Data.TryGetProperty("summary", out _)).IsFalse();
     }
 
     [Test]

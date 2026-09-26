@@ -8,7 +8,7 @@ public abstract record AgentOutcome
     }
 
     /// <summary>The agent finished on its own.</summary>
-    public sealed record Completed(int ExitCode, string? Summary) : AgentOutcome;
+    public sealed record Completed(int ExitCode) : AgentOutcome;
 
     /// <summary>The agent crashed or its provider gave up.</summary>
     public sealed record Failed(string Error) : AgentOutcome;

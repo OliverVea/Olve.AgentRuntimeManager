@@ -30,6 +30,6 @@ internal sealed class FakeRun : IAgentRun
 
         return script.Failure is { } failure
             ? new AgentOutcome.Failed(failure)
-            : new AgentOutcome.Completed(script.ExitCode, script.Summary ?? "Fake agent finished.");
+            : new AgentOutcome.Completed(script.ExitCode);
     }
 }

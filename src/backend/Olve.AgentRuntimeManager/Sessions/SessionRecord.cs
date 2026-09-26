@@ -23,7 +23,6 @@ public sealed record SessionRecord
     public DateTimeOffset? EndedAt { get; init; }
     public string? ProviderSessionId { get; init; }
     public int? ExitCode { get; init; }
-    public string? Summary { get; init; }
     public string? Error { get; init; }
     public string? KillReason { get; init; }
     public KillSource? KillSource { get; init; }

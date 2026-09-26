@@ -56,13 +56,14 @@ token = request(discovery["token_endpoint"], {
 }, form=True)["access_token"]
 auth = {"Authorization": f"Bearer {token}"}
 
-session = request(api + "/api/sessions", {
+created = request(api + "/api/sessions", {
     "prompt": "Tell me a joke", "provider": "claude", "model": "haiku",
     "caller": "deploy-beta", "timeoutSeconds": 120,
 }, {**auth, "Idempotency-Key": f"claude-check-{os.environ['VERSION']}"})
-session_id = session["id"]
-print(f"Session {session_id} ({session['status']})")
+session_id = created["id"]
+print(f"Session {session_id}")
 
+session = request(f"{api}/api/sessions/{session_id}", headers=auth)
 deadline = time.time() + 180
 while session["status"] in ("queued", "working") and time.time() < deadline:
     time.sleep(2)
@@ -83,5 +84,6 @@ user_plugins = [p for p in init.get("plugins", []) if not str(p.get("source", ""
 if user_plugins: problems.append(f"plugins: {user_plugins}")
 if problems:
     fail("; ".join(problems))
-print(f"Claude Code {init.get('claude_code_version')} ({init.get('model')}) locked down; it says: {session.get('summary')!r}")
+result = next((e for e in events if e.get("type") == "result"), {})
+print(f"Claude Code {init.get('claude_code_version')} ({init.get('model')}) locked down; it says: {result.get('result')!r}")
 PY

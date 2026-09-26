@@ -2,7 +2,7 @@ using Olve.AgentRuntimeManager.Api;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
-/// <summary><c>POST /api/sessions</c>: 201 when started, 202 when queued (with <c>queuePosition</c>).</summary>
+/// <summary><c>POST /api/sessions</c>: the new session's id, 201 when started, 202 when queued.</summary>
 public sealed class CreateSessionHandler(SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency) : ISessionsCreateHandler
 {
     public Task<SessionsCreateResponse> HandleAsync(SessionsCreateRequest request, CancellationToken cancellationToken)
@@ -16,8 +16,8 @@ public sealed class CreateSessionHandler(SessionManager sessions, IdempotencySto
             request.IdempotencyKey,
             () => sessions.Create(request.Body) switch
             {
-                CreateOutcome.Started started => new SessionsCreateResponse.Created(started.Session.ToDto()),
-                CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(queued.Session.ToDto()),
+                CreateOutcome.Started started => new SessionsCreateResponse.Created(new CreatedSession { Id = started.Session.Id }),
+                CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(new CreatedSession { Id = queued.Session.Id }),
                 CreateOutcome.QueueFull full => new SessionsCreateResponse.ServiceUnavailable(SessionErrors.QueueFull(full.MaxQueueSize)),
                 CreateOutcome.UnknownProvider unknown => new SessionsCreateResponse.BadRequest(SessionErrors.UnknownProvider(unknown.Provider, unknown.Known)),
                 _ => throw new InvalidOperationException("Unhandled create outcome."),

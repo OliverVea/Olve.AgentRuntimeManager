@@ -36,7 +36,7 @@ function note(session: Session): string {
         ? `<span class="note">#${session.queuePosition} in queue</span>`
         : "";
     case "completed":
-      return `<span class="note" title="${escapeHtml(session.summary ?? "")}">exit ${session.exitCode ?? "?"}</span>`;
+      return `<span class="note">exit ${session.exitCode ?? "?"}</span>`;
     case "cancelled":
     case "killed":
       return `<span class="note" title="${escapeHtml(session.killReason ?? "")}">by ${escapeHtml(endedBy(session))}</span>`;

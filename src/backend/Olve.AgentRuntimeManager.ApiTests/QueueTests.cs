@@ -31,13 +31,13 @@ public class QueueTests(SmallQueueFactory factory)
 
         await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.Created);
         await Assert.That(second.StatusCode).IsEqualTo(HttpStatusCode.Accepted);
-        var queued = (await second.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
+        var queued = await client.GetSessionAsync((await second.Content.ReadFromJsonAsync<CreatedSessionBody>(Wire.JsonOptions))!.Id);
         await Assert.That(queued.Status).IsEqualTo("queued");
         await Assert.That(queued.QueuePosition).IsEqualTo(1);
         await Assert.That(third.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
         await Assert.That((await third.ErrorAsync()).Code).IsEqualTo("QUEUE_FULL");
 
-        var running = (await first.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
+        var running = (await first.Content.ReadFromJsonAsync<CreatedSessionBody>(Wire.JsonOptions))!;
         (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();
 
         var started = await client.GetSessionAsync(queued.Id);

@@ -318,15 +318,8 @@ function patch(
         providerSessionId: event.providerSessionId,
         startedAt: event.at,
       };
-    case "session.completed": {
-      const next: Session = {
-        ...moveTo(session, "completed"),
-        endedAt: event.at,
-        exitCode: event.exitCode,
-      };
-      if (event.summary !== undefined) next.summary = event.summary;
-      return next;
-    }
+    case "session.completed":
+      return { ...moveTo(session, "completed"), endedAt: event.at, exitCode: event.exitCode };
     case "session.failed":
       return { ...moveTo(session, "failed"), endedAt: event.at, error: event.error };
     case "session.cancelled":

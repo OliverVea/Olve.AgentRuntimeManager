@@ -190,7 +190,9 @@ async function create(): Promise<void> {
   }
   createButton.disabled = true;
   try {
-    const session = await unwrap(sessionsCreate({ client, body: parsed.value }));
+    const { id } = await unwrap(sessionsCreate({ client, body: parsed.value }));
+    // Create returns only the id; read the session to show it before its events arrive.
+    const session = await unwrap(sessionsGet({ client, path: { id } }));
     store.upsert(session);
     prompt.value = "";
     fitPrompt();

@@ -76,9 +76,6 @@ model Session {
   /** Set when status is `completed`. */
   exitCode?: int32;
 
-  /** The agent's final summary. Set when status is `completed` and the agent gave one. */
-  summary?: string;
-
   /** Set when status is `failed`. */
   error?: string;
 
@@ -129,15 +126,20 @@ model KillSession {
   reason?: string;
 }
 
+/** The id of a session just created; read it with `GET /sessions/{id}`. */
+model CreatedSession {
+  @format("uuid") id: string;
+}
+
 @route("/sessions")
 interface Sessions {
   /**
-   * Creates a session. It starts right away (201) when a slot is free, else it is queued (202,
-   * with `queuePosition`); a full queue is a 503.
+   * Creates a session and returns its id. It starts right away (201) when a slot is free, else
+   * it is queued (202); a full queue is a 503.
    */
   @post create(...IdempotencyKey, @body body: CreateSession):
-    | (CreatedResponse & { @body body: Session })
-    | (AcceptedResponse & { @body body: Session })
+    | (CreatedResponse & { @body body: CreatedSession })
+    | (AcceptedResponse & { @body body: CreatedSession })
     | BadRequest
     | UnauthorizedResponse
     | ServiceUnavailable;
@@ -205,7 +207,6 @@ model SessionStarted {
 model SessionCompleted {
   ...SessionTransition<"session.completed">;
   exitCode: int32;
-  summary?: string;
 }
 
 /** A session's agent failed (or couldn't start). */

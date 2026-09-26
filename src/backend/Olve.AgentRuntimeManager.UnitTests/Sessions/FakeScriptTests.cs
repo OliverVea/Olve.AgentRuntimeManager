@@ -9,14 +9,14 @@ public class FakeScriptTests
     [Test]
     public async Task NoDirectives_CompletesAfterTheDefaultDelay() =>
         await Assert.That(FakeScript.Parse("Fix the bug", Default))
-            .IsEqualTo(new FakeScript(Default, Hang: false, ExitCode: 0, Summary: null, Failure: null));
+            .IsEqualTo(new FakeScript(Default, Hang: false, ExitCode: 0, Failure: null));
 
     [Test]
     public async Task Directives_AnywhereInThePrompt_AreApplied()
     {
-        var script = FakeScript.Parse("Do it fake:sleep=250ms\nthen fake:exit=3 fake:summary=all_done", Default);
+        var script = FakeScript.Parse("Do it fake:sleep=250ms\nthen fake:exit=3", Default);
 
-        await Assert.That(script).IsEqualTo(new FakeScript(TimeSpan.FromMilliseconds(250), false, 3, "all done", null));
+        await Assert.That(script).IsEqualTo(new FakeScript(TimeSpan.FromMilliseconds(250), false, 3, null));
     }
 
     [Test]

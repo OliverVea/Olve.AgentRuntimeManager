@@ -19,14 +19,14 @@ public class ClaudeProviderTests
     public void Cleanup() => Directory.Delete(_root, recursive: true);
 
     [Test]
-    public async Task Turn_Succeeds_CompletesWithTheResultAsSummary()
+    public async Task Turn_Succeeds_Completes()
     {
         var launch = Launch("Say READY");
 
         var run = Provider().Start(launch);
         var outcome = await run.Completion;
 
-        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0, "READY\n\nNO-CANARY"));
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(run.ProviderSessionId).IsEqualTo(launch.SessionId.ToString());
     }
 
@@ -153,7 +153,7 @@ public class ClaudeProviderTests
 
         var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
 
-        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0, "READY\n\nNO-CANARY"));
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
     }
 
     [Test]

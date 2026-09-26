@@ -298,11 +298,11 @@ public sealed class SessionManager : IDisposable
             switch (outcome)
             {
                 case AgentOutcome.Completed completed:
-                    var done = EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode, Summary = completed.Summary });
+                    var done = EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode });
                     _events.Publish(new SessionCompleted
                     {
                         At = done.EndedAt!.Value, SessionId = id, Previous = session.Status,
-                        ExitCode = completed.ExitCode, Summary = completed.Summary,
+                        ExitCode = completed.ExitCode,
                     });
                     break;
                 case AgentOutcome.Failed failed:

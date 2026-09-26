@@ -20,7 +20,6 @@ public static class SessionMapping
         EndedAt = session.EndedAt,
         ProviderSessionId = session.ProviderSessionId,
         ExitCode = session.ExitCode,
-        Summary = session.Summary,
         Error = session.Error,
         KillReason = session.KillReason,
         KillSource = session.KillSource,

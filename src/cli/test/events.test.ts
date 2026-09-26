@@ -219,8 +219,8 @@ describe("formatEvent", () => {
   test("one line per session event", () => {
     const time = clock(at);
     expect(line({ type: "session.queued", position: 3 })).toBe(`${time} session.queued ${sessionId} position=3`);
-    expect(line({ type: "session.completed", previous: "working", exitCode: 0, summary: "done" })).toBe(
-      `${time} session.completed ${sessionId} exitCode=0 "done"`,
+    expect(line({ type: "session.completed", previous: "working", exitCode: 0 })).toBe(
+      `${time} session.completed ${sessionId} exitCode=0`,
     );
     expect(line({ type: "session.failed", previous: "working", error: "boom" })).toBe(
       `${time} session.failed ${sessionId} "boom"`,

@@ -56,7 +56,7 @@ artifacts/                                      # Everything generated (gitignor
 | GET | `/health` | No | Health check, returns 200 |
 | GET | `/api/auth-config` | No | Public OIDC settings for the SPA login (authority, client id, scopes) |
 | GET | `/api/server-info` | Yes (JWT) | Build version and environment (`beta`/`prod`) from the deploy; both `null` on a local run |
-| POST | `/api/sessions` | Yes (JWT) | Create a session: 201 started, 202 queued (`queuePosition`), 503 queue full; `Idempotency-Key` honoured |
+| POST | `/api/sessions` | Yes (JWT) | Create a session; returns its id: 201 started, 202 queued, 503 queue full; `Idempotency-Key` honoured |
 | POST | `/api/sessions/search` | Yes (JWT) | Search sessions (filters in the body), newest first |
 | GET | `/api/sessions/{id}` | Yes (JWT) | Get a session |
 | POST | `/api/sessions/{id}/kill` | Yes (JWT) | Kill a queued or working session (`{ "caller": "…", "reason": "…" }`); 409 if it already ended |
@@ -75,13 +75,13 @@ Sessions (`Sessions/`) are stored in SQLite (see [Persistence](#persistence)): `
 keeps a FIFO queue in front of `Sessions:TotalSlots` slots, moves sessions through the state machine
 (`SessionLifecycle`), kills them at their timeout, and publishes a lifecycle event per change.
 Agents run through the `IAgentProvider` seam. `fake` runs no LLM and follows `fake:` directives in
-the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:summary=…`, `fake:fail=…`; see
+the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`; see
 `FakeScript`). `claude` runs Claude Code (`Providers/Claude/`): one `claude -p` process per session,
 spoken to in its `stream-json` protocol, locked down (no built-in tools, none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
-variables), with the ARM session id as Claude's session id. It answers one prompt with one turn;
-the final result is the session's summary, and the raw output is kept in
-`<WorkRoot>/<session id>/output.jsonl`. It uses the machine's Claude Code login (or
+variables), with the ARM session id as Claude's session id. It answers one prompt with one turn; its
+output (the agent's answer included) is kept in `<WorkRoot>/<session id>/output.jsonl` until the
+conversation is in the API (M5b). It uses the machine's Claude Code login (or
 `CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
 
 `GET /api/events` (`Events/`) streams every session change as SSE (`arm events` tails it). Each

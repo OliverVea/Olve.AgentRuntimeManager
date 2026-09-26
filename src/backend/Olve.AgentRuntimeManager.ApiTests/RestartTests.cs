@@ -17,7 +17,7 @@ public class RestartTests
             await using (var before = new RestartedFactory(folder))
             {
                 var client = Client(before);
-                done = await client.CreateSessionAsync("fake:sleep=0ms fake:summary=all_done", "restart-test");
+                done = await client.CreateSessionAsync("fake:sleep=0ms", "restart-test");
                 await client.WaitForSessionAsync(done.Id, s => s.Status == "completed");
                 hanging = await client.CreateSessionAsync("fake:hang", "restart-test");
             }
@@ -30,7 +30,6 @@ public class RestartTests
             var page = (await search.Content.ReadFromJsonAsync<SessionPageBody>(Wire.JsonOptions))!;
 
             await Assert.That(completed.Status).IsEqualTo("completed");
-            await Assert.That(completed.Summary).IsEqualTo("all done");
             await Assert.That(killed.Status).IsEqualTo("killed");
             await Assert.That(killed.KillSource).IsEqualTo("system");
             await Assert.That(page.Total).IsEqualTo(2);

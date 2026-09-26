@@ -44,7 +44,6 @@ export function formatSession(s: Session): string {
     ["endedAt", s.endedAt],
     ["providerSessionId", s.providerSessionId],
     ["exitCode", s.exitCode],
-    ["summary", s.summary],
     ["error", s.error],
     ["killReason", s.killReason],
     ["killSource", s.killSource],
@@ -131,15 +130,12 @@ export const sessionGroup: CommandGroup = {
       async run({ args, options, client, settings, user }) {
         const body = createBody(args.prompt!, options, { settings, user });
         const key = text(options, "idempotency-key");
-        const { data: session, status } = await send(
+        const { data: created, status } = await send(
           sessionsCreate({ client, body, ...(key ? { headers: { "Idempotency-Key": key } } : {}) }),
           client,
         );
-        const headline =
-          status === 202
-            ? `Queued session ${session.id}${session.queuePosition !== undefined ? ` at position ${session.queuePosition}` : ""}.`
-            : `Started session ${session.id}.`;
-        return { json: session, pretty: `${headline}\n\n${formatSession(session)}` };
+        // Only the id comes back; `arm session get <id>` shows the session.
+        return { json: created, pretty: `${status === 202 ? "Queued" : "Started"} session ${created.id}.` };
       },
     },
     {

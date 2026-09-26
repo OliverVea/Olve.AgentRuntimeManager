@@ -71,7 +71,7 @@ a repeated key within 24 hours returns the original response.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create (starts, or queues: 202 + position) |
+| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create; returns its id (201 started, 202 queued) |
 | `arm session list [--status X,Y] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `POST /api/sessions/search` | Search |
 | `arm session get <id>` | `GET /api/sessions/:id` | Get |
 | `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill a queued/working/waiting session |
@@ -283,7 +283,7 @@ subject ID (`sessionId`, `completionId`, or `provider`). The table lists the rem
 | `session.started` | sessionId, previous, providerSessionId |
 | `session.waiting` | sessionId, previous |
 | `session.resumed` | sessionId, previous |
-| `session.completed` | sessionId, previous, exitCode, summary |
+| `session.completed` | sessionId, previous, exitCode |
 | `session.failed` | sessionId, previous, error |
 | `session.killed` | sessionId, previous, reason, source (user\|system\|timeout) |
 | `session.revived` | sessionId, newSessionId |
@@ -319,7 +319,7 @@ a trailing `.*` matches a namespace, e.g. `session.approval.*`),
 | `arm server logs [-f] [--since T]` | — | Server output |
 
 - **Queue:** FIFO with a concurrent-session limit. When all slots are busy, create returns 202
-  with the queue position; when the queue is full, 503. New sessions also wait while host memory
+  (the session's position is on the session); when the queue is full, 503. New sessions also wait while host memory
   is low.
 - **Gentle restart:** the server can exit and come back without killing running agents; the new
   server re-attaches to them and clients replay missed events via `Last-Event-ID`.

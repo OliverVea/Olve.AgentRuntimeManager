@@ -19,7 +19,7 @@ public static class Wire
     public static StringContent JsonContent<T>(T value) =>
         new(System.Text.Json.JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
 
-    /// <summary>POST /api/sessions; fails unless the session was created (201 or 202).</summary>
+    /// <summary>POST /api/sessions, then reads the new session back; fails unless it was created (201 or 202).</summary>
     public static Task<SessionBody> CreateSessionAsync(this HttpClient client, string prompt, string caller = "api-tests", int? timeoutSeconds = null) =>
         client.CreateSessionAsync(new CreateSessionBody(prompt, caller, timeoutSeconds));
 
@@ -27,7 +27,8 @@ public static class Wire
     {
         using var response = await client.PostAsync("/api/sessions", JsonContent(body));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<SessionBody>(JsonOptions))!;
+        var created = (await response.Content.ReadFromJsonAsync<CreatedSessionBody>(JsonOptions))!;
+        return await client.GetSessionAsync(created.Id);
     }
 
     /// <summary>A session whose (fake) agent runs until killed (or its timeout).</summary>

@@ -10,9 +10,6 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// </summary>
 internal sealed class ClaudeRun : IAgentRun
 {
-    /// <summary>Longest summary kept; the agent's full answer stays in <c>output.jsonl</c>.</summary>
-    internal const int MaxSummaryLength = 16_000;
-
     private const int StderrTailLength = 2_000;
 
     private readonly Process _process;
@@ -104,7 +101,7 @@ internal sealed class ClaudeRun : IAgentRun
 
     internal static AgentOutcome Outcome(ClaudeResult? result, int exitCode, string stderrTail) => result switch
     {
-        { IsError: false } => new AgentOutcome.Completed(exitCode, Truncate(result.Text)),
+        { IsError: false } => new AgentOutcome.Completed(exitCode),
         { } failed => new AgentOutcome.Failed(
             $"Claude Code's turn ended with {failed.Subtype}"
             + (failed.Errors.Count > 0 ? $": {string.Join("; ", failed.Errors)}" : failed.Text is { Length: > 0 } text ? $": {text}" : ".")),
@@ -146,9 +143,6 @@ internal sealed class ClaudeRun : IAgentRun
             // The agent already closed its end.
         }
     }
-
-    private static string? Truncate(string? text) =>
-        text is { Length: > MaxSummaryLength } ? text[..MaxSummaryLength] + " […]" : text;
 
     /// <summary>Copies stderr to its file as it comes (so a full pipe never stalls the agent); returns its tail.</summary>
     private async Task<string> CollectStderrAsync(string path)

@@ -15,7 +15,7 @@ const session = {
   timeoutSeconds: 600,
   createdAt,
 };
-const queued = { ...session, status: "queued", queuePosition: 3 };
+const created = { id };
 const page = {
   items: [session, { ...session, id: "0b1c", status: "completed", caller: "ci", prompt: "second\nline" }],
   total: 5,
@@ -34,8 +34,8 @@ const required = ["--provider", "claude", "--model", "sonnet", "--caller", "orib
 const requiredBody = { provider: "claude", model: "sonnet", caller: "oribot" };
 
 describe("session create", () => {
-  test("201: POSTs the body with the bearer; prints 'Started' and the session", async () => {
-    const f = fakeFetch(() => ({ status: 201, body: session }));
+  test("201: POSTs the body with the bearer; prints 'Started' and the id", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await cli(["session", "create", "fix the flaky test", ...required], f);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
@@ -47,31 +47,25 @@ describe("session create", () => {
     expect(req.headers.get("idempotency-key")).toBe(null);
     // Unset options are left out, so the server applies its defaults.
     expect(req.body).toEqual({ prompt: "fix the flaky test", ...requiredBody });
-    const lines = r.stdout.split("\n");
-    expect(lines[0]).toBe(`Started session ${id}.`);
-    expect(r.stdout).toContain(`id              ${id}`);
-    expect(r.stdout).toContain("model           sonnet");
-    expect(r.stdout).toContain("caller          oribot");
-    expect(r.stdout).not.toContain("startedAt");
+    expect(r.stdout.trim()).toBe(`Started session ${id}.`);
   });
 
-  test("202: prints 'Queued' with the queue position", async () => {
-    const f = fakeFetch(() => ({ status: 202, body: queued }));
+  test("202: prints 'Queued' and the id", async () => {
+    const f = fakeFetch(() => ({ status: 202, body: created }));
     const r = await cli(["session", "create", "x", ...required], f);
     expect(r.code).toBe(0);
-    expect(r.stdout.split("\n")[0]).toBe(`Queued session ${id} at position 3.`);
-    expect(r.stdout).toContain("queued (position 3)");
+    expect(r.stdout.trim()).toBe(`Queued session ${id}.`);
   });
 
-  test("--json prints the raw session for both 201 and 202", async () => {
-    const f = fakeFetch(() => ({ status: 202, body: queued }));
+  test("--json prints the raw response ({ id }) for both 201 and 202", async () => {
+    const f = fakeFetch(() => ({ status: 202, body: created }));
     const r = await cli(["session", "create", "x", ...required, "--json"], f);
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.stdout)).toEqual(queued);
+    expect(JSON.parse(r.stdout)).toEqual(created);
   });
 
   test("every option maps to the create body", async () => {
-    const f = fakeFetch(() => ({ status: 201, body: session }));
+    const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await cli(
       [
         "session", "create",
@@ -91,7 +85,7 @@ describe("session create", () => {
   });
 
   test("a prompt starting with a dash goes after --", async () => {
-    const f = fakeFetch(() => ({ status: 201, body: session }));
+    const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await runCli(["session", "create", ...required, "--url", url, "--token", "tok", "--", "-5 degrees"], { fetch: f.fetch });
     expect(r.code).toBe(0);
     expect(f.requests[0]!.body).toEqual({ prompt: "-5 degrees", ...requiredBody });

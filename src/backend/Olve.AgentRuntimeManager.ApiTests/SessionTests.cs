@@ -22,10 +22,14 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
 
         using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("Wait. fake:hang", "creator") { Model = "fake-large" }));
-        var session = (await response.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
+        var body = await response.Content.ReadAsStringAsync();
+        var created = System.Text.Json.JsonSerializer.Deserialize<CreatedSessionBody>(body, Wire.JsonOptions)!;
+        var session = await client.GetSessionAsync(created.Id);
         await client.KillSessionAsync(session.Id);
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Created);
+        // Only the id: the session itself is read with GET.
+        await Assert.That(System.Text.Json.Nodes.JsonNode.Parse(body)!.AsObject().Select(p => p.Key)).IsEquivalentTo(["id"]);
         await Assert.That(session.Status).IsEqualTo("working");
         await Assert.That(session.QueuePosition).IsNull();
         await Assert.That(session.Provider).IsEqualTo("fake");
@@ -40,13 +44,12 @@ public class SessionTests(ApiTarget target)
     public async Task Session_RunsToCompletion()
     {
         var client = target.CreateAuthenticatedClient();
-        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=3 fake:summary=all_done");
+        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=3");
 
         var completed = await client.WaitForSessionAsync(session.Id, Ended);
 
         await Assert.That(completed.Status).IsEqualTo("completed");
         await Assert.That(completed.ExitCode).IsEqualTo(3);
-        await Assert.That(completed.Summary).IsEqualTo("all done");
         await Assert.That(completed.EndedAt).IsNotNull();
     }
 
@@ -122,12 +125,12 @@ public class SessionTests(ApiTarget target)
         var caller = UniqueCaller();
         var key = Guid.NewGuid().ToString();
 
-        async Task<(HttpStatusCode, SessionBody)> Create()
+        async Task<(HttpStatusCode, CreatedSessionBody)> Create()
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/sessions") { Content = Wire.JsonContent(new CreateSessionBody("fake:sleep=0ms", caller)) };
             request.Headers.Add("Idempotency-Key", key);
             using var response = await client.SendAsync(request);
-            return (response.StatusCode, (await response.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!);
+            return (response.StatusCode, (await response.Content.ReadFromJsonAsync<CreatedSessionBody>(Wire.JsonOptions))!);
         }
 
         var (firstStatus, first) = await Create();
@@ -135,7 +138,6 @@ public class SessionTests(ApiTarget target)
 
         await Assert.That(secondStatus).IsEqualTo(firstStatus);
         await Assert.That(second.Id).IsEqualTo(first.Id);
-        await Assert.That(second.CreatedAt).IsEqualTo(first.CreatedAt);
         var page = await Search(client, new { caller });
         await Assert.That(page.Total).IsEqualTo(1);
     }

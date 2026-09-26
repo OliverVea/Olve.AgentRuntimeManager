@@ -151,7 +151,6 @@ describe("SessionStore", () => {
       sessionId: "s2",
       previous: "working",
       exitCode: 0,
-      summary: "done",
     });
 
     await vi.waitFor(() => expect(store.active).toEqual([]));
@@ -162,7 +161,7 @@ describe("SessionStore", () => {
       killReason: "stop",
       killCaller: "oliver",
     });
-    expect(store.get("s2")).toMatchObject({ status: "completed", exitCode: 0, summary: "done" });
+    expect(store.get("s2")).toMatchObject({ status: "completed", exitCode: 0 });
   });
 
   it("pages History, newest first, merging what ended live", async () => {

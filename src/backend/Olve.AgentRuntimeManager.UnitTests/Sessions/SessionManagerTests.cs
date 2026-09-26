@@ -191,11 +191,10 @@ public class SessionManagerTests : IDisposable
         Create();
         var queued = Create();
 
-        _provider.RunOf(running.Id).End(new AgentOutcome.Completed(0, "done"));
+        _provider.RunOf(running.Id).End(new AgentOutcome.Completed(0));
 
         var completed = await Eventually(running.Id, s => s.Status == SessionStatus.Completed);
         await Assert.That(completed.ExitCode).IsEqualTo(0);
-        await Assert.That(completed.Summary).IsEqualTo("done");
         await Assert.That(completed.EndedAt).IsEqualTo(Start);
         var next = await Eventually(queued.Id, s => s.Status == SessionStatus.Working);
         await Assert.That(next.QueuePosition).IsNull();
@@ -300,7 +299,7 @@ public class SessionManagerTests : IDisposable
     public async Task Timeout_OfACompletedSession_DoesNothing()
     {
         var session = Create(timeoutSeconds: 5);
-        _provider.RunOf(session.Id).End(new AgentOutcome.Completed(0, null));
+        _provider.RunOf(session.Id).End(new AgentOutcome.Completed(0));
         await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
 
         _time.Advance(TimeSpan.FromSeconds(10));
@@ -336,13 +335,13 @@ public class SessionManagerTests : IDisposable
     public async Task Restart_KeepsEndedSessions()
     {
         var done = Create("finish");
-        _provider.RunOf(done.Id).End(new AgentOutcome.Completed(0, "all done"));
+        _provider.RunOf(done.Id).End(new AgentOutcome.Completed(4));
         await Eventually(done.Id, s => s.Status == SessionStatus.Completed);
 
         Restart();
 
         await Assert.That(_sessions.Get(done.Id)).IsEqualTo(_sessions.Search(new SessionSearch(), 10, 0).Items.Single());
-        await Assert.That(_sessions.Get(done.Id)!.Summary).IsEqualTo("all done");
+        await Assert.That(_sessions.Get(done.Id)!.ExitCode).IsEqualTo(4);
     }
 
     [Test]
