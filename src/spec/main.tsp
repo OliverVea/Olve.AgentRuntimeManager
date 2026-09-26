@@ -32,7 +32,7 @@ model PageOfMessage {
 
 /**
  * Current error shape (Olve.MinimalApi result mapping).
- * Replaced by the SPEC error envelope `{ error: { code, message, details } }` in M3 (A2).
+ * Replaced by the SPEC error envelope `{ error: { code, message, details } }` in M4 (A2).
  */
 model ResultProblem {
   message: string;
@@ -76,7 +76,7 @@ interface Messages {
 
   /**
    * A missing id is currently a 400 (Olve.MinimalApi maps every failed Result to 400), unlike
-   * `get`'s 404; the SPEC error envelope in M3 settles not-found handling for all operations.
+   * `get`'s 404; the SPEC error envelope in M4 settles not-found handling for all operations.
    */
   @put update(@path id: string, @body body: Message):
     | Message
