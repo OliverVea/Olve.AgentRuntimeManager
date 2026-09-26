@@ -103,5 +103,5 @@ From an event-type review; general agreement, details open:
   `arm-private.ovea.pro`, both Tailscale-private, so `/health` isn't public) and Authentik
   blueprints (`olve-arm`, `olve-arm-spa`) are in; the repo is bound to an Olve.Pipelines pipeline.
   If ARM ever gets a public route, keep `/health` off it (prefix paths or a Traefik middleware).
-- **C3. `Message` example — open:** keep as the M1–M3 test bed; remove when the first real ARM
-  entity lands?
+- **C3. `Message` example — decided (2026-09-26):** removed in M4; the API spec contains only ARM
+  entities from then on.
