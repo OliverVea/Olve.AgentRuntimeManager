@@ -26,7 +26,7 @@ public class SessionManagerTests : IDisposable
         _sessions = new SessionManager(
             _bus,
             _time,
-            Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2, DefaultTimeoutSeconds = 60 }),
+            Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2 }),
             [_provider],
             NullLogger<SessionManager>.Instance);
     }
@@ -103,14 +103,14 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
-    public async Task Create_KeepsTheRequest_AndDefaultsTheTimeout()
+    public async Task Create_KeepsTheRequest_WithNoTimeoutByDefault()
     {
         var session = Create();
 
         await Assert.That(session.Provider).IsEqualTo(_provider.Name);
         await Assert.That(session.Model).IsEqualTo("m");
         await Assert.That(session.Caller).IsEqualTo("tests");
-        await Assert.That(session.TimeoutSeconds).IsEqualTo(60);
+        await Assert.That(session.TimeoutSeconds).IsNull();
         await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m"));
     }
 
@@ -266,6 +266,16 @@ public class SessionManagerTests : IDisposable
         await Assert.That(killed.KillSource).IsEqualTo(KillSource.Timeout);
         await Assert.That(killed.KillReason).IsEqualTo("Timed out after 5s.");
         await Assert.That(_provider.RunOf(session.Id).WasKilled).IsTrue();
+    }
+
+    [Test]
+    public async Task WithoutATimeout_ASessionRunsUntilItEnds()
+    {
+        var session = Create();
+
+        _time.Advance(TimeSpan.FromDays(2));
+
+        await Assert.That(_sessions.Get(session.Id)!.Status).IsEqualTo(SessionStatus.Working);
     }
 
     [Test]

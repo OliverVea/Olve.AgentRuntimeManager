@@ -31,7 +31,7 @@ public class SessionTests(ApiTarget target)
         await Assert.That(session.Provider).IsEqualTo("fake");
         await Assert.That(session.Model).IsEqualTo("fake-large");
         await Assert.That(session.Caller).IsEqualTo("creator");
-        await Assert.That(session.TimeoutSeconds).IsGreaterThan(0);
+        await Assert.That(session.TimeoutSeconds).IsNull();
         await Assert.That(session.StartedAt).IsNotNull();
         await Assert.That(session.ProviderSessionId).IsNotNull();
     }

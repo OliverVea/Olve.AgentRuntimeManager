@@ -39,7 +39,7 @@ model CreateSession {
 
   /**
    * Seconds the session may run once started (time queued doesn't count); then it is killed
-   * with source `timeout`. Unset: the server's default (600).
+   * with source `timeout`. Unset: no timeout.
    */
   @minValue(1) timeoutSeconds?: int32;
 }
@@ -56,7 +56,9 @@ model Session {
   provider: string;
   `model`: string;
   caller: string;
-  timeoutSeconds: int32;
+
+  /** Set when the session has a timeout. */
+  timeoutSeconds?: int32;
 
   createdAt: utcDateTime;
 

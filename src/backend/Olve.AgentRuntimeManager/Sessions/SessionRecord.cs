@@ -15,7 +15,8 @@ public sealed record SessionRecord
     public required string Provider { get; init; }
     public required string Model { get; init; }
     public required string Caller { get; init; }
-    public required int TimeoutSeconds { get; init; }
+    /// <summary>Seconds it may run once started; null: no timeout.</summary>
+    public int? TimeoutSeconds { get; init; }
 
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? StartedAt { get; init; }

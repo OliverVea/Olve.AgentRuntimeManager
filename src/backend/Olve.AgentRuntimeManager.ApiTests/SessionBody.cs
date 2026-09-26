@@ -9,7 +9,7 @@ public sealed record SessionBody(
     string Provider,
     string Model,
     string Caller,
-    int TimeoutSeconds,
+    int? TimeoutSeconds,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt,

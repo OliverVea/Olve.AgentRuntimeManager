@@ -118,7 +118,7 @@ export const sessionGroup: CommandGroup = {
         caller: { type: "string", description: "Who started the session; searchable (default: setting caller, else your user name)", valueName: "X" },
         "timeout-seconds": {
           type: "string",
-          description: "Kill the session this long after it starts (default: the server's)",
+          description: "Kill the session this long after it starts (default: no timeout)",
           valueName: "N",
         },
         "idempotency-key": {

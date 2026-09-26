@@ -203,7 +203,6 @@ Sources in priority order (highest wins):
 | `Events:ReplayCapacity` | `1000` | Recent events kept for `Last-Event-ID` replay (and how far a connection may lag) |
 | `Sessions:TotalSlots` | `10` | Sessions that run at once; more are queued (202) |
 | `Sessions:MaxQueueSize` | `200` | Sessions that may wait for a slot; more are a 503 `QUEUE_FULL` |
-| `Sessions:DefaultTimeoutSeconds` | `600` | Timeout of a session without `timeoutSeconds` (then killed, source `timeout`) |
 | `Sessions:IdempotencyWindow` | `1.00:00:00` | How long an `Idempotency-Key` replays its original response |
 | `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
 

@@ -11,9 +11,6 @@ public sealed class SessionOptions
     /// <summary>Sessions that may wait for a slot (SPEC <c>maxQueueSize</c>); more are a 503.</summary>
     public int MaxQueueSize { get; set; } = 200;
 
-    /// <summary>Timeout of a session that doesn't set <c>timeoutSeconds</c> (SPEC <c>backgroundTimeout</c>).</summary>
-    public int DefaultTimeoutSeconds { get; set; } = 600;
-
     /// <summary>How long an <c>Idempotency-Key</c> replays its original response (SPEC: 24 hours).</summary>
     public TimeSpan IdempotencyWindow { get; set; } = TimeSpan.FromHours(24);
 }

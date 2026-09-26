@@ -73,7 +73,7 @@ public sealed class SessionManager : IDisposable
                 Provider = request.Provider,
                 Model = request.Model,
                 Caller = request.Caller,
-                TimeoutSeconds = request.TimeoutSeconds ?? _options.DefaultTimeoutSeconds,
+                TimeoutSeconds = request.TimeoutSeconds,
                 CreatedAt = _time.GetUtcNow(),
             };
             _sessions[session.Id] = session;
@@ -148,7 +148,7 @@ public sealed class SessionManager : IDisposable
 
             if (_running.Remove(id, out var running))
             {
-                running.Timeout.Dispose();
+                running.Timeout?.Dispose();
                 run = running.Run;
             }
 
@@ -202,7 +202,7 @@ public sealed class SessionManager : IDisposable
         {
             foreach (var running in _running.Values)
             {
-                running.Timeout.Dispose();
+                running.Timeout?.Dispose();
             }
         }
     }
@@ -232,12 +232,14 @@ public sealed class SessionManager : IDisposable
             StartedAt = now,
             ProviderSessionId = run.ProviderSessionId,
         };
-        var timeout = TimeSpan.FromSeconds(session.TimeoutSeconds);
-        var timer = _time.CreateTimer(
-            _ => Kill(id, $"Timed out after {session.TimeoutSeconds}s.", KillSource.Timeout),
-            state: null,
-            timeout,
-            Timeout.InfiniteTimeSpan);
+        // No timeout: no timer (the session runs until it ends or is killed).
+        var timer = session.TimeoutSeconds is { } seconds
+            ? _time.CreateTimer(
+                _ => Kill(id, $"Timed out after {seconds}s.", KillSource.Timeout),
+                state: null,
+                TimeSpan.FromSeconds(seconds),
+                Timeout.InfiniteTimeSpan)
+            : null;
         _running[id] = new RunningAgent(run, timer);
         _events.Publish(new SessionStarted { At = now, SessionId = id, Previous = session.Status, ProviderSessionId = run.ProviderSessionId });
 
@@ -257,7 +259,7 @@ public sealed class SessionManager : IDisposable
             }
 
             _running.Remove(id);
-            running.Timeout.Dispose();
+            running.Timeout?.Dispose();
             var session = _sessions[id];
             switch (outcome)
             {
