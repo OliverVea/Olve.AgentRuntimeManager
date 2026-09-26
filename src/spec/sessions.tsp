@@ -30,7 +30,7 @@ model CreateSession {
   /** The task: the first user message the agent receives. Must not be blank. */
   @minLength(1) prompt: string;
 
-  /** The provider that runs the agent (`fake` so far). An unknown name is a 400 `UNKNOWN_PROVIDER`. */
+  /** The provider that runs the agent: `fake` (no LLM, for tests) or `claude` (Claude Code). An unknown name is a 400 `UNKNOWN_PROVIDER`. */
   @minLength(1) provider: string;
 
   /** The model, in the provider's own naming, passed to it as is. The `fake` provider ignores it. */
