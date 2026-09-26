@@ -28,6 +28,7 @@ union ArmEvent {
   @TypeSpec.Events.contentType("application/json") `session.started`: SessionStarted,
   @TypeSpec.Events.contentType("application/json") `session.completed`: SessionCompleted,
   @TypeSpec.Events.contentType("application/json") `session.failed`: SessionFailed,
+  @TypeSpec.Events.contentType("application/json") `session.cancelled`: SessionCancelled,
   @TypeSpec.Events.contentType("application/json") `session.killed`: SessionKilled,
 }
 
@@ -40,6 +41,7 @@ union ArmEventData {
   `session.started`: SessionStarted,
   `session.completed`: SessionCompleted,
   `session.failed`: SessionFailed,
+  `session.cancelled`: SessionCancelled,
   `session.killed`: SessionKilled,
 }
 

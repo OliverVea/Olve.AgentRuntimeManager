@@ -21,6 +21,7 @@ const statusSet: Record<SessionStatus, true> = {
   queued: true,
   working: true,
   completed: true,
+  cancelled: true,
   killed: true,
   failed: true,
 };
@@ -183,7 +184,9 @@ export const sessionGroup: CommandGroup = {
           sessionsKill({ client, path: { id: args.id! }, body: reason ? { caller, reason } : { caller } }),
           client,
         );
-        return { json: session, pretty: `Killed session ${session.id}.\n\n${formatSession(session)}` };
+        // A queued session is cancelled, a working one killed; the status says which.
+        const verb = session.status === "cancelled" ? "Cancelled" : "Killed";
+        return { json: session, pretty: `${verb} session ${session.id}.\n\n${formatSession(session)}` };
       },
     },
     {

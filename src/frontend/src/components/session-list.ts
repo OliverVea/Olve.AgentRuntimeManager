@@ -174,8 +174,13 @@ export class SessionList extends BaseElement {
       case "session.failed":
         next = { ...moveTo(next, "failed"), endedAt: event.at, error: event.error };
         break;
+      case "session.cancelled":
       case "session.killed":
-        next = { ...moveTo(next, "killed"), endedAt: event.at, killSource: event.source };
+        next = {
+          ...moveTo(next, event.type === "session.cancelled" ? "cancelled" : "killed"),
+          endedAt: event.at,
+          killSource: event.source,
+        };
         if (event.reason !== undefined) next.killReason = event.reason;
         if (event.caller !== undefined) next.killCaller = event.caller;
         break;
@@ -204,6 +209,7 @@ export class SessionList extends BaseElement {
       .status.working { background: rgba(60,130,220,0.18); }
       .status.completed { background: rgba(58,166,106,0.18); }
       .status.failed, .status.killed { background: rgba(200,60,60,0.16); }
+      .status.cancelled { background: rgba(120,120,120,0.16); }
       .error { margin: 0.75rem 0; padding: 0.6rem 0.8rem; border-radius: 6px; background: rgba(200,60,60,0.14); font-size: 0.88rem; }
       .muted { opacity: 0.6; padding: 1rem 0; }
       .signin { display: flex; align-items: center; gap: 0.8rem; padding: 1rem 0; }
@@ -266,8 +272,9 @@ function row(session: Session): string {
       ? `<span class="queue">#${session.queuePosition} in queue</span>`
       : "";
   const killedBy =
-    session.status === "killed" && session.killCaller !== undefined
-      ? `<span class="killed-by dim">killed by ${escapeHtml(session.killCaller)}</span>`
+    (session.status === "killed" || session.status === "cancelled") &&
+    session.killCaller !== undefined
+      ? `<span class="killed-by dim">${session.status} by ${escapeHtml(session.killCaller)}</span>`
       : "";
   return `
     <li data-id="${escapeHtml(session.id)}">

@@ -7,7 +7,8 @@ public abstract record KillOutcome
     {
     }
 
-    public sealed record Killed(SessionRecord Session) : KillOutcome;
+    /// <summary>The session was stopped: cancelled if it was queued, killed if it was working.</summary>
+    public sealed record Stopped(SessionRecord Session) : KillOutcome;
 
     public sealed record NotFound : KillOutcome;
 

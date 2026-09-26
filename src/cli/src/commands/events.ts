@@ -145,6 +145,7 @@ export function formatEvent(e: ReceivedEvent): string {
       return `${head} ${data.sessionId} exitCode=${data.exitCode}${data.summary ? ` ${JSON.stringify(truncate(data.summary, 60))}` : ""}`;
     case "session.failed":
       return `${head} ${data.sessionId} ${JSON.stringify(truncate(data.error, 60))}`;
+    case "session.cancelled":
     case "session.killed":
       return `${head} ${data.sessionId} source=${data.source}${data.caller ? ` caller=${data.caller}` : ""}${data.reason ? ` ${JSON.stringify(truncate(data.reason, 60))}` : ""}`;
     default: {

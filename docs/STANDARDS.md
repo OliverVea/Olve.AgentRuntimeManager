@@ -30,9 +30,10 @@ reason. Back a rule with a test where possible.
 
 ## Clients
 
-- The `arm` CLI MUST cover every API feature: nothing supported should need a raw HTTP call. A
-  backend change MAY ship first (deployed and verified on its own), but the feature isn't done
-  until the CLI has it.
+- The `arm` CLI MUST cover every API feature: nothing supported should need a raw HTTP call.
+  Every push keeps the CLI up to date with the API: a contract change and its CLI support land
+  together. Enforced by `src/cli/test/api-coverage.test.ts` (every operation of the generated
+  client is used by a command), which runs in `mise run ci`.
 - The web UI SHOULD offer every feature too, and MAY simplify it (fewer options, friendlier
   defaults) where the CLI is exhaustive. Client changes land together: no client-only features.
 - Web UI changes are mock-first: a standalone HTML/CSS/JS mock (page, flow or widget, fake data)

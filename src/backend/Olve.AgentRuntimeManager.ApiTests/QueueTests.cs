@@ -47,7 +47,7 @@ public class QueueTests(SmallQueueFactory factory)
     }
 
     [Test]
-    public async Task KillingAQueuedSession_RemovesItFromTheQueue()
+    public async Task KillingAQueuedSession_CancelsIt_AndRemovesItFromTheQueue()
     {
         var client = Client();
         var running = await client.CreateHangingSessionAsync();
@@ -57,7 +57,8 @@ public class QueueTests(SmallQueueFactory factory)
         var killed = (await kill.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
 
         await Assert.That(queued.Status).IsEqualTo("queued");
-        await Assert.That(killed.Status).IsEqualTo("killed");
+        await Assert.That(killed.Status).IsEqualTo("cancelled");
+        await Assert.That(killed.KillCaller).IsEqualTo("api-tests");
         await Assert.That(killed.QueuePosition).IsNull();
         await Assert.That(killed.StartedAt).IsNull();
         (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();

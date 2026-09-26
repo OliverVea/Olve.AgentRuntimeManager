@@ -296,7 +296,7 @@ describe("session usage errors exit 2 without a request", () => {
     ["empty caller", ["session", "create", "x", ...required, "--caller="], "--caller must not be empty"],
     ["zero timeout", ["session", "create", "x", ...required, "--timeout-seconds", "0"], "--timeout-seconds must be a positive integer"],
     ["removed option", ["session", "create", "x", ...required, "--tag", "a:1"], "--tag"],
-    ["unknown status", ["session", "list", "--status", "running"], "--status must be one of queued, working, completed, killed, failed"],
+    ["unknown status", ["session", "list", "--status", "running"], "--status must be one of queued, working, completed, cancelled, killed, failed"],
     ["limit above 100", ["session", "list", "--limit", "101"], "--limit must be an integer from 1 to 100"],
     ["negative offset", ["session", "list", "--offset", "-1"], "--offset"],
     ["bad date", ["session", "list", "--after", "yesterday"], "--after must be a date or date-time"],

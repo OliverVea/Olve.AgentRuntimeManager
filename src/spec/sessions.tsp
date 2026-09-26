@@ -5,18 +5,20 @@ using Http;
 namespace Arm;
 
 /**
- * `queued → working → completed`; `queued|working → killed`; `queued|working → failed`.
- * Terminal: completed, killed, failed.
+ * `queued → working → completed`; `queued → cancelled` (withdrawn before it started);
+ * `working → killed` (stopped while running); `queued|working → failed`.
+ * Terminal: completed, cancelled, killed, failed.
  */
 enum SessionStatus {
   queued,
   working,
   completed,
+  cancelled,
   killed,
   failed,
 }
 
-/** Who ended a killed session. */
+/** Who ended a cancelled or killed session. */
 enum KillSource {
   user,
   system,
@@ -62,10 +64,10 @@ model Session {
 
   createdAt: utcDateTime;
 
-  /** Set once the agent started: when status is `working` or `completed`, and `killed` or `failed` after starting. */
+  /** Set once the agent started: when status is `working`, `completed` or `killed`, and `failed` after starting. */
   startedAt?: utcDateTime;
 
-  /** Set when status is `completed`, `killed` or `failed`. */
+  /** Set when status is `completed`, `cancelled`, `killed` or `failed`. */
   endedAt?: utcDateTime;
 
   /** The provider's own id for the agent. Set whenever `startedAt` is. */
@@ -80,13 +82,13 @@ model Session {
   /** Set when status is `failed`. */
   error?: string;
 
-  /** Set when status is `killed` and a reason was given. */
+  /** Set when status is `cancelled` or `killed` and a reason was given. */
   killReason?: string;
 
-  /** Set when status is `killed`. */
+  /** Set when status is `cancelled` or `killed`. */
   killSource?: KillSource;
 
-  /** The `caller` of the kill request. Set when status is `killed` and `killSource` is `user`. */
+  /** The `caller` of the kill request. Set when status is `cancelled` or `killed` and `killSource` is `user`. */
   killCaller?: string;
 }
 
@@ -145,7 +147,10 @@ interface Sessions {
 
   @get get(...SessionId): Session | BadRequest | NotFound | UnauthorizedResponse;
 
-  /** Kills a queued or working session; a session that already ended is a 409. */
+  /**
+   * Stops a session: a queued one is cancelled, a working one is killed (the returned session's
+   * status says which). A session that already ended is a 409.
+   */
   @route("/{id}/kill")
   @post kill(...SessionId, @body body: KillSession):
     | Session
@@ -208,7 +213,17 @@ model SessionFailed {
   error: string;
 }
 
-/** A session was killed: by a user, the system, or its timeout. */
+/** A queued session was cancelled before it started: by a user or the system. */
+model SessionCancelled {
+  ...SessionTransition<"session.cancelled">;
+  reason?: string;
+  source: KillSource;
+
+  /** The `caller` of the kill request. Set when `source` is `user`. */
+  caller?: string;
+}
+
+/** A working session was killed: by a user, the system, or its timeout. */
 model SessionKilled {
   ...SessionTransition<"session.killed">;
   reason?: string;

@@ -5,12 +5,12 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
 public class SessionLifecycleTests
 {
-    // queued → working → completed; queued|working → killed; queued|working → failed.
+    // queued → working → completed; queued → cancelled; working → killed; queued|working → failed.
     private static readonly HashSet<(SessionStatus, SessionStatus)> Allowed =
     [
         (SessionStatus.Queued, SessionStatus.Working),
         (SessionStatus.Working, SessionStatus.Completed),
-        (SessionStatus.Queued, SessionStatus.Killed),
+        (SessionStatus.Queued, SessionStatus.Cancelled),
         (SessionStatus.Working, SessionStatus.Killed),
         (SessionStatus.Queued, SessionStatus.Failed),
         (SessionStatus.Working, SessionStatus.Failed),
@@ -28,6 +28,7 @@ public class SessionLifecycleTests
 
     [Test]
     [Arguments(SessionStatus.Completed, true)]
+    [Arguments(SessionStatus.Cancelled, true)]
     [Arguments(SessionStatus.Killed, true)]
     [Arguments(SessionStatus.Failed, true)]
     [Arguments(SessionStatus.Queued, false)]

@@ -122,8 +122,9 @@ public sealed class SessionManager : IDisposable
     }
 
     /// <summary>
-    /// Kills a queued or working session (<c>session.killed</c>) and starts the next queued one in
-    /// its slot. <paramref name="caller"/> is who asked, for kills by a user.
+    /// Stops a session: a queued one is cancelled (<c>session.cancelled</c>), a working one is
+    /// killed (<c>session.killed</c>) and the next queued one starts in its slot.
+    /// <paramref name="caller"/> is who asked, for stops by a user.
     /// </summary>
     public KillOutcome Kill(Guid id, string? reason, KillSource source, string? caller = null)
     {
@@ -153,22 +154,22 @@ public sealed class SessionManager : IDisposable
             }
 
             var now = _time.GetUtcNow();
-            var killed = session with
+            var cancel = session.Status == SessionStatus.Queued;
+            var stopped = session with
             {
-                Status = SessionLifecycle.Move(session.Status, SessionStatus.Killed),
+                Status = SessionLifecycle.Move(session.Status, cancel ? SessionStatus.Cancelled : SessionStatus.Killed),
                 QueuePosition = null,
                 EndedAt = now,
                 KillReason = reason,
                 KillSource = source,
                 KillCaller = caller,
             };
-            _sessions[id] = killed;
-            _events.Publish(new SessionKilled
-            {
-                At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller,
-            });
+            _sessions[id] = stopped;
+            _events.Publish(cancel
+                ? new SessionCancelled { At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller }
+                : new SessionKilled { At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller });
             StartNextLocked();
-            outcome = new KillOutcome.Killed(_sessions[id]);
+            outcome = new KillOutcome.Stopped(_sessions[id]);
         }
 
         run?.Kill();

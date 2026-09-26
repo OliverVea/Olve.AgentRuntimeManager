@@ -3,17 +3,19 @@ using Olve.AgentRuntimeManager.Api;
 namespace Olve.AgentRuntimeManager.Sessions;
 
 /// <summary>
-/// The session state machine: <c>queued → working → completed</c>; <c>queued|working → killed</c>;
-/// <c>queued|working → failed</c>. Terminal: completed, killed, failed. (SPEC's <c>waiting</c>
+/// The session state machine: <c>queued → working → completed</c>; <c>queued → cancelled</c>
+/// (withdrawn before it started); <c>working → killed</c>; <c>queued|working → failed</c>.
+/// Terminal: completed, cancelled, killed, failed. (SPEC's <c>waiting</c>
 /// state arrives with approvals, M8.)
 /// </summary>
 public static class SessionLifecycle
 {
     private static readonly IReadOnlyDictionary<SessionStatus, SessionStatus[]> Next = new Dictionary<SessionStatus, SessionStatus[]>
     {
-        [SessionStatus.Queued] = [SessionStatus.Working, SessionStatus.Killed, SessionStatus.Failed],
+        [SessionStatus.Queued] = [SessionStatus.Working, SessionStatus.Cancelled, SessionStatus.Failed],
         [SessionStatus.Working] = [SessionStatus.Completed, SessionStatus.Killed, SessionStatus.Failed],
         [SessionStatus.Completed] = [],
+        [SessionStatus.Cancelled] = [],
         [SessionStatus.Killed] = [],
         [SessionStatus.Failed] = [],
     };

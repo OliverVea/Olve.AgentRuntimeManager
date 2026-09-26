@@ -70,6 +70,7 @@ public class SessionManagerTests : IDisposable
         SessionCompleted e => e.SessionId,
         SessionFailed e => e.SessionId,
         SessionKilled e => e.SessionId,
+        SessionCancelled e => e.SessionId,
         _ => null,
     };
 
@@ -201,7 +202,7 @@ public class SessionManagerTests : IDisposable
 
         var outcome = _sessions.Kill(session.Id, "enough", KillSource.User, "oliver");
 
-        var killed = ((KillOutcome.Killed)outcome).Session;
+        var killed = ((KillOutcome.Stopped)outcome).Session;
         await Assert.That(killed.Status).IsEqualTo(SessionStatus.Killed);
         await Assert.That(killed.KillReason).IsEqualTo("enough");
         await Assert.That(killed.KillSource).IsEqualTo(KillSource.User);
@@ -212,7 +213,7 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
-    public async Task Kill_AQueuedSession_RemovesItFromTheQueue()
+    public async Task Kill_AQueuedSession_CancelsIt_AndRemovesItFromTheQueue()
     {
         Create();
         Create();
@@ -221,7 +222,7 @@ public class SessionManagerTests : IDisposable
 
         _sessions.Kill(first.Id, null, KillSource.User);
 
-        await Assert.That(_sessions.Get(first.Id)!.Status).IsEqualTo(SessionStatus.Killed);
+        await Assert.That(_sessions.Get(first.Id)!.Status).IsEqualTo(SessionStatus.Cancelled);
         await Assert.That(_sessions.Get(first.Id)!.QueuePosition).IsNull();
         await Assert.That(_sessions.Get(second.Id)!.QueuePosition).IsEqualTo(1);
         await Assert.That(_provider.Runs.Count).IsEqualTo(2);
