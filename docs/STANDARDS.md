@@ -28,6 +28,14 @@ reason. Back a rule with a test where possible.
   `session.waiting`); one event per fact, no duplicates.
 - Payloads SHOULD be bounded; oversized fields are truncated with `truncated: true`.
 
+## Clients
+
+- The `arm` CLI MUST cover every API feature: nothing supported should need a raw HTTP call. A
+  backend change MAY ship first (deployed and verified on its own), but the feature isn't done
+  until the CLI has it.
+- The web UI SHOULD offer every feature too, and MAY simplify it (fewer options, friendlier
+  defaults) where the CLI is exhaustive. Client changes land together: no client-only features.
+
 ## Code
 
 - Generated output MUST go to `artifacts/`, never into source folders.
