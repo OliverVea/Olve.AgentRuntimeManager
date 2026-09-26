@@ -68,7 +68,13 @@ re-evaluated and scoped when it's picked up.
   quick steering message; the laptop view is the larger surface built on top of that.
 - **Dashboard widget**: a small embeddable ARM widget (running/queued/waiting counts, pending
   approvals with inline approve/deny) for a homelab dashboard next to Olve.Pipelines and other
-  services.
+  services. Served by ARM at `/widget` (the dashboard only hosts it, e.g. as an iframe) and
+  configured by query parameters: `view` (`summary`/`approvals`/`sessions`), filters reusing the
+  session search fields (`caller`, `tag`, `status`, `provider`), and `compact`/`theme`/`limit`.
+  Parameters are configuration, never authorisation: no tokens in the URL; the widget uses the
+  normal login and they can only narrow what the viewer may already see. Unknown or invalid
+  values fall back to defaults. Olve.Pipelines needs the same `/widget` convention (e.g. pipeline
+  status, pending promotion gates): file an issue there.
 - **`arm chat`**: interactive conversational session in the terminal.
 - **`arm run "prompt"`**: stream output to stdout, exit with the session's exit code.
 - **Interactive CLI approvals**: approval prompts inline, keyboard approve/deny.
