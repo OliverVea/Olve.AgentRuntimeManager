@@ -32,8 +32,10 @@ function rank(status: SessionStatus): number {
 /**
  * The sessions the sessions screen shows, kept current from `GET /api/events`.
  *
- * Every (re)connect opens the stream and fetches the Overview's snapshot (queued + working) in
- * parallel; events that arrive before the snapshot are buffered and applied on top of it. Until
+ * Every (re)connect fetches the Overview's snapshot (queued + working) right away, so the list
+ * loads even while the stream is down, and again on the connection's first heartbeat: the server
+ * sends it once subscribed, so that snapshot can't miss a change. Events that arrive while a
+ * snapshot loads are buffered and applied on top of it. Until
  * events carry a per-session `seq` (M5b/M6), duplicates and stale events are recognised by the
  * lifecycle: a `created` for a known session is ignored, and no event moves a session backwards
  * (queued → working → ended).
@@ -52,6 +54,10 @@ export class SessionStore extends EventTarget {
   /** Events held back while a snapshot is loading. */
   #buffer: SessionEvent[] | null = null;
   #everConnected = false;
+  /** Connected, but the server hasn't confirmed its subscription (the connect heartbeat) yet. */
+  #awaitingHeartbeat = false;
+  /** A snapshot was asked for while one was loading: take another when it's in. */
+  #snapshotAgain = false;
   #errors = 0;
 
   stream: StreamState = "connecting";
@@ -103,6 +109,8 @@ export class SessionStore extends EventTarget {
     this.#run?.abort();
     this.#run = null;
     this.#buffer = null;
+    this.#awaitingHeartbeat = false;
+    this.#snapshotAgain = false;
     this.#sessions = new Map();
     this.stream = "connecting";
     this.overview = "idle";
@@ -178,7 +186,14 @@ export class SessionStore extends EventTarget {
         });
         for await (const data of stream) {
           if (run.signal.aborted) return;
-          this.apply(data as ArmEventData);
+          const event = data as ArmEventData;
+          // The server subscribes before its connect heartbeat: a snapshot taken after it can't
+          // miss anything, since every later change arrives as an event.
+          if (event.type === "heartbeat" && this.#awaitingHeartbeat) {
+            this.#awaitingHeartbeat = false;
+            void this.#snapshot(run);
+          }
+          this.apply(event);
         }
       } catch {
         // Aborted, or the stream broke outside the client's own retries: reopen below.
@@ -196,12 +211,10 @@ export class SessionStore extends EventTarget {
     return (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await base(input, init);
       if (response.ok && run === this.#run) {
-        const reconnect = this.#everConnected;
         this.#everConnected = true;
+        this.#awaitingHeartbeat = true;
         this.#errors = 0;
         this.#setStream(run, "connected");
-        // Events may have been missed while disconnected: take a fresh snapshot.
-        if (reconnect && !this.#buffer) void this.#snapshot(run);
       }
       return response;
     }) as typeof fetch;
@@ -222,7 +235,10 @@ export class SessionStore extends EventTarget {
 
   /** Fetch the queued and working sessions, holding events back until they're in. */
   async #snapshot(run: AbortController): Promise<void> {
-    if (this.#buffer) return; // one is already loading; its buffer catches what happens meanwhile
+    if (this.#buffer) {
+      this.#snapshotAgain = true; // it may have been read before the server subscribed
+      return;
+    }
     this.#buffer = [];
     if (this.overview !== "ready") this.overview = "loading";
     this.#changed();
@@ -253,6 +269,10 @@ export class SessionStore extends EventTarget {
     this.#buffer = null;
     for (const event of buffered) this.#apply(event);
     this.#changed();
+    if (this.#snapshotAgain && run === this.#run) {
+      this.#snapshotAgain = false;
+      void this.#snapshot(run);
+    }
   }
 
   /** Keep whichever of the known and the given session is further along. */

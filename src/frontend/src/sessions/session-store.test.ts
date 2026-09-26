@@ -18,10 +18,14 @@ function start(api: ReturnType<typeof fakeApi>) {
 const ids = (sessions: { id: string; status: string }[]) =>
   sessions.map((s) => `${s.id}:${s.status}`);
 
+/** Connected, subscribed (the connect heartbeat) and the snapshot after it loaded. */
 async function connected(api: ReturnType<typeof fakeApi>, store: SessionStore) {
-  await vi.waitFor(() => expect(store.overview).toBe("ready"));
   await vi.waitFor(() => expect(store.stream).toBe("connected"));
+  const searches = api.searches().length;
   api.push({ type: "heartbeat", at });
+  await vi.waitFor(() => expect(api.searches().length).toBeGreaterThan(searches));
+  await vi.waitFor(() => expect(store.overview).toBe("ready"));
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 describe("SessionStore", () => {
@@ -43,6 +47,34 @@ describe("SessionStore", () => {
     expect(decodeURIComponent(api.calls.find((c) => c.path === "/api/events")!.search)).toBe(
       "?event=session.*",
     );
+  });
+
+  it("re-reads the snapshot once the server has subscribed, so nothing ends unseen", async () => {
+    const api = fakeApi({ sessions: [session("s1")] });
+    const store = start(api);
+    await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:working"]));
+    await vi.waitFor(() => expect(store.stream).toBe("connected"));
+
+    // It ends before the server subscribed this connection: no event will ever say so.
+    api.sessions.splice(0, 1, session("s1", { status: "completed" }));
+    api.push({ type: "heartbeat", at });
+
+    await vi.waitFor(() => expect(store.active).toEqual([]));
+  });
+
+  it("takes the heartbeat's snapshot after one still loading, not instead of it", async () => {
+    const api = fakeApi({ sessions: [session("s1")] });
+    api.holdSearch();
+    const store = start(api);
+    await vi.waitFor(() => expect(store.stream).toBe("connected"));
+    api.push({ type: "heartbeat", at });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    api.releaseSearch(); // the first snapshot, read before the subscription
+    api.sessions.splice(0, 1, session("s1", { status: "completed" }));
+
+    await vi.waitFor(() => expect(api.searches().length).toBe(2));
+    await vi.waitFor(() => expect(store.active).toEqual([]));
   });
 
   it("applies what happens while the snapshot loads on top of it", async () => {
@@ -173,7 +205,7 @@ describe("SessionStore", () => {
     await vi.waitFor(() => expect(store.active).toEqual([]));
     expect(store.stream).toBe("connected");
     expect(states).toContain("reconnecting");
-    expect(api.searches()).toHaveLength(2);
+    expect(api.searches()).toHaveLength(3); // first load, its heartbeat, the reconnect
   });
 
   it("reports the API's error message", async () => {
