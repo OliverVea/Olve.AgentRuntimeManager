@@ -32,9 +32,10 @@ re-evaluated and scoped when it's picked up.
   can also put a session to sleep until a time ("check the deploy in 20 minutes") or an event
   (CI finished, a subagent ended). Timeouts then count active time, not time asleep. The UI lists
   sleeping sessions with their wake condition; they can be woken or killed.
-- **Subagents**: sessions an agent starts itself, linked to their parent (shown nested in the
-  UI; killing a parent kills its running subagents). Needs a parent/child link on sessions and a
-  way for an agent to start one; SPEC's `children` filter hints at it.
+- **Subagents**: agents starting sessions of their own in a controlled way, which is more than a
+  parent link (M5c "Parent sessions"). An agent may only start subagents from pre-defined
+  arguments (e.g. named agent configs or templates it's allowed to use), not arbitrary prompts,
+  providers or models; likely with `start_subagent`/`wait_for_subagent` tools. To be designed.
 
 ## Classifications
 
