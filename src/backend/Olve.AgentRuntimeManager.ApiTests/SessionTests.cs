@@ -237,17 +237,21 @@ public class SessionTests(ApiTarget target)
         var done = await client.CreateSessionAsync("fake:sleep=0ms", caller);
         await client.WaitForSessionAsync(done.Id, s => s.Status == "completed");
 
-        var working = await Search(client, new { caller, status = "working" });
+        var working = await Search(client, new { caller, status = new[] { "working" } });
+        var either = await Search(client, new { caller, status = new[] { "working", "completed" } });
         await client.KillSessionAsync(hanging.Id);
 
         await Assert.That(working.Items.Select(s => s.Id).ToList()).IsEquivalentTo([hanging.Id]);
+        await Assert.That(either.Items.Select(s => s.Id).ToList()).IsEquivalentTo([hanging.Id, done.Id]);
     }
 
     [Test]
     [Arguments("""{"limit":0}""")]
     [Arguments("""{"limit":101}""")]
     [Arguments("""{"offset":-1}""")]
-    [Arguments("""{"status":"sleeping"}""")]
+    [Arguments("""{"status":["sleeping"]}""")]
+    [Arguments("""{"status":[]}""")]
+    [Arguments("""{"status":"working"}""")]
     public async Task Search_WithInvalidFilters_Is400(string body)
     {
         using var response = await target.CreateAuthenticatedClient().PostAsync("/api/sessions/search", Wire.Json(body));

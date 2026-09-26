@@ -11,7 +11,7 @@ arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY]
-arm session list [--status X] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
+arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>

@@ -332,7 +332,9 @@ public class SessionManagerTests : IDisposable
         await Assert.That(second.Items.Single().Id).IsEqualTo(old.Id);
         var byTime = _sessions.Search(new SessionSearch { CreatedAfter = Start, CreatedBefore = Start.AddSeconds(2) }, 10, 0);
         await Assert.That(byTime.Total).IsEqualTo(1);
-        var byStatus = _sessions.Search(new SessionSearch { Status = SessionStatus.Queued }, 10, 0);
+        var byStatus = _sessions.Search(new SessionSearch { Status = [SessionStatus.Queued] }, 10, 0);
         await Assert.That(byStatus.Total).IsEqualTo(1);
+        var byStatuses = _sessions.Search(new SessionSearch { Status = [SessionStatus.Queued, SessionStatus.Working] }, 10, 0);
+        await Assert.That(byStatuses.Total).IsEqualTo(3);
     }
 }

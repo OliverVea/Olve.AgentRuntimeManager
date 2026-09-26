@@ -12,7 +12,7 @@ import {
 } from "@arm/client";
 import { send, unwrap } from "../api";
 import { UsageError } from "../errors";
-import { dateTime, integer, oneOf, text, textOrDefault } from "../options";
+import { commaListOf, dateTime, integer, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandContext, CommandGroup, OptionValues } from "../registry";
 
@@ -95,7 +95,7 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
 
 function searchBody(options: OptionValues): SessionSearch {
   const body: SessionSearch = {
-    status: oneOf(options, "status", sessionStatuses),
+    status: commaListOf(options, "status", sessionStatuses),
     caller: text(options, "caller"),
     createdAfter: dateTime(options, "after"),
     createdBefore: dateTime(options, "before"),
@@ -147,7 +147,7 @@ export const sessionGroup: CommandGroup = {
       summary: "Search sessions, newest first, one page at a time",
       args: [],
       options: {
-        status: { type: "string", description: `Only this status: ${sessionStatuses.join(", ")}`, valueName: "X" },
+        status: { type: "string", description: `Only these statuses, comma-separated: ${sessionStatuses.join(", ")}`, valueName: "X,Y" },
         caller: { type: "string", description: "Only sessions started by this caller", valueName: "X" },
         after: { type: "string", description: "Created after this date or date-time", valueName: "DATE" },
         before: { type: "string", description: "Created before this date or date-time", valueName: "DATE" },

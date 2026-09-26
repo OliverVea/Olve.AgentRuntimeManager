@@ -94,7 +94,8 @@ model Session {
 
 /** Filters for searching sessions; every field is optional, and empty matches everything. */
 model SessionSearch {
-  status?: SessionStatus;
+  /** Matches any of these statuses (all when left out). */
+  @minItems(1) status?: SessionStatus[];
   caller?: string;
   createdAfter?: utcDateTime;
   createdBefore?: utcDateTime;

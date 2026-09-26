@@ -150,7 +150,7 @@ describe("session list", () => {
     const r = await cli(
       [
         "session", "list",
-        "--status", "working",
+        "--status", "working,queued",
         "--caller", "oribot",
         "--after", "2026-09-01",
         "--before", "2026-09-02T10:00:00+02:00",
@@ -164,7 +164,7 @@ describe("session list", () => {
     expect(req.method).toBe("POST");
     expect(req.url).toBe(`${url}/api/sessions/search`);
     expect(req.body).toEqual({
-      status: "working",
+      status: ["working", "queued"],
       caller: "oribot",
       createdAfter: "2026-09-01T00:00:00.000Z",
       createdBefore: "2026-09-02T08:00:00.000Z",
@@ -296,7 +296,7 @@ describe("session usage errors exit 2 without a request", () => {
     ["empty caller", ["session", "create", "x", ...required, "--caller="], "--caller must not be empty"],
     ["zero timeout", ["session", "create", "x", ...required, "--timeout-seconds", "0"], "--timeout-seconds must be a positive integer"],
     ["removed option", ["session", "create", "x", ...required, "--tag", "a:1"], "--tag"],
-    ["unknown status", ["session", "list", "--status", "running"], "--status must be one of queued, working, completed, cancelled, killed, failed"],
+    ["unknown status", ["session", "list", "--status", "working,running"], "--status must be one of queued, working, completed, cancelled, killed, failed, got 'running'"],
     ["limit above 100", ["session", "list", "--limit", "101"], "--limit must be an integer from 1 to 100"],
     ["negative offset", ["session", "list", "--offset", "-1"], "--offset"],
     ["bad date", ["session", "list", "--after", "yesterday"], "--after must be a date or date-time"],

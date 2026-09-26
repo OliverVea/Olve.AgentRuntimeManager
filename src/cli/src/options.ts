@@ -67,12 +67,13 @@ export function dateTime(options: OptionValues, name: string): string | undefine
   return date.toISOString();
 }
 
-/** One of a fixed set of values. */
-export function oneOf<T extends string>(options: OptionValues, name: string, values: readonly T[]): T | undefined {
-  const value = text(options, name);
-  if (value === undefined) return undefined;
-  if (!(values as readonly string[]).includes(value)) {
-    throw new UsageError(`--${name} must be one of ${values.join(", ")}, got '${value}'`);
+/** A comma-separated list of known values (`--status queued,working`); each must be one of `values`. */
+export function commaListOf<T extends string>(options: OptionValues, name: string, values: readonly T[]): T[] | undefined {
+  const entries = commaList(options, name);
+  for (const value of entries ?? []) {
+    if (!(values as readonly string[]).includes(value)) {
+      throw new UsageError(`--${name} must be one of ${values.join(", ")}, got '${value}'`);
+    }
   }
-  return value as T;
+  return entries as T[] | undefined;
 }

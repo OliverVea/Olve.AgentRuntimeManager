@@ -110,7 +110,7 @@ public sealed class SessionManager : IDisposable
         }
 
         var matches = all
-            .Where(s => search.Status is not { } status || s.Status == status)
+            .Where(s => search.Status is not { } statuses || statuses.Contains(s.Status))
             .Where(s => search.Caller is not { } caller || s.Caller == caller)
             .Where(s => search.CreatedAfter is not { } after || s.CreatedAt > after)
             .Where(s => search.CreatedBefore is not { } before || s.CreatedAt < before)

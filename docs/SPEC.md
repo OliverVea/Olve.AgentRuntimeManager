@@ -72,7 +72,7 @@ a repeated key within 24 hours returns the original response.
 | CLI | API | Purpose |
 |---|---|---|
 | `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create (starts, or queues: 202 + position) |
-| `arm session list [--status X] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `POST /api/sessions/search` | Search |
+| `arm session list [--status X,Y] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `POST /api/sessions/search` | Search |
 | `arm session get <id>` | `GET /api/sessions/:id` | Get |
 | `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill a queued/working/waiting session |
 | `arm session delete <id>` | `DELETE /api/sessions/:id` | Delete (terminal sessions only) |
