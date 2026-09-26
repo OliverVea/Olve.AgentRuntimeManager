@@ -3,77 +3,119 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Olve.AgentRuntimeManager — sessions</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        --edge: color-mix(in oklab, currentColor 14%, transparent);
-      }
-      body {
-        font: 15px/1.5 system-ui, sans-serif;
-        max-width: 46rem;
-        margin: 3rem auto;
-        padding: 0 1.25rem;
-      }
-      header h1 {
-        font-size: 1.4rem;
-        margin: 0 0 0.25rem;
-      }
-      header p {
-        margin: 0 0 1.5rem;
-        opacity: 0.7;
-      }
-      details {
-        margin: 0 0 1.5rem;
-        border: 1px solid var(--edge);
-        border-radius: 8px;
-        padding: 0.5rem 0.9rem;
-      }
-      summary {
-        cursor: pointer;
-        font-weight: 600;
-      }
-      .auth-bar {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 0.6rem;
-        min-height: 2rem;
-        margin: 0 0 1.5rem;
-      }
-      .auth-bar .who {
-        opacity: 0.75;
-        font-size: 0.9rem;
-      }
-      .auth-bar button {
-        font: inherit;
-        cursor: pointer;
-        border: 1px solid var(--edge);
-        border-radius: 6px;
-        background: transparent;
-        color: inherit;
-        padding: 0.35rem 0.8rem;
-      }
-      .auth-bar button:hover {
-        background: color-mix(in oklab, currentColor 8%, transparent);
-      }
-    </style>
+    <title>ARM — sessions</title>
   </head>
   <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
+      <symbol id="i-cog" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></symbol>
+    </svg>
+
     <header>
-      <h1>Sessions</h1>
-      <p>
-        The newest agent sessions, kept live from the event stream — a vanilla Web Component
-        (<code>&lt;session-list&gt;</code>) talking to <code>Olve.AgentRuntimeManager</code> through
-        a TypeScript client generated from its TypeSpec contract.
-      </p>
+      <span class="brand">ARM</span>
+      <span id="env"></span>
+      <span class="spacer"></span>
+      <span class="live" id="live" hidden></span>
+      <span class="user" id="user"></span>
+      <button type="button" class="icon-btn" id="theme"></button>
+      <button type="button" class="icon-btn" id="open-options" title="Options" aria-label="Options" hidden>
+        <svg class="i" aria-hidden="true"><use href="#i-cog" /></svg>
+      </button>
+      <button type="button" class="icon-btn" id="logout" title="Log out" aria-label="Log out" hidden>
+        <svg class="i" aria-hidden="true"><use href="#i-logout" /></svg>
+      </button>
     </header>
 
-    <!-- Log in / who's-logged-in + log out, populated by main.ts. Every session endpoint needs a
-         login (OIDC + PKCE via Authentik), so the list shows a sign-in prompt until then. -->
-    <div id="auth" class="auth-bar"></div>
+    <main>
+      <div class="signin" id="signin" hidden>
+        <p>Log in to see and start sessions.</p>
+        <button type="button" class="primary" id="login">Log in</button>
+      </div>
 
-    <session-list></session-list>
+      <div id="app" hidden>
+        <form class="composer" id="composer">
+          <textarea id="prompt" rows="1" placeholder="What should the agent do?"></textarea>
+          <div class="row">
+            <button type="button" class="advanced-toggle" id="advanced" aria-expanded="false">Advanced ▾</button>
+            <div class="settings">
+              <label class="field">model <input id="c-model" class="model" placeholder="provider/model" spellcheck="false" /></label>
+              <label class="field">caller <input id="c-caller" class="caller" spellcheck="false" /></label>
+              <label class="field">timeout (s) <input id="c-timeout" class="num" inputmode="numeric" placeholder="none" /></label>
+            </div>
+            <span class="spacer"></span>
+            <span class="hint">Ctrl+Enter</span>
+            <button class="primary" id="create" type="submit" disabled>Start session</button>
+          </div>
+          <div class="toast" id="toast" role="status"></div>
+        </form>
+
+        <nav class="views" id="views">
+          <button type="button" data-view="overview">Overview</button>
+          <button type="button" data-view="history">History</button>
+        </nav>
+        <session-list id="list"></session-list>
+
+        <section id="detail" hidden>
+          <a href="#/" class="back">← All sessions</a>
+          <div class="detail-card" id="detail-body"></div>
+        </section>
+      </div>
+    </main>
+
+    <dialog id="kill-dialog">
+      <form method="dialog">
+        <h3 id="kill-title">Kill this session?</h3>
+        <p id="kill-what"></p>
+        <label class="field">reason (optional) <input id="kill-reason" placeholder="e.g. wrong prompt" /></label>
+        <p class="problem" id="kill-problem"></p>
+        <div class="buttons">
+          <button type="button" class="ghost" data-close>Back</button>
+          <button type="submit" class="primary danger" id="kill-confirm" value="confirm">Kill</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-dialog">
+      <form method="dialog">
+        <h3>Delete this session?</h3>
+        <p id="delete-what"></p>
+        <p class="problem" id="delete-problem"></p>
+        <div class="buttons">
+          <button type="button" class="ghost" data-close>Back</button>
+          <button type="submit" class="primary danger" id="delete-confirm" value="confirm">Delete</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="options-dialog">
+      <form method="dialog">
+        <h3>Options</h3>
+        <p>Saved in this browser, like <code>arm config</code> on a machine.</p>
+        <section class="opt">
+          <h4>New sessions</h4>
+          <label class="field">model <input id="o-model" placeholder="provider/model" spellcheck="false" /></label>
+          <label class="field">caller <input id="o-caller" spellcheck="false" /></label>
+          <label class="field">timeout (s) <input id="o-timeout" inputmode="numeric" placeholder="none" /></label>
+        </section>
+        <section class="opt">
+          <h4>Display</h4>
+          <label class="field">theme
+            <select id="o-theme">
+              <option value="">Follow the system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+        </section>
+        <p class="problem" id="options-problem"></p>
+        <div class="buttons">
+          <button type="button" class="ghost" data-close>Cancel</button>
+          <button type="submit" class="primary" id="options-save" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

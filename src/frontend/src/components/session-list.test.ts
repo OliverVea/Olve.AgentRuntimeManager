@@ -1,205 +1,160 @@
-import type { ArmEventData, Session } from "@arm/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { createApiClient } from "../api-client.js";
+import { SessionStore } from "../sessions/session-store.js";
+import { fakeApi, session } from "../testing/fake-api.js";
 import { SessionList } from "./session-list.js";
-
-function session(id: string, overrides: Partial<Session> = {}): Session {
-  return {
-    id,
-    status: "working",
-    prompt: `prompt of ${id}`,
-    provider: "claude",
-    model: "opus",
-    caller: "tester",
-    timeoutSeconds: 600,
-    createdAt: "2026-09-26T10:00:00Z",
-    ...overrides,
-  };
-}
-
-/**
- * A real generated client over a scripted `fetch`: SessionList drives the Hey API SDK, and the
- * fake backend answers by method + path, recording every request (URL, method, body). The event
- * stream stays open; `push` writes one SSE frame to it.
- */
-function fakeApi(overrides: { search?: () => Response; sessions?: Session[] } = {}) {
-  const calls: { method: string; path: string; search: string; body: unknown }[] = [];
-  const sessions = overrides.sessions ?? [];
-  const encoder = new TextEncoder();
-  let events: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let nextId = 1;
-
-  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = new Request(input, init);
-    const url = new URL(request.url);
-    const text = await request.text();
-    calls.push({
-      method: request.method,
-      path: url.pathname,
-      search: url.search,
-      body: text ? JSON.parse(text) : undefined,
-    });
-
-    if (request.method === "POST" && url.pathname === "/api/sessions/search") {
-      return (
-        overrides.search?.() ??
-        Response.json({ items: sessions, total: sessions.length, limit: 50, offset: 0 })
-      );
-    }
-    if (request.method === "GET" && url.pathname === "/api/events") {
-      const body = new ReadableStream<Uint8Array>({
-        start: (controller) => {
-          events = controller;
-        },
-      });
-      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
-    }
-    return new Response(null, { status: 404 });
-  });
-
-  const push = (event: ArmEventData) => {
-    if (!events) throw new Error("event stream not open");
-    events.enqueue(
-      encoder.encode(`event: ${event.type}\nid: ${nextId++}\ndata: ${JSON.stringify(event)}\n\n`),
-    );
-  };
-
-  return { client: createApiClient("http://test", { fetch }), calls, push };
-}
 
 beforeAll(() => customElements.define(SessionList.tagName, SessionList));
 
-const mounted: SessionList[] = [];
+const cleanup: Array<() => void> = [];
 afterEach(() => {
-  for (const el of mounted.splice(0)) el.remove(); // closes the event stream
+  for (const undo of cleanup.splice(0)) undo();
 });
 
-/** Mount a signed-in list on `client` and wait for its first page. */
-async function mount(client: ReturnType<typeof fakeApi>["client"], signedIn = true) {
+async function mount(api: ReturnType<typeof fakeApi>) {
+  const store = new SessionStore(api.client);
+  store.start();
   const el = document.createElement(SessionList.tagName) as SessionList;
-  el.client = client;
-  el.signedIn = signedIn;
+  el.store = store;
   document.body.append(el);
-  mounted.push(el);
-  if (signedIn) await vi.waitFor(() => expect(el.shadowRoot!.querySelector(".bar")).not.toBeNull());
-  await el.load();
-  return el;
+  cleanup.push(() => {
+    el.remove();
+    store.stop();
+  });
+  await vi.waitFor(() => expect(store.overview).toBe("ready"));
+  return { el, store };
 }
 
-const statuses = (el: SessionList) =>
-  [...el.shadowRoot!.querySelectorAll("li")].map(
-    (li) => `${li.dataset.id}:${li.querySelector(".status")?.textContent}`,
-  );
+const cards = (el: SessionList) => [...el.shadowRoot!.querySelectorAll<HTMLElement>(".card")];
+const text = (el: SessionList, selector: string) =>
+  [...el.shadowRoot!.querySelectorAll(selector)].map((e) => e.textContent?.trim());
 
 describe("<session-list>", () => {
-  it("renders the newest page of sessions the API returns", async () => {
-    const { client, calls } = fakeApi({
-      sessions: [
-        session("aaaaaaaa-0001", { caller: "oribot", prompt: "x".repeat(300) }),
-        session("bbbbbbbb-0002", { status: "queued", queuePosition: 2 }),
-      ],
+  it("shows the Overview as cards: status · time · queue place, the task, id · model · caller", async () => {
+    const { el } = await mount(
+      fakeApi({
+        sessions: [
+          session("aaaaaaaa-0001", { caller: "oribot", createdAt: "2026-09-26T10:00:00Z" }),
+          session("bbbbbbbb-0002", {
+            status: "queued",
+            createdAt: "2026-09-26T10:01:00Z",
+            model: "opus",
+            provider: "claude",
+          }),
+        ],
+      }),
+    );
+
+    expect(cards(el).map((c) => c.dataset.open)).toEqual(["aaaaaaaa-0001", "bbbbbbbb-0002"]);
+    expect(text(el, ".badge")).toEqual(["working", "queued"]);
+    expect(text(el, ".note")).toEqual(["#1 in queue"]);
+    expect(text(el, ".task")).toEqual(["prompt of aaaaaaaa-0001", "prompt of bbbbbbbb-0002"]);
+    expect(text(el, ".info")).toEqual(["aaaaaaaafake (fake)oribot", "bbbbbbbbopus (claude)tester"]);
+    expect(el.shadowRoot!.querySelector("[data-kill]")?.getAttribute("title")).toBe("Kill session");
+    expect(el.shadowRoot!.querySelectorAll("[data-kill]")[1]?.getAttribute("title")).toBe(
+      "Cancel session",
+    );
+  });
+
+  it("shows History with each outcome and a delete button", async () => {
+    const { el } = await mount(
+      fakeApi({
+        sessions: [
+          session("c", {
+            status: "completed",
+            exitCode: 0,
+            endedAt: "2026-09-26T10:05:00Z",
+            createdAt: "2026-09-26T10:04:00Z",
+          }),
+          session("k", {
+            status: "killed",
+            killSource: "user",
+            killCaller: "oliver",
+            endedAt: "2026-09-26T10:05:00Z",
+            createdAt: "2026-09-26T10:03:00Z",
+          }),
+          session("t", {
+            status: "cancelled",
+            killSource: "timeout",
+            endedAt: "2026-09-26T10:05:00Z",
+            createdAt: "2026-09-26T10:02:00Z",
+          }),
+          session("f", {
+            status: "failed",
+            error: "out of tokens",
+            endedAt: "2026-09-26T10:05:00Z",
+            createdAt: "2026-09-26T10:01:00Z",
+          }),
+        ],
+      }),
+    );
+
+    el.view = "history";
+
+    await vi.waitFor(() => expect(cards(el)).toHaveLength(4));
+    expect(text(el, ".note")).toEqual(["exit 0", "by oliver", "by timeout", "out of tokens"]);
+    expect(el.shadowRoot!.querySelectorAll("[data-delete]")).toHaveLength(4);
+  });
+
+  it("offers older History while the server has more", async () => {
+    const sessions = Array.from({ length: 21 }, (_, i) =>
+      session(`e${i}`, {
+        status: "completed",
+        createdAt: new Date(Date.UTC(2026, 8, 25, 0, i)).toISOString(),
+      }),
+    );
+    const { el } = await mount(fakeApi({ sessions }));
+    el.view = "history";
+    await vi.waitFor(() => expect(cards(el)).toHaveLength(20));
+
+    el.shadowRoot!.querySelector<HTMLButtonElement>("[data-older]")!.click();
+
+    await vi.waitFor(() => expect(cards(el)).toHaveLength(21));
+    expect(el.shadowRoot!.querySelector("[data-older]")).toBeNull();
+  });
+
+  it("follows the store live", async () => {
+    const api = fakeApi({ sessions: [] });
+    const { el } = await mount(api);
+    expect(text(el, ".empty")).toEqual(["Nothing running. Start a session above."]);
+    await vi.waitFor(() => expect(api.streams()).toBe(1));
+
+    api.push({
+      type: "session.created",
+      at: "2026-09-26T10:00:00Z",
+      sessionId: "s1",
+      session: session("s1"),
     });
 
-    const el = await mount(client);
+    await vi.waitFor(() => expect(cards(el)).toHaveLength(1));
+  });
+
+  it("reports what the user asks for", async () => {
+    const { el } = await mount(fakeApi({ sessions: [session("s1")] }));
+    const seen: string[] = [];
+    for (const type of ["open-session", "kill-session", "copy-id", "toggle-times"]) {
+      el.addEventListener(type, (e) => seen.push(`${type}:${(e as CustomEvent).detail ?? ""}`));
+    }
     const root = el.shadowRoot!;
 
-    expect(statuses(el)).toEqual(["aaaaaaaa-0001:working", "bbbbbbbb-0002:queued"]);
-    expect(root.querySelector(".id")?.textContent).toBe("aaaaaaaa");
-    expect(root.querySelector(".caller")?.textContent).toBe("oribot");
-    expect(root.querySelector(".provider")?.textContent).toBe("claude");
-    expect(root.querySelector(".model")?.textContent).toBe("opus");
-    expect(root.querySelector(".prompt")?.textContent).toHaveLength(120); // truncated
-    expect(root.querySelector(".queue")?.textContent).toBe("#2 in queue");
-    expect(root.querySelector(".count")?.textContent).toBe("2 sessions");
-    expect(calls.find((c) => c.path === "/api/sessions/search")?.body).toEqual({ limit: 50 });
-  });
-
-  it("subscribes to session events and applies them", async () => {
-    const api = fakeApi({ sessions: [session("s1", { status: "queued", queuePosition: 1 })] });
-    const el = await mount(api.client);
-
-    const stream = await vi.waitFor(() => {
-      const call = api.calls.find((c) => c.path === "/api/events");
-      expect(call).toBeDefined();
-      return call!;
-    });
-    expect(decodeURIComponent(stream.search)).toBe("?event=session.*");
-
-    const at = "2026-09-26T10:01:00Z";
-    api.push({ type: "session.created", at, sessionId: "s2", session: session("s2") });
-    api.push({
-      type: "session.started",
-      at,
-      sessionId: "s1",
-      previous: "queued",
-      providerSessionId: "p1",
-    });
-    await vi.waitFor(() => expect(statuses(el)).toEqual(["s2:working", "s1:working"]));
-    expect(el.shadowRoot!.querySelector(".queue")).toBeNull(); // no longer queued
-    expect(el.shadowRoot!.querySelector(".live")?.textContent).toBe("Live");
-
-    api.push({ type: "session.completed", at, sessionId: "s1", previous: "working", exitCode: 0 });
-    api.push({ type: "session.failed", at, sessionId: "s2", previous: "working", error: "boom" });
-    await vi.waitFor(() => expect(statuses(el)).toEqual(["s2:failed", "s1:completed"]));
-    expect(el.shadowRoot!.querySelector(".count")?.textContent).toBe("2 sessions");
-  });
-
-  it("records who killed a session", async () => {
-    const api = fakeApi({ sessions: [session("s1")] });
-    const el = await mount(api.client);
-    await vi.waitFor(() => expect(api.calls.some((c) => c.path === "/api/events")).toBe(true));
-
-    api.push({
-      type: "session.killed",
-      at: "2026-09-26T10:01:00Z",
-      sessionId: "s1",
-      previous: "working",
-      source: "user",
-      reason: "stop",
-      caller: "oliver",
-    });
-    await vi.waitFor(() => expect(statuses(el)).toEqual(["s1:killed"]));
-    expect(el.shadowRoot!.querySelector(".killed-by")?.textContent).toBe("killed by oliver");
-  });
-
-  it("shows a sign-in prompt and calls nothing while signed out", async () => {
-    const { client, calls } = fakeApi({ sessions: [session("s1")] });
-    const el = await mount(client, false);
-
-    expect(el.shadowRoot!.querySelector(".signin")?.textContent).toMatch(/Sign in to see sessions/);
-    expect(calls).toHaveLength(0);
-
-    const signIn = vi.fn();
-    el.addEventListener("sign-in", signIn);
-    el.shadowRoot!.querySelector<HTMLButtonElement>('[data-action="sign-in"]')!.click();
-    expect(signIn).toHaveBeenCalledTimes(1);
-  });
-
-  it("clears the list when signed out", async () => {
-    const el = await mount(fakeApi({ sessions: [session("s1")] }).client);
-    expect(statuses(el)).toHaveLength(1);
-
-    el.signedIn = false;
-
-    expect(el.shadowRoot!.querySelector("li")).toBeNull();
-    expect(el.shadowRoot!.querySelector(".signin")).not.toBeNull();
-  });
-
-  it("surfaces the message from the API's error envelope", async () => {
-    const el = await mount(
-      fakeApi({
-        search: () =>
-          Response.json(
-            { error: { code: "INVALID_REQUEST", message: "limit must be 1–100", details: {} } },
-            { status: 400 },
-          ),
-      }).client,
+    root.querySelector<HTMLElement>(".task")!.click();
+    root.querySelector<HTMLElement>("[data-kill]")!.click();
+    root.querySelector<HTMLElement>("[data-copy]")!.click();
+    root.querySelector<HTMLElement>("[data-dur]")!.click();
+    const card = root.querySelector<HTMLElement>(".card")!;
+    card.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Delete", bubbles: true, composed: true }),
     );
-    expect(el.shadowRoot!.querySelector(".error")?.textContent).toBe("limit must be 1–100");
-  });
+    card.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }),
+    );
 
-  it("surfaces an auth-specific error on 401", async () => {
-    const el = await mount(fakeApi({ search: () => new Response(null, { status: 401 }) }).client);
-    expect(el.shadowRoot!.querySelector(".error")?.textContent).toMatch(/Not authorized/);
+    expect(seen).toEqual([
+      "open-session:s1",
+      "kill-session:s1",
+      "copy-id:s1",
+      "toggle-times:",
+      "kill-session:s1",
+      "open-session:s1",
+    ]);
   });
 });

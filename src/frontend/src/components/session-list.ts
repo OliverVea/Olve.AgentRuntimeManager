@@ -1,351 +1,153 @@
-import {
-  type ArmEventData,
-  eventsStream,
-  type Session,
-  type SessionStatus,
-  sessionsSearch,
-} from "@arm/client";
-import type { Client } from "@arm/client/client";
 import { BaseElement, escapeHtml } from "../base-element.js";
+import { isEnded } from "../sessions/format.js";
+import type { SessionStore } from "../sessions/session-store.js";
+import { cardStyles, sessionCard, type TimesAs, timeOf } from "./session-card.js";
 
-type Status = "idle" | "loading" | "ready" | "error";
+export type View = "overview" | "history";
 
-/** How many of the newest sessions the list shows. */
-const PAGE_SIZE = 50;
-
-/** Prompt characters shown per row before truncating. */
-const PROMPT_PREVIEW = 120;
+/** `<use href>` only finds symbols in its own tree, so the cards' icons live in the shadow root. */
+const sprite = `<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+</svg>`;
 
 /**
- * `<session-list>` — a read-only view of the newest sessions, kept current from the event
- * stream. Driven entirely by the TypeScript client Hey API generates from the TypeSpec contract
- * (`@arm/client`).
+ * `<session-list>` — the Overview (queued and working, oldest first) or History (ended, newest
+ * first) as cards, from a {@link SessionStore}. It re-renders on every store change, and only
+ * ticks the running times in between; the composer and dialogs live outside it, so a live update
+ * never touches what the user is typing.
  *
- * Every endpoint needs a bearer token, so the list only talks to the API while `signedIn` is
- * true; signed out it shows a sign-in prompt (its button dispatches a bubbling `sign-in` event
- * for the page to act on) and holds no data or connection.
- *
- * Signed in, it loads one page via `sessionsSearch`, then subscribes to `session.*` on
- * `GET /api/events`: `session.created` inserts the new session at the top, and the lifecycle
- * events patch the matching row in place. The generated SSE client reconnects on its own and
- * sends `Last-Event-ID`, so events missed during a blip are replayed.
- *
- * Every state transition ends by calling `this.render()` **explicitly** — there is no automatic
- * re-render (see {@link BaseElement}).
+ * It only reports what the user wants, as bubbling events whose `detail` is the session id:
+ * `open-session`, `kill-session`, `delete-session`, `copy-id`; plus `toggle-times`.
  */
 export class SessionList extends BaseElement {
   static readonly tagName = "session-list";
 
-  #client: Client | null = null;
-  #signedIn = false;
-  #events: AbortController | null = null;
+  #store: SessionStore | null = null;
+  #view: View = "overview";
+  #times: TimesAs = "relative";
+  #tick: ReturnType<typeof setInterval> | undefined;
+  readonly #onChange = () => this.render();
 
-  // --- view state ---
-  #sessions: Session[] = [];
-  #total = 0;
-  #status: Status = "idle";
-  #error = "";
-  #live = false;
-
-  /** The API client (see `createApiClient`). */
-  set client(value: Client) {
-    this.#client = value;
-    this.#sync();
+  set store(store: SessionStore) {
+    this.#store?.removeEventListener("change", this.#onChange);
+    this.#store = store;
+    store.addEventListener("change", this.#onChange);
+    this.render();
   }
 
-  /** Whether the user is signed in. Signing in loads + subscribes; signing out clears. */
-  set signedIn(value: boolean) {
-    if (value === this.#signedIn) return;
-    this.#signedIn = value;
-    this.#sync();
+  set view(view: View) {
+    this.#view = view;
+    if (view === "history" && this.#store?.history === "idle") void this.#store.loadHistory();
+    this.render();
   }
 
-  get signedIn(): boolean {
-    return this.#signedIn;
+  get view(): View {
+    return this.#view;
+  }
+
+  set times(times: TimesAs) {
+    this.#times = times;
+    this.render();
+  }
+
+  constructor() {
+    super();
+    this.root.addEventListener("click", (e) => this.#click(e as MouseEvent));
+    this.root.addEventListener("keydown", (e) => this.#key(e as KeyboardEvent));
   }
 
   connectedCallback(): void {
-    this.render(); // author-triggered first paint
-    this.#sync();
+    this.render();
+    this.#tick = setInterval(() => this.#tickTimes(), 1000);
   }
 
   disconnectedCallback(): void {
-    this.#unsubscribe();
-  }
-
-  /** Start or stop talking to the API to match (connected, client, signed in). */
-  #sync(): void {
-    if (!this.isConnected) return;
-    if (this.#client && this.#signedIn) {
-      void this.load();
-      this.#subscribe();
-      return;
-    }
-    this.#unsubscribe();
-    this.#sessions = [];
-    this.#total = 0;
-    this.#status = "idle";
-    this.#error = "";
-    this.render();
-  }
-
-  // --- data operations. Each mutates state, then explicitly re-renders. ---
-
-  async load(): Promise<void> {
-    if (!this.#client || !this.#signedIn) return;
-    this.#status = "loading";
-    this.#error = "";
-    this.render();
-    try {
-      const page = await unwrap(
-        sessionsSearch({ client: this.#client, body: { limit: PAGE_SIZE } }),
-      );
-      this.#sessions = page.items;
-      this.#total = page.total;
-      this.#status = "ready";
-    } catch (error) {
-      this.#status = "error";
-      this.#error = describeError(error);
-    }
-    this.render();
-  }
-
-  /** Open the `session.*` event stream (once); it runs until {@link #unsubscribe}. */
-  #subscribe(): void {
-    if (this.#events || !this.#client) return;
-    const events = new AbortController();
-    this.#events = events;
-    void (async () => {
-      const { stream } = await eventsStream({
-        client: this.#client ?? undefined,
-        query: { event: ["session.*"] },
-        signal: events.signal,
-        onSseEvent: () => this.#setLive(events, true),
-        onSseError: () => this.#setLive(events, false),
-      });
-      for await (const data of stream) {
-        if (events.signal.aborted) break;
-        this.apply(data as ArmEventData);
-      }
-    })();
-  }
-
-  #unsubscribe(): void {
-    this.#events?.abort();
-    this.#events = null;
-    this.#live = false;
-  }
-
-  /** Show whether the stream is connected — ignoring a stream that's already been replaced. */
-  #setLive(events: AbortController, live: boolean): void {
-    if (events !== this.#events || live === this.#live) return;
-    this.#live = live;
-    this.render();
-  }
-
-  /** Fold one event into the list: insert on create, patch the row on lifecycle changes. */
-  apply(event: ArmEventData): void {
-    if (event.type === "heartbeat") return;
-    if (event.type === "session.created") {
-      if (this.#sessions.some((s) => s.id === event.sessionId)) return; // replayed
-      this.#sessions = [event.session, ...this.#sessions].slice(0, PAGE_SIZE);
-      this.#total++;
-      this.render();
-      return;
-    }
-
-    const index = this.#sessions.findIndex((s) => s.id === event.sessionId);
-    const current = this.#sessions[index];
-    if (!current) return; // not on this page
-
-    let next: Session = { ...current };
-    switch (event.type) {
-      case "session.queued":
-        next = { ...next, status: "queued", queuePosition: event.position };
-        break;
-      case "session.started":
-        next = { ...next, providerSessionId: event.providerSessionId, startedAt: event.at };
-        next = moveTo(next, "working");
-        break;
-      case "session.completed":
-        next = { ...moveTo(next, "completed"), endedAt: event.at, exitCode: event.exitCode };
-        if (event.summary !== undefined) next.summary = event.summary;
-        break;
-      case "session.failed":
-        next = { ...moveTo(next, "failed"), endedAt: event.at, error: event.error };
-        break;
-      case "session.cancelled":
-      case "session.killed":
-        next = {
-          ...moveTo(next, event.type === "session.cancelled" ? "cancelled" : "killed"),
-          endedAt: event.at,
-          killSource: event.source,
-        };
-        if (event.reason !== undefined) next.killReason = event.reason;
-        if (event.caller !== undefined) next.killCaller = event.caller;
-        break;
-    }
-    this.#sessions = this.#sessions.map((s, i) => (i === index ? next : s));
-    this.render();
+    clearInterval(this.#tick);
   }
 
   protected override styles(): string {
-    return `
-      :host { display: block; }
-      .bar { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
-      .count { opacity: 0.65; font-size: 0.85rem; }
-      .live { font-size: 0.78rem; opacity: 0.7; }
-      .live::before { content: ""; display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.35rem; border-radius: 50%; background: #9a9a9a; }
-      .live.on::before { background: #3aa66a; }
-      button { font: inherit; cursor: pointer; border: 1px solid var(--edge, rgba(128,128,128,0.35)); border-radius: 6px; background: transparent; color: inherit; padding: 0.3rem 0.7rem; }
-      button:hover { background: rgba(128,128,128,0.12); }
-      ul { list-style: none; margin: 0; padding: 0; }
-      li { padding: 0.65rem 0; border-top: 1px solid var(--edge, rgba(128,128,128,0.2)); }
-      .meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; font-size: 0.82rem; }
-      .meta .dim { opacity: 0.6; }
-      .id { font: 0.75rem ui-monospace, monospace; opacity: 0.55; }
-      .prompt { margin-top: 0.25rem; overflow-wrap: anywhere; }
-      .status { font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 999px; background: rgba(128,128,128,0.16); }
-      .status.working { background: rgba(60,130,220,0.18); }
-      .status.completed { background: rgba(58,166,106,0.18); }
-      .status.failed, .status.killed { background: rgba(200,60,60,0.16); }
-      .status.cancelled { background: rgba(120,120,120,0.16); }
-      .error { margin: 0.75rem 0; padding: 0.6rem 0.8rem; border-radius: 6px; background: rgba(200,60,60,0.14); font-size: 0.88rem; }
-      .muted { opacity: 0.6; padding: 1rem 0; }
-      .signin { display: flex; align-items: center; gap: 0.8rem; padding: 1rem 0; }
-    `;
+    return cardStyles;
   }
 
   protected override template(): string {
-    if (!this.#signedIn) {
-      return `
-        <div class="signin">
-          <span class="muted">Sign in to see sessions.</span>
-          <button data-action="sign-in">Log in</button>
-        </div>`;
-    }
-    return `
-      <div class="bar">
-        <span class="count">${this.#countLabel()}</span>
-        <span>
-          <span class="live ${this.#live ? "on" : ""}">${this.#live ? "Live" : "Connecting…"}</span>
-          <button data-action="refresh">Refresh</button>
-        </span>
-      </div>
-      ${this.#error ? `<div class="error">${escapeHtml(this.#error)}</div>` : ""}
-      ${this.#body()}
-    `;
-  }
+    const store = this.#store;
+    if (!store) return "";
+    const now = Date.now();
+    const overview = this.#view === "overview";
+    const sessions = overview ? store.active : store.ended;
+    const state = overview ? store.overview : store.history;
+    const error = state === "error" ? `<div class="error">${escapeHtml(store.error)}</div>` : "";
 
-  #countLabel(): string {
-    if (this.#status === "loading") return "Loading…";
-    if (this.#status === "error") return "Error";
-    const n = this.#total;
-    const shown = this.#sessions.length < n ? `newest ${this.#sessions.length} of ` : "";
-    return `${shown}${n} session${n === 1 ? "" : "s"}`;
-  }
+    let body: string;
+    if (sessions.length) body = sessions.map((s) => sessionCard(s, this.#times, now)).join("");
+    else if (state === "loading" || state === "idle") body = `<div class="empty">Loading…</div>`;
+    else if (overview) body = `<div class="empty">Nothing running. Start a session above.</div>`;
+    else body = `<div class="empty">No ended sessions yet.</div>`;
 
-  #body(): string {
-    if (this.#status === "loading" && this.#sessions.length === 0) {
-      return `<p class="muted">Loading sessions…</p>`;
-    }
-    if (this.#status === "ready" && this.#sessions.length === 0) {
-      return `<p class="muted">No sessions yet.</p>`;
-    }
-    return `<ul>${this.#sessions.map((s) => row(s)).join("")}</ul>`;
-  }
-
-  protected override afterRender(): void {
-    this.query<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
-      "click",
-      () => void this.load(),
-    );
-    this.query<HTMLButtonElement>('[data-action="sign-in"]')?.addEventListener("click", () =>
-      this.dispatchEvent(new CustomEvent("sign-in", { bubbles: true, composed: true })),
-    );
-  }
-}
-
-function row(session: Session): string {
-  const queued =
-    session.status === "queued" && session.queuePosition !== undefined
-      ? `<span class="queue">#${session.queuePosition} in queue</span>`
+    const older = !overview && store.historyLoaded < store.historyTotal;
+    const footer = older
+      ? `<div class="footer-note">Showing the newest ${sessions.length} · <button data-older>load older</button></div>`
       : "";
-  const killedBy =
-    (session.status === "killed" || session.status === "cancelled") &&
-    session.killCaller !== undefined
-      ? `<span class="killed-by dim">${session.status} by ${escapeHtml(session.killCaller)}</span>`
-      : "";
-  return `
-    <li data-id="${escapeHtml(session.id)}">
-      <div class="meta">
-        <span class="status ${escapeHtml(session.status)}">${escapeHtml(session.status)}</span>
-        ${queued}
-        <span class="id" title="${escapeHtml(session.id)}">${escapeHtml(session.id.slice(0, 8))}</span>
-        <span class="provider dim">${escapeHtml(session.provider)}</span>
-        <span class="model dim">${escapeHtml(session.model)}</span>
-        <span class="caller">${escapeHtml(session.caller)}</span>
-        ${killedBy}
-        <time class="dim" datetime="${escapeHtml(session.createdAt)}">${escapeHtml(formatTime(session.createdAt))}</time>
-      </div>
-      <div class="prompt">${escapeHtml(truncate(session.prompt, PROMPT_PREVIEW))}</div>
-    </li>`;
-}
-
-/** A session in a new status; the queue position only means something while queued. */
-function moveTo(session: Session, status: SessionStatus): Session {
-  const { queuePosition: _, ...rest } = session;
-  return { ...rest, status };
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
-}
-
-/**
- * A failed API call: the HTTP status (undefined when no response arrived, e.g. a network error)
- * and the parsed error body — the API's `{ error: { code, message, details } }` envelope.
- */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number | undefined,
-    readonly body: unknown,
-  ) {
-    super(envelopeMessage(body) ?? (status ? `Request failed (${status}).` : "Request failed."));
-    this.name = "ApiError";
+    return sprite + error + body + footer;
   }
-}
 
-/**
- * The generated SDK returns `{ data, error, response }` instead of throwing (and a thrown error
- * would carry only the body, not the status). Turn a failure into an {@link ApiError} with the
- * status so the component's try/catch flow stays simple.
- */
-async function unwrap<T>(
-  call: Promise<{ data?: T; error?: unknown; response?: Response }>,
-): Promise<T> {
-  const { data, error, response } = await call;
-  if (error !== undefined || !response?.ok) throw new ApiError(response?.status, error);
-  return data as T;
-}
+  /** Keep keyboard focus on the same card across re-renders. */
+  protected override render(): void {
+    const focused = (this.root.activeElement as HTMLElement | null)?.dataset?.open;
+    super.render();
+    this.#markOverflow();
+    if (focused) this.query<HTMLElement>(`[data-open="${CSS.escape(focused)}"]`)?.focus();
+  }
 
-/** The `error.message` of an error envelope, or a thrown Error's own message. */
-function envelopeMessage(body: unknown): string | undefined {
-  const message = (body as { error?: { message?: unknown } } | undefined)?.error?.message;
-  if (typeof message === "string" && message) return message;
-  if (body instanceof Error && body.message) return body.message;
-  return undefined;
-}
+  /** Fade rows that are wider than the card. */
+  #markOverflow(): void {
+    for (const row of this.queryAll<HTMLElement>(".info, .r1")) {
+      row.classList.toggle("overflows", row.scrollWidth > row.clientWidth + 1);
+    }
+  }
 
-/** Turn a failed call into a human-readable line, calling out the auth case. */
-function describeError(error: unknown): string {
-  const status = error instanceof ApiError ? error.status : undefined;
-  if (status === 401 || status === 403) return "Not authorized — try logging in again.";
-  return (error as { message?: string } | undefined)?.message || "Request failed.";
+  #tickTimes(): void {
+    const now = Date.now();
+    for (const el of this.queryAll<HTMLElement>("[data-dur]")) {
+      const session = this.#store?.get(el.dataset.dur ?? "");
+      if (session && !isEnded(session)) el.textContent = timeOf(session, this.#times, now);
+    }
+  }
+
+  #emit(type: string, detail?: string): void {
+    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  }
+
+  #click(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+    const control = target.closest<HTMLElement>("button, [data-copy]");
+    if (!control) {
+      // A click anywhere else on a card opens that session (unless it ends a text selection).
+      const card = target.closest<HTMLElement>("[data-open]");
+      if (card && !getSelection()?.toString()) this.#emit("open-session", card.dataset.open);
+      return;
+    }
+    const d = control.dataset;
+    if (d.kill) this.#emit("kill-session", d.kill);
+    else if (d.delete) this.#emit("delete-session", d.delete);
+    else if (d.copy) this.#emit("copy-id", d.copy);
+    else if ("times" in d) this.#emit("toggle-times");
+    else if ("older" in d) void this.#store?.loadHistory(true);
+  }
+
+  /** Enter opens the focused card; Delete asks to kill (or delete) it. */
+  #key(e: KeyboardEvent): void {
+    const card = (e.target as HTMLElement).closest?.<HTMLElement>("[data-open]");
+    const id = card?.dataset.open;
+    if (!id) return;
+    if (e.key === "Enter" && e.target === card) {
+      this.#emit("open-session", id);
+    } else if (e.key === "Delete") {
+      const session = this.#store?.get(id);
+      if (!session) return;
+      e.preventDefault();
+      this.#emit(isEnded(session) ? "delete-session" : "kill-session", id);
+    }
+  }
 }

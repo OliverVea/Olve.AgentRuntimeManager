@@ -1,0 +1,464 @@
+/* The sessions screen (approved mock: mocks/sessions.html). The cards' own styles are in
+   components/session-card.ts (shadow DOM); they share these tokens. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --card: #ffffff;
+  --line: #e4e4e0;
+  --text: #1d1d1b;
+  --dim: #6b6b66;
+  --faint: #9a9a94;
+  --field: #ffffff;
+  --chip: #f1f1ed;
+  --hover: #f1f1ed;
+  --backdrop: rgba(0, 0, 0, 0.25);
+  --accent: #2563eb;
+  --accent-fill: #2563eb;
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --danger-fill: #dc2626;
+  --danger-soft: #fee2e2;
+  --working: #15803d;
+  --working-bg: #dcfce7;
+  --queued: #52525b;
+  --queued-bg: #f1f1f4;
+  --completed: #15803d;
+  --completed-bg: #dcfce7;
+  --killed: #b45309;
+  --killed-bg: #fef3c7;
+  --failed: #dc2626;
+  --failed-bg: #fee2e2;
+  --beta: #7c3aed;
+  --beta-bg: #ede9fe;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --row: 22px;
+}
+/* Dark: set by main.ts from the system preference, or the Options override. */
+:root.dark {
+  color-scheme: dark;
+  --bg: #131312;
+  --card: #1c1c1a;
+  --line: #33332f;
+  --text: #ececea;
+  --dim: #a1a19a;
+  --faint: #75756f;
+  --field: #232321;
+  --chip: #2a2a27;
+  --hover: #2a2a27;
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --accent: #7aa7ff;
+  --accent-fill: #3563d4;
+  --on-accent: #ffffff;
+  --danger: #f87171;
+  --danger-fill: #b83232;
+  --danger-soft: #3a1818;
+  --working: #4ade80;
+  --working-bg: #143020;
+  --queued: #b4b4bc;
+  --queued-bg: #2a2a2e;
+  --completed: #4ade80;
+  --completed-bg: #143020;
+  --killed: #fbbf24;
+  --killed-bg: #372b0c;
+  --failed: #f87171;
+  --failed-bg: #3a1818;
+  --beta: #c4b5fd;
+  --beta-bg: #2e2250;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px / 1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: hidden must beat every display rule */
+  display: none !important;
+}
+svg.i {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* ---- header ---- */
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  font-weight: 750;
+  font-size: 19px;
+  letter-spacing: 0.02em;
+}
+.env {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--beta);
+  background: var(--beta-bg);
+  border-radius: 4px;
+  padding: 1px 7px;
+}
+.version {
+  color: var(--dim);
+  font: 12px var(--mono);
+}
+.spacer {
+  flex: 1;
+}
+.live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--working);
+}
+.dot.connecting,
+.dot.reconnecting {
+  background: var(--killed);
+  animation: pulse 1s infinite;
+}
+.dot.down {
+  background: var(--danger);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.user {
+  color: var(--dim);
+  font-size: 13px;
+}
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+}
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+main {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+}
+
+/* ---- signed out ---- */
+.signin {
+  text-align: center;
+  color: var(--dim);
+  padding: 48px 16px;
+}
+.signin p {
+  margin: 0 0 14px;
+}
+
+/* ---- composer ---- */
+.composer {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+/* One line to start; grows with the prompt. The resize grip only appears once it's multi-line. */
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  max-height: 50vh;
+  resize: none;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  background: var(--field);
+  line-height: 20px;
+}
+.composer textarea.multiline {
+  resize: vertical;
+  overflow-y: auto;
+}
+.composer textarea:focus,
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.composer .row {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+/* Labels sit left of their inputs here, to keep the composer short. */
+.composer .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.field input,
+.field select {
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--field);
+  color: var(--text);
+  height: 32px;
+}
+.field .num {
+  width: 6.5em;
+  font-family: var(--mono);
+}
+.field .caller {
+  width: 10em;
+}
+.field .model {
+  width: 12em;
+  font-family: var(--mono);
+}
+.hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+.composer .settings {
+  display: contents;
+}
+/* Phones: the settings fold behind a light "Advanced" toggle. */
+.advanced-toggle {
+  display: none;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font-size: 13px;
+  padding: 0;
+}
+.advanced-toggle:hover {
+  color: var(--dim);
+}
+.primary {
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 16px;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.primary.danger {
+  background: var(--danger-fill);
+}
+.toast {
+  font-size: 13px;
+  color: var(--dim);
+  margin-top: 6px;
+}
+.toast.error {
+  color: var(--danger);
+}
+.toast:empty {
+  display: none;
+}
+
+/* ---- views ---- */
+nav.views {
+  display: flex;
+  gap: 2px;
+  margin: 22px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+nav.views button {
+  border: 0;
+  background: none;
+  padding: 6px 12px;
+  color: var(--dim);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+nav.views button.on {
+  color: var(--text);
+  border-bottom-color: var(--text);
+  font-weight: 650;
+}
+
+/* ---- the session page (its own mock comes with M5b) ---- */
+.back {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+}
+.detail-card {
+  margin-top: 12px;
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 28px;
+  color: var(--dim);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.detail-card strong {
+  color: var(--text);
+}
+
+/* ---- dialogs ---- */
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  width: min(460px, 92vw);
+  background: var(--card);
+  color: var(--text);
+}
+dialog::backdrop {
+  background: var(--backdrop);
+}
+dialog h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+dialog p {
+  color: var(--dim);
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+dialog .buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+dialog .problem {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+dialog .problem:empty {
+  display: none;
+}
+.ghost {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 14px;
+  background: transparent;
+}
+.ghost:hover {
+  background: var(--hover);
+}
+section.opt {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+section.opt h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+}
+section.opt .field input,
+section.opt .field select {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .user,
+  .version {
+    display: none;
+  }
+  main {
+    padding: 12px;
+  }
+  .field .caller {
+    width: 8em;
+  }
+  .advanced-toggle {
+    display: inline;
+  }
+  .hint {
+    display: none;
+  }
+  .composer .settings {
+    display: none;
+    order: 10;
+    width: 100%;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .composer .settings.open {
+    display: flex;
+  }
+  .composer .settings .field {
+    justify-content: space-between;
+  }
+  .composer .settings .field input {
+    flex: 1;
+    max-width: 70%;
+    width: auto;
+  }
+}
