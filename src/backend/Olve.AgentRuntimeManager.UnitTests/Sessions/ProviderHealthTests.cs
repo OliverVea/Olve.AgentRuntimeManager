@@ -108,6 +108,32 @@ public class ProviderHealthTests : IDisposable
     }
 
     [Test]
+    public async Task Check_PausesAProviderThatCantRunAgents_AndLeavesTheOthers()
+    {
+        _provider.CheckResult = Down(ProviderTrouble.Unauthorized);
+
+        await _sessions.CheckProvidersAsync(CancellationToken.None);
+
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Unauthorized);
+        await Assert.That(Health().Reason).IsEqualTo("Unauthorized for a while.");
+        await Assert.That(Health(_other).Status).IsEqualTo(ProviderStatus.Available);
+        await Assert.That(Events().OfType<ProviderHealthChanged>().Single().Health.Provider).IsEqualTo("controlled");
+        await Assert.That(Create().Status).IsEqualTo(SessionStatus.Queued);
+    }
+
+    [Test]
+    public async Task Check_DoesntOverrideWhatASessionFound()
+    {
+        var session = Create();
+        await End(session.Id, Down(ProviderTrouble.Limited, Start + TimeSpan.FromHours(1)), s => s.Status == SessionStatus.Queued);
+        _provider.CheckResult = Down(ProviderTrouble.Unauthorized);
+
+        await _sessions.CheckProvidersAsync(CancellationToken.None);
+
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Limited);
+    }
+
+    [Test]
     public async Task Refused_RequeuesTheSessionAtTheHead_AndPausesTheProvider()
     {
         var session = Create();

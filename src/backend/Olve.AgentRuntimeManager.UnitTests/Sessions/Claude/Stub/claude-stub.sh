@@ -3,6 +3,17 @@
 # `stub:<behaviour>` word in the prompt. Writes how it was started (arguments one per line,
 # then the environment) to `invocation.txt` in its working directory.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# `claude auth status --json`: logged in with a token, or a login in the configuration folder
+# (where Claude Code keeps it, `.credentials.json`).
+if [ "$1" = auth ]; then
+  if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]; then
+    echo '{"loggedIn": true, "authMethod": "oauth_token"}'
+  else
+    echo '{"loggedIn": false, "authMethod": "none"}'; exit 1
+  fi
+  exit 0
+fi
 { printf '%s\n' "$@" | sed 's/^/arg:/'; env | sort | sed 's/^/env:/'; } > invocation.txt
 
 # The prompt arrives as the first stdin line, like with the real CLI.

@@ -15,4 +15,11 @@ public interface IAgentProvider
     /// its lock.
     /// </summary>
     IAgentRun Start(AgentLaunch launch);
+
+    /// <summary>
+    /// Whether the provider can run agents at all, found out without running one (no usage): the
+    /// trouble if it can't, null if it can or can't tell. Run once at startup.
+    /// </summary>
+    Task<AgentOutcome.Unavailable?> CheckAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<AgentOutcome.Unavailable?>(null);
 }

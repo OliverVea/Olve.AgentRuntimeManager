@@ -12,6 +12,11 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
     /// <summary>When set, <see cref="Start"/> throws this instead of starting.</summary>
     public Exception? StartFailure { get; set; }
 
+    /// <summary>What <see cref="CheckAsync"/> finds.</summary>
+    public AgentOutcome.Unavailable? CheckResult { get; set; }
+
+    public Task<AgentOutcome.Unavailable?> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(CheckResult);
+
     public IReadOnlyList<ControlledRun> Runs
     {
         get

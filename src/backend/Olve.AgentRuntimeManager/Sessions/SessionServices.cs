@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.Utilities.AsyncOnStartup;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -21,6 +22,7 @@ public static class SessionServices
 
         services.AddSingleton<IAgentProvider, ClaudeProvider>();
         services.AddSingleton<SessionManager>();
+        services.AddSingleton<IAsyncOnStartup, ProviderCheck>();
         services.AddSingleton<IdempotencyStore<SessionsCreateResponse>>();
 
         services.AddSingleton<ISessionsCreateHandler, CreateSessionHandler>();

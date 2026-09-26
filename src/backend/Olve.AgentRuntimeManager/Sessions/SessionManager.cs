@@ -94,6 +94,30 @@ public sealed class SessionManager : IDisposable
     /// <summary>The names of the registered providers.</summary>
     public IReadOnlyList<string> Providers => [.. _providers.Keys.Order(StringComparer.Ordinal)];
 
+    /// <summary>
+    /// Asks every provider whether it can run agents at all (<see cref="IAgentProvider.CheckAsync"/>)
+    /// and pauses those that can't. A provider already paused by a session keeps its state.
+    /// </summary>
+    public async Task CheckProvidersAsync(CancellationToken cancellationToken)
+    {
+        foreach (var provider in _providers.Values)
+        {
+            if (await provider.CheckAsync(cancellationToken) is not { } unavailable)
+            {
+                continue;
+            }
+
+            lock (_gate)
+            {
+                var state = _health[provider.Name];
+                if (state.Status == ProviderStatus.Available)
+                {
+                    PauseLocked(state, unavailable);
+                }
+            }
+        }
+    }
+
     /// <summary>Every provider's health, by name.</summary>
     public IReadOnlyList<ProviderHealth> Health()
     {

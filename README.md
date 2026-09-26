@@ -91,7 +91,9 @@ says why and until when: `limited` until the limit resets, `unreachable` for a w
 again, `unauthorized` until a restart. New sessions still queue; other providers' sessions pass
 them. The refused session goes back to the head of the queue (`working → queued`, with the
 error) and fails after `Sessions:ProviderRetries` retries; waiting out a known limit reset uses
-none. Health is in memory only, and every change is a `provider.health` event.
+none. Health is in memory only, and every change is a `provider.health` event. Once the server is
+up it also checks each provider without running an agent (`claude`: `claude auth status`, so a
+missing login shows as `unauthorized` before any session tries).
 
 `GET /api/events` (`Events/`) streams every session change as SSE (`arm events` tails it). Each
 event's JSON data carries `type` (= the SSE event name), `at` and its subject id; every event but

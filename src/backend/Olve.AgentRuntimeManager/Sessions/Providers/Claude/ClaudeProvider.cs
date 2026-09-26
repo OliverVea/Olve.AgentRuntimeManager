@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
@@ -27,6 +28,53 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
             ?? throw new InvalidOperationException($"'{settings.Command}' did not start.");
         logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, pid {Pid}) in {Folder}", launch.SessionId, launch.Attempt, process.Id, folder);
         return new ClaudeRun(process, launch.ProviderSessionId, launch.Prompt, folder, settings.ExitGrace);
+    }
+
+    /// <summary>
+    /// Whether Claude Code is logged in, as its agents would be (the same environment and
+    /// configuration folder): <c>claude auth status</c>, which reads the credentials without using
+    /// them. A token it has but the API would reject still shows only when a session runs.
+    /// </summary>
+    public async Task<AgentOutcome.Unavailable?> CheckAsync(CancellationToken cancellationToken)
+    {
+        var settings = options.Value;
+        var info = new ProcessStartInfo(settings.Command)
+        {
+            WorkingDirectory = Directory.CreateDirectory(WorkRoot(settings)).FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in (string[])["auth", "status", "--json"])
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        LockDownEnvironment(info, settings);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            using var process = Process.Start(info) ?? throw new InvalidOperationException($"'{settings.Command}' did not start.");
+            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            _ = process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            if (ClaudeStreamJson.Parse(await stdout) is { } status && status["loggedIn"] is JsonValue flag && flag.TryGetValue<bool>(out var loggedIn))
+            {
+                return loggedIn
+                    ? null
+                    : new AgentOutcome.Unavailable(ProviderTrouble.Unauthorized,
+                        "Claude Code is not logged in: no CLAUDE_CODE_OAUTH_TOKEN, and no login in its configuration folder.");
+            }
+
+            logger.LogWarning("Claude Code's auth status (exit code {ExitCode}) said nothing about a login", process.ExitCode);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Could not ask Claude Code whether it is logged in");
+        }
+
+        return null;
     }
 
     /// <summary>How the agent is launched: the lockdown flags and a minimal environment.</summary>
@@ -61,6 +109,13 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
             info.ArgumentList.Add(launch.Model);
         }
 
+        LockDownEnvironment(info, settings);
+        return info;
+    }
+
+    /// <summary>Only the allowlisted variables, plus what keeps Claude Code to itself.</summary>
+    private static void LockDownEnvironment(ProcessStartInfo info, ClaudeProviderOptions settings)
+    {
         info.Environment.Clear();
         foreach (var name in PassedThrough)
         {
@@ -79,8 +134,6 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
         {
             info.Environment["CLAUDE_CONFIG_DIR"] = configDirectory;
         }
-
-        return info;
     }
 
     private static string WorkRoot(ClaudeProviderOptions settings) =>

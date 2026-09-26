@@ -210,6 +210,33 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task Check_LoggedIn_IsFine()
+    {
+        var config = Directory.CreateDirectory(Path.Combine(_root, "config")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(config, ".credentials.json"), "{}");
+
+        var trouble = await Provider(o => o.ConfigDirectory = config).CheckAsync(CancellationToken.None);
+
+        await Assert.That(trouble).IsNull();
+    }
+
+    [Test]
+    public async Task Check_NotLoggedIn_IsUnauthorized()
+    {
+        Skip.When(Environment.GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN") is { Length: > 0 }, "A token in the test's environment logs the stub in.");
+        var config = Directory.CreateDirectory(Path.Combine(_root, "config")).FullName;
+
+        var trouble = await Provider(o => o.ConfigDirectory = config).CheckAsync(CancellationToken.None);
+
+        await Assert.That(trouble!.Trouble).IsEqualTo(ProviderTrouble.Unauthorized);
+        await Assert.That(trouble.Error).StartsWith("Claude Code is not logged in");
+    }
+
+    [Test]
+    public async Task Check_WithoutClaudeCode_CantTell() =>
+        await Assert.That(await Provider(o => o.Command = Path.Combine(_root, "no-such-claude")).CheckAsync(CancellationToken.None)).IsNull();
+
+    [Test]
     public async Task MissingCommand_FailsToStart() =>
         await Assert.That(() => Provider(o => o.Command = Path.Combine(_root, "no-such-claude")).Start(Launch("x")))
             .ThrowsException();

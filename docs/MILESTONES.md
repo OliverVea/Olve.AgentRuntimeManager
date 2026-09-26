@@ -22,6 +22,7 @@ The `arm` CLI grows with every milestone.
 - [ ] M13 — **Codex provider** (re-evaluate the current CLI first)
 - [ ] M14 — **Retention**: 6-month retention, hot/cold tiers, compressed archive
 - [ ] M15 — **API versioning** (B3)
+- [ ] M16 — **Typed ids** (after the MVP; agreed 2026-09-26): ids as Olve.Utilities `Id<T>` (`Id<Session>`, later completions, approvals, …) instead of bare `Guid`s, so ids of different things can't be mixed up. Through the emitter: the `Id<T>` decorator already planned in `SPEC-FIRST.md` (generated models, route parameters, JSON converters, conformance tests), then the backend (store, runtime, handlers) moves over in one pass. The wire format stays a UUID string
 
 ## Web UI
 
