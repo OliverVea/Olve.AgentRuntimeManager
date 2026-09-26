@@ -64,6 +64,15 @@ re-evaluated and scoped when it's picked up.
 
 ## Frontends & interaction
 
+- **CLI served by the server, like `pl`**: the pipeline builds `arm` (linux-x64/arm64,
+  darwin-arm64) into the bundle, the image carries it, and ARM serves it at `/download/{asset}`
+  (outside `/api`, anonymous). Each environment serves the CLI matching its API; `arm` can warn
+  when it's older than the server, or update itself.
+- **Setup page without auth**: the web UI's logged-out view (and `/setup`) shows the install
+  one-liner for the viewer's OS from this server's `/download`, then `arm login`, plus the server
+  version. Anonymous because it's what you need before you have a token; nothing on it is secret
+  (the OIDC client is already public via `/api/auth-config`). Fine while ARM is Tailscale-only;
+  revisit with a public route, like `/health` (OPEN-QUESTIONS C1).
 - **Mobile-first web UI**: on a phone the jobs are checking status, approving and sending a
   quick steering message; the laptop view is the larger surface built on top of that.
 - **Dashboard widget**: a small embeddable ARM widget (running/queued/waiting counts, pending
