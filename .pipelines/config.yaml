@@ -29,6 +29,8 @@ secrets:
     description: Claude Code OAuth token (`claude setup-token`, one year) for the beta VM's agents. Use sparingly.
   - name: CLAUDE_CODE_OAUTH_TOKEN_PROD
     description: Claude Code OAuth token (`claude setup-token`, one year) for the prod VM's agents.
+  - name: ARM_BETA_OIDC_CLIENT_SECRET
+    description: Secret of the beta `olve-arm` confidential client (client credentials); deploy-beta uses it to start its one claude check session through ARM.
 
 # Production steps run in parallel and write to bundle/<step-name>/.
 productionSteps:

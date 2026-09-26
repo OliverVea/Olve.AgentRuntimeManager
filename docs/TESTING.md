@@ -74,10 +74,11 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   clobbers real beta state.
 - **LLM-free** — control-plane only (session CRUD, approval flow via FakeProvider, policy,
   SSE, health). Never spawn a real Claude/Codex session here.
-- **One exception, in `deploy-beta` (2026-09-26):** each bundle's beta deploy runs one real
-  Claude Code turn in the VM (`src/deploy/vm/claude-check.sh`: Haiku, "Tell me a joke", the
-  provider's lockdown, the beta token) and fails unless the agent saw no tools or MCP servers and
-  the turn succeeded. It confirms the bundle's Claude Code version, login and lockdown before prod.
+- **One exception, in `deploy-beta` (2026-09-26):** each bundle's beta deploy starts one real
+  `claude` session through ARM's API (`src/deploy/vm/claude-check.sh`: Haiku, "Tell me a joke",
+  caller `deploy-beta`, a client-credentials token of the beta `olve-arm` machine client) and fails
+  unless it completed and its Claude Code saw no tools or MCP servers. It confirms the bundle's
+  provider, Claude Code version, login and lockdown before prod; the session stays in beta's history.
 
 ## Provider (LLM) integration testing
 

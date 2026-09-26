@@ -4,7 +4,7 @@
 # built image tarball + src/deploy/vm to the host and runs vm-deploy.sh there, which ensures the
 # VM exists (first run creates it), installs the release as a systemd service, and ensures the
 # host relay the Olve.Homelab route targets, then confirms the `claude` provider with one real
-# Claude Code turn (src/deploy/vm/claude-check.sh). Idempotent; a failure stops the chain.
+# session through ARM (src/deploy/vm/claude-check.sh). Idempotent; a failure stops the chain.
 set -e
 
 mkdir -p /tmp
@@ -49,11 +49,13 @@ for i in 1 2 3 4 5; do
 done
 [ "$healthy" = 1 ] || { echo "beta health check failed" >&2; exit 1; }
 
-# One real Claude Code turn per bundle, in the VM with the provider's lockdown (a Haiku joke).
-# Bundles from before Claude Code was deployed have no check (and no Claude Code).
+# One real claude session through ARM per bundle (a Haiku joke; it shows in beta's history), run
+# in the VM. The machine client's secret travels inside the script on stdin, never on a command
+# line. Bundles from before Claude Code was deployed have no check (and no Claude Code).
 if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/claude-check.sh" ]; then
-  echo "Confirming Claude Code on beta..."
-  ssh -o StrictHostKeyChecking=no "$HOST" \
-    "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 bash -s" \
-    < "$INPUT_DIR/vm/claude-check.sh"
+  echo "Confirming the claude provider on beta..."
+  { printf 'VERSION=%s\nCLIENT_SECRET_B64=%s\n' "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
+    cat "$INPUT_DIR/vm/claude-check.sh"; } |
+    ssh -o StrictHostKeyChecking=no "$HOST" \
+      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 bash -s"
 fi
