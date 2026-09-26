@@ -24,6 +24,16 @@ export type CommandContext = {
   options: OptionValues;
   /** Generated Hey API client, configured with base URL, token and fetch. */
   client: Client;
+  /** The server's base URL (flag, env, config, default). */
+  url: string;
+  /** For requests that aren't API calls (the login provider). */
+  fetch: typeof fetch;
+  /** Opens a URL in the user's browser (best effort). */
+  openBrowser(url: string): void;
+  /** No browser the login redirect could reach: over SSH, or no display. */
+  headless: boolean;
+  now(): Date;
+  sleep(ms: number): Promise<void>;
   /** The user's defaults: each setting's env variable (`ARM_MODEL`, …), else `~/.arm/config.json`. */
   settings: ArmConfig;
   /** The config folder (`~/.arm`), if there is one; `arm config` writes to it. */
@@ -53,6 +63,8 @@ export type Command = {
   options: Record<string, OptionSpec>;
   /** Streams until interrupted: Ctrl+C then aborts `ctx.signal` (exit 0) instead of killing the process. */
   streaming?: boolean;
+  /** Runs without a token (login, logout, config): no saved token is loaded or refreshed. */
+  skipAuth?: boolean;
   /** The output to print, or undefined when the command streamed its own output. */
   run(ctx: CommandContext): Promise<CommandOutput | undefined>;
 };

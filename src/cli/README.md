@@ -18,6 +18,7 @@ arm session delete <id>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
+arm login [--device | --browser] | arm logout
 arm config [list] | arm config get <key> | arm config set <key> <value> | arm config unset <key>
 
 arm --help | arm <group> --help | arm <group> <command> --help
@@ -40,6 +41,23 @@ built-in default. A prompt starting with a dash goes after `--`:
 missing or blank `<prompt>`, a `caller` found nowhere (flag, env, config, OS user) and malformed
 values (an unknown `--status`, `--limit` outside 1–100, …) are usage errors before any request is
 sent.
+
+## Logging in
+
+`arm login` works like `pl login`: it asks the server which OIDC client to use
+(`GET /api/auth-config`), logs you in with it, and saves the tokens for that server in
+`~/.arm/credentials.json` (0600). It also saves that server as your default `url`, so
+`arm login --url https://arm-beta.ovea.pro` switches you to beta. Later commands send the saved
+token (unless `--token`/`ARM_TOKEN` is given) and refresh it when it has expired;
+`arm logout` forgets it.
+
+- **Browser** (default): authorization code with PKCE, redirected to a listener on
+  `http://127.0.0.1:<random port>/callback`. The URL is printed too, in case no browser opens.
+- **Device code** (`--device`; the default over SSH or without a display): open the printed URL
+  on any device, approve, and the CLI picks up the token.
+
+The server's OIDC client must allow both: a loopback redirect
+(`^http://(127\.0\.0\.1|localhost):[0-9]+/callback$`, regex) and the device code grant.
 
 ## Defaults
 

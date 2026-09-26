@@ -9,6 +9,15 @@ export type Recorded = {
 
 type Reply = { status?: number; statusText?: string; body?: unknown } | Error;
 
+/** JSON bodies parsed; anything else (form-encoded token requests) kept as text. */
+function parseBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 /** A fetch stand-in that records each request and answers with `reply(request)`. */
 export function fakeFetch(reply: (req: Recorded) => Reply) {
   const requests: Recorded[] = [];
@@ -19,7 +28,7 @@ export function fakeFetch(reply: (req: Recorded) => Reply) {
       method: request.method,
       url: request.url,
       headers: request.headers,
-      body: text ? JSON.parse(text) : undefined,
+      body: text ? parseBody(text) : undefined,
     };
     requests.push(recorded);
     const r = reply(recorded);
@@ -104,6 +113,8 @@ export async function runCli(
     signal?: AbortSignal;
     /** Called with every stdout line so far, after each write (e.g. to Ctrl+C after N events). */
     onStdout?: (lines: string[]) => void;
+    openBrowser?: (url: string) => void;
+    now?: () => Date;
   } = {},
 ): Promise<CliResult> {
   const out: string[] = [];
@@ -116,6 +127,9 @@ export async function runCli(
     stderr: (t) => err.push(t),
     signal: options.signal,
     env: options.env ?? {},
+    openBrowser: options.openBrowser,
+    now: options.now,
+    sleep: async () => {},
     fetch:
       options.fetch ??
       (async () => {

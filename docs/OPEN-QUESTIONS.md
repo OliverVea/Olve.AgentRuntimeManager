@@ -78,6 +78,56 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
 - Details and spike findings: [`SPEC-FIRST.md`](SPEC-FIRST.md). Promote to the `olve-api`
   template after M4.
 
+### A10. Providers — ACP as transport, ARM owns the rest
+- **Leaning (2026-09-26):** build ARM. ARM talks to providers over **ACP** (Agent Client
+  Protocol) wherever an adapter is good enough. ACP is an implementation detail behind the
+  provider seam: nothing ACP-shaped (session ids, update types, permission options) goes into
+  `src/spec/`, so a provider can move to a direct integration, or ACP can be dropped, without an
+  API change.
+- **How a provider is wired:** ACP for lifecycle and the event stream (`session/new`, `prompt`,
+  `cancel`, `load`); ARM's tools served to the agent over MCP (HTTP) in `session/new`; the
+  agent's built-in tools and user-level config switched off. Per-provider differences (how to
+  lock down, whether steering and MCP exist) live in a small capability profile, not in separate
+  runners.
+- **Why build rather than adopt (opencode serve, Rivet Sandbox Agent, …):** they cover the
+  easy part (driving the CLIs). Near-full SPEC parity needs what they lack: queue and slots,
+  policy-checked ARM-owned tools, `secretEnv`, roles and agent tokens, restart survival,
+  completions, retention.
+- **When to scrap ARM:** if ACP comes to cover most of ARM's API — a shared remote server,
+  auth with roles, approvals routed to entitled clients (first decision wins), queue and
+  history, policy-checked tools and secrets, restart survival. Only the remote transport is
+  moving (the ACP SDK ships HTTP/WebSocket/SSE server transports). Revisit now and then. The
+  hedge: ARM exposes an ACP endpoint (VISION), so ARM would shrink toward it rather than be
+  thrown away.
+- **Spike findings (2026-09-26, `claude-agent-acp` 0.81.2, `codex-acp` 1.13.1, `opencode` 1.18.32,
+  `pi-acp` 0.0.34; throwaway code in the gitignored `sandbox/acp-spike/`):**
+  - *Claude:* `_meta.claudeCode.options.tools: []` turns off the built-in tools, but the user's
+    own connectors and plugins still load. Isolation needs `settingSources: []`,
+    `strictMcpConfig: true` and `ENABLE_CLAUDEAI_MCP_SERVERS=false`; then the agent sees only
+    ARM's tools. `secretEnv` reached `approved_bash`, and the policy block worked. `session/load`
+    in a new adapter process keeps context. It runs on the Claude subscription; the adapter only
+    refuses that with `--hide-claude-auth`.
+  - *Messages mid-turn:* putting a user message in a tool result **does not work**. Claude treats
+    it as a possible prompt injection and ignores it, which is correct. The native
+    `_session/steering` extension works (injected mid-tool, obeyed). So `POST …/messages` uses
+    the provider's native steering; providers without it deliver at the end of the turn, or
+    cancel and re-prompt.
+  - *ARM dies mid-turn:* the agent CLI outlives the adapter, finishes its current turn
+    unsupervised (its ARM tool calls still arrive), then exits (~25s). Gentle restart (M5, A4)
+    therefore needs a small **supervisor process per session** that owns the agent's stdio and
+    that a restarted ARM reconnects to over a socket (the pattern AOE's `__acp-runner` uses), not
+    adoption by PID.
+  - *Codex:* steering and HTTP MCP are advertised; ChatGPT login works. Lockdown via
+    `CODEX_CONFIG` (feature flags) is incomplete: `apply_patch`, `functions.exec`,
+    `collaboration.*` (subagents) and goal tools remained. A read-only sandbox is the backstop.
+    Not yet run end to end.
+  - *opencode:* HTTP MCP, `loadSession`, no steering. Not yet run end to end.
+  - *pi:* `pi-acp` has no MCP and no steering. ARM's tools would reach pi as a pi extension
+    (`--no-builtin-tools -e …`), steering through pi's own RPC mode, so pi is a direct
+    integration rather than ACP.
+- **Open:** M9/M13 reshaped around this (ACP provider + Claude profile, then a second profile);
+  the Codex and opencode end-to-end runs.
+
 ---
 
 ### A9. Events — to discuss (2026-09-25)

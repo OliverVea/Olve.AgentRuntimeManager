@@ -81,6 +81,10 @@ re-evaluated and scoped when it's picked up.
 ## Standards
 
 - **OpenAI-compatible endpoint** (`/v1/chat/completions`) so any OpenAI SDK can use ARM.
+- **ACP endpoint** (Agent Client Protocol): ARM as an ACP agent, so any ACP client (Zed,
+  JetBrains, the `arm` CLI) can attach to an ARM session as a frontend, with ARM's policy,
+  approvals and queue behind it. Also the hedge if ACP grows to cover most of ARM's API: ARM
+  shrinks toward this endpoint instead of being scrapped (OPEN-QUESTIONS A10).
 - **AG-UI** (agent-to-user protocol): the closest fit for a frontend-agnostic runtime.
 - **A2A** (agent-to-agent) for multi-agent orchestration.
 - **OpenTelemetry** traces per session.

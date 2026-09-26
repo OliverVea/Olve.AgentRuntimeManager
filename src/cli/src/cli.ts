@@ -3,6 +3,8 @@ import pkg from "../package.json" with { type: "json" };
 import { createApiClient } from "./api";
 import { groups as defaultGroups } from "./commands";
 import { type ArmConfig, type ConfigKey, configDir, configKeys, loadConfig } from "./config";
+import { LoginError, refresh } from "./auth/oidc";
+import { isExpired, loadCredentials, saveCredentials, serverKey } from "./credentials";
 import { ApiError, ExitCode, NetworkError, UsageError } from "./errors";
 import { commandHelp, groupHelp, rootHelp } from "./help";
 import { formatJson } from "./output";
@@ -31,6 +33,10 @@ export type Io = {
   signal?: AbortSignal;
   /** Called before a streaming command runs, so Ctrl+C aborts `signal` rather than the process. */
   onStreaming?(): void;
+  /** Opens a URL in a browser; injected for tests (main.ts uses xdg-open / open / start). */
+  openBrowser?(url: string): void;
+  now?(): Date;
+  sleep?(ms: number): Promise<void>;
 };
 
 type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string }>;
@@ -165,7 +171,18 @@ export async function run(
   if (!isHttpUrl(url)) {
     return usage(new UsageError(`invalid URL '${url}' (expected http:// or https://)`, hint));
   }
-  const token = (values.token as string | undefined) || io.env.ARM_TOKEN || undefined;
+  const fetchFn = io.fetch ?? fetch;
+  const now = io.now ?? (() => new Date());
+  let token = (values.token as string | undefined) || io.env.ARM_TOKEN || undefined;
+  if (!token && !command.skipAuth) {
+    try {
+      token = await savedToken(dir, url, fetchFn, now);
+    } catch (error) {
+      if (!(error instanceof LoginError)) throw error;
+      io.stderr(wantsJson ? formatJson({ error: { code: "LOGIN_EXPIRED", message: error.message, details: null } }) : `error: ${error.message}`);
+      return ExitCode.Failure;
+    }
+  }
 
   const client = createApiClient({ baseUrl: url, token, fetch: io.fetch });
   const args = Object.fromEntries(command.args.map((a, i) => [a.name, positionals[i]!]));
@@ -179,6 +196,12 @@ export async function run(
       args,
       options,
       client,
+      url,
+      fetch: fetchFn,
+      openBrowser: io.openBrowser ?? (() => {}),
+      headless: isHeadless(io.env),
+      now,
+      sleep: io.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       settings,
       configDir: dir,
       user: io.env.USER || io.env.USERNAME || undefined,
@@ -191,6 +214,10 @@ export async function run(
     return print(io, wantsJson ? formatJson(output.json) : output.pretty);
   } catch (error) {
     if (error instanceof UsageError) return usage(new UsageError(error.message, error.help ?? hint));
+    if (error instanceof LoginError) {
+      io.stderr(wantsJson ? formatJson({ error: { code: "LOGIN_FAILED", message: error.message, details: null } }) : `error: ${error.message}`);
+      return ExitCode.Failure;
+    }
     if (error instanceof ApiError || error instanceof NetworkError) {
       io.stderr(wantsJson ? formatJson(error.toJSON()) : `error: ${error.message}`);
       return error.exitCode;
@@ -208,6 +235,33 @@ export async function run(
 /** How the command is invoked: `arm session list`, or `arm events` for a group's default command. */
 export function commandPath(group: CommandGroup, command: { name: string }): string {
   return group.defaultCommand === command.name ? `arm ${group.name}` : `arm ${group.name} ${command.name}`;
+}
+
+/**
+ * The token saved by `arm login` for this server, refreshed first if it has expired (and the
+ * refreshed one saved). None saved: undefined. Expired and not refreshable: a {@link LoginError}.
+ */
+async function savedToken(dir: string | undefined, url: string, fetchFn: typeof fetch, now: () => Date): Promise<string | undefined> {
+  const credentials = loadCredentials(dir);
+  const server = serverKey(url);
+  const saved = credentials[server];
+  if (!saved) return undefined;
+  if (!isExpired(saved, now())) return saved.accessToken;
+  if (!saved.refreshToken || !dir) throw new LoginError(`your login to ${server} has expired; run \`arm login\``);
+  let renewed: Awaited<ReturnType<typeof refresh>>;
+  try {
+    renewed = await refresh(fetchFn, saved.tokenEndpoint, saved.clientId, saved.refreshToken, now);
+  } catch (error) {
+    throw new LoginError(`your login to ${server} has expired and couldn't be renewed (${(error as Error).message}); run \`arm login\``);
+  }
+  saveCredentials(dir, { ...credentials, [server]: { ...saved, ...renewed, refreshToken: renewed.refreshToken ?? saved.refreshToken } });
+  return renewed.accessToken;
+}
+
+/** No browser a loopback redirect could reach: over SSH, or (Linux) without a display. */
+function isHeadless(env: Record<string, string | undefined>): boolean {
+  if (env.SSH_CONNECTION || env.SSH_TTY) return true;
+  return process.platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY;
 }
 
 function print(io: Io, text: string): number {
