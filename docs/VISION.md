@@ -64,6 +64,11 @@ re-evaluated and scoped when it's picked up.
 
 ## Frontends & interaction
 
+- **Mobile-first web UI**: on a phone the jobs are checking status, approving and sending a
+  quick steering message; the laptop view is the larger surface built on top of that.
+- **Dashboard widget**: a small embeddable ARM widget (running/queued/waiting counts, pending
+  approvals with inline approve/deny) for a homelab dashboard next to Olve.Pipelines and other
+  services.
 - **`arm chat`**: interactive conversational session in the terminal.
 - **`arm run "prompt"`**: stream output to stdout, exit with the session's exit code.
 - **Interactive CLI approvals**: approval prompts inline, keyboard approve/deny.

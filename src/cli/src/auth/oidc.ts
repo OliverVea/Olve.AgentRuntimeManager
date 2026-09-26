@@ -133,6 +133,13 @@ export async function startDevice(fetchFn: typeof fetch, endpoint: string, clien
   const deviceCode = str(body.device_code);
   const userCode = str(body.user_code);
   const verificationUri = str(body.verification_uri);
+  if (body.error === "invalid_client") {
+    // Authentik's answer when the client doesn't have the device code grant.
+    throw new LoginError(
+      `this server's login client (${clientId}) doesn't allow device code login; ` +
+        "its OIDC client needs the urn:ietf:params:oauth:grant-type:device_code grant (or try `arm login --browser`)",
+    );
+  }
   if (status < 200 || status >= 300 || !deviceCode || !userCode || !verificationUri) {
     const detail = str(body.error_description) ?? str(body.error) ?? "no device_code/user_code";
     throw new LoginError(`device authorization failed (${status}): ${detail}`);

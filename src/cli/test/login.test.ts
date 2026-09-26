@@ -127,6 +127,19 @@ describe("arm login (device)", () => {
     expect(r.stdout).toContain("no refresh token");
   });
 
+  test("a client without the device grant gets an explanation, not the raw OAuth error", async () => {
+    const f = fakeFetch((req) => {
+      if (req.url === `${server}/api/auth-config`) return { body: { authority, clientId: "arm-spa", scopes: "openid" } };
+      if (req.url.endsWith("openid-configuration")) {
+        return { body: { authorization_endpoint: "https://auth.test/a", token_endpoint: tokenEndpoint, device_authorization_endpoint: deviceEndpoint } };
+      }
+      return { status: 400, body: { error: "invalid_client", error_description: "Client authentication failed" } };
+    });
+    const r = await runCli(["login", "--device"], { env: env(), fetch: f.fetch });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("doesn't allow device code login");
+  });
+
   test("--device without a device endpoint is an error", async () => {
     const f = provider(() => ({ body: {} }));
     const r = await runCli(["login", "--device"], { env: env(), fetch: f.fetch });
