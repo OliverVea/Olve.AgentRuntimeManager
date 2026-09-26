@@ -5,12 +5,14 @@
   "description": "Workspace root: TypeSpec contract tooling, generated clients, frontend and CLI.",
   "workspaces": [
     "src/frontend",
-    "src/cli"
+    "src/cli",
+    "src/codegen/typespec-arm-csharp"
   ],
   "scripts": {
     "spec": "tsp compile src/spec/main.tsp",
     "client": "openapi-ts -f openapi-ts.config.mjs",
-    "generate": "npm run spec && npm run client"
+    "generate": "npm run spec && npm run client",
+    "codegen:test": "npm test --workspace src/codegen/typespec-arm-csharp"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",

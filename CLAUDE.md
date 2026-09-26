@@ -5,9 +5,10 @@ See [README.md](README.md) for project structure, endpoints, configuration, CI e
 ## Layout
 
 `src/backend/` (.NET solution root — run `dotnet` commands there), `src/frontend/` (SPA),
-`src/spec/main.tsp` (API contract, TypeSpec), `src/deploy/helm/` (chart). `Dockerfile` + `.pipelines/`
+`src/spec/main.tsp` (API contract, TypeSpec), `src/codegen/typespec-arm-csharp/` (our emitter:
+contract → C# backend surface), `src/deploy/helm/` (chart). `Dockerfile` + `.pipelines/`
 stay at the repo root (the root is the image build context). Generated output (OpenAPI documents,
-clients) goes to the gitignored `artifacts/`, never into source folders.
+clients, the generated backend C#) goes to the gitignored `artifacts/`, never into source folders.
 
 ## Commands
 

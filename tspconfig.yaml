@@ -1,10 +1,18 @@
 # TypeSpec emitter config for src/spec/main.tsp. Generated output goes to artifacts/ (gitignored),
 # never into source folders.
-output-dir: "{project-root}/artifacts/spec"
+output-dir: "{project-root}/artifacts"
 emit:
   - "@typespec/openapi3"
+  - "typespec-arm-csharp"
 options:
   "@typespec/openapi3":
     openapi-versions: ["3.2.0"]
     file-type: json
-    emitter-output-dir: "{output-dir}"
+    emitter-output-dir: "{output-dir}/spec"
+  # Our own emitter (src/codegen/typespec-arm-csharp): the backend's C# surface, compiled into
+  # the API project by its csproj (docs/SPEC-FIRST.md, M2).
+  "typespec-arm-csharp":
+    emitter-output-dir: "{output-dir}/generated/backend"
+    namespace: "Olve.AgentRuntimeManager.Api"
+    external-types:
+      ResultProblem: "ResultProblem"

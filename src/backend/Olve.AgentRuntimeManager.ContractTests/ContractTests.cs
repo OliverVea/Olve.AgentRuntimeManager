@@ -49,6 +49,12 @@ public class ContractTests(ApiFactory factory)
             f => f.CreateAuthenticatedClient().PostAsync("/api/messages", Json(new { text = "" })));
         yield return () => new("Messages_create", "text over 280 chars", 400,
             f => f.CreateAuthenticatedClient().PostAsync("/api/messages", Json(new { text = new string('x', 281) })));
+        yield return () => new("Messages_create", "body missing required text (binding failure)", 400,
+            f => f.CreateAuthenticatedClient().PostAsync("/api/messages", Json(new { })));
+        yield return () => new("Messages_create", "malformed JSON body (binding failure)", 400,
+            f => f.CreateAuthenticatedClient().PostAsync("/api/messages", new StringContent("{", Encoding.UTF8, "application/json")));
+        yield return () => new("Messages_create", "null text", 400,
+            f => f.CreateAuthenticatedClient().PostAsync("/api/messages", new StringContent("{\"text\":null}", Encoding.UTF8, "application/json")));
         yield return () => new("Messages_create", "no bearer token", 401,
             f => f.CreateClient().PostAsync("/api/messages", Json(new { text = "hello" })));
 
@@ -63,6 +69,8 @@ public class ContractTests(ApiFactory factory)
             async f => await f.CreateAuthenticatedClient().PutAsync($"/api/messages/{await CreateMessageAsync(f)}", Json(new { text = "after" })));
         yield return () => new("Messages_update", "empty text", 400,
             async f => await f.CreateAuthenticatedClient().PutAsync($"/api/messages/{await CreateMessageAsync(f)}", Json(new { text = "" })));
+        yield return () => new("Messages_update", "body missing required text (binding failure)", 400,
+            async f => await f.CreateAuthenticatedClient().PutAsync($"/api/messages/{await CreateMessageAsync(f)}", Json(new { })));
         yield return () => new("Messages_update", "missing message", 400,
             f => f.CreateAuthenticatedClient().PutAsync($"/api/messages/{MissingId}", Json(new { text = "after" })));
         yield return () => new("Messages_update", "no bearer token", 401,

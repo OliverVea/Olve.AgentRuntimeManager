@@ -19,6 +19,7 @@ src/
 ├── backend/                                    # .NET — run dotnet commands from here
 │   ├── Olve.AgentRuntimeManager.slnx
 │   ├── Olve.AgentRuntimeManager/               # API application (minimal API)
+│   │   ├── Api/                                # Runtime for the generated API surface (ArmResults, binding failures, handler check)
 │   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
 │   │   ├── Messages/                           # Message CRUD example feature
 │   │   ├── Stores/                             # EntityStore snapshot persistence (promotion-shaped)
@@ -34,6 +35,7 @@ src/
 │   └── Directory.Packages.props                # Central package version management
 ├── frontend/                                   # Vanilla Web Components + TS frontend (see src/frontend/README.md)
 ├── cli/                                        # `arm` CLI (TypeScript on the generated client; see src/cli/README.md)
+├── codegen/typespec-arm-csharp/                # Our TypeSpec emitter: contract → C# backend surface (+ snapshot tests)
 ├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
 └── deploy/
     └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
@@ -41,7 +43,7 @@ src/
 Dockerfile                                      # Multi-stage build (self-contained JIT, chiseled); repo root is the build context
 mise.toml                                       # Toolchain pins + tasks (`mise run ci`)
 package.json                                    # npm workspace root: TypeSpec + Hey API tooling, frontend, cli
-tspconfig.yaml, openapi-ts.config.mjs           # Contract → OpenAPI → TS client generation config
+tspconfig.yaml, openapi-ts.config.mjs           # Contract → OpenAPI + C# backend → TS client generation config
 artifacts/                                      # Everything generated (gitignored)
 ```
 
@@ -61,9 +63,11 @@ artifacts/                                      # Everything generated (gitignor
 The JSON API lives under `/api/` so the SPA can own the site root; `/health` stays at the root
 for Kubernetes probes. Unmatched non-API GETs fall back to `index.html` for SPA client routing.
 
-The `Messages` feature is the template's worked example — it exercises `Id<T>`, an
-`EntityStore<Message>`, `Page<T>` pagination, the `IHandler` + `.WithValidation(...)` pattern, and
-`IAsyncOnStartup` wiring (a welcome message is seeded on first run).
+The `/api` endpoints are generated from the contract (see [Client Generation](#client-generation)):
+the app implements one generated `I…Handler` per operation and opts operations out of auth in
+`Program.cs`. The `Messages` feature is the worked example — handlers of the generated
+`Messages_*` interfaces over an `EntityStore<Message>` (domain `Message` with `Id<T>`), `Page<T>`
+pagination, and `IAsyncOnStartup` wiring (a welcome message is seeded on first run).
 
 ## Build & Test
 
@@ -74,7 +78,7 @@ Run from `src/backend/` (the solution root):
 dotnet restore
 dotnet build
 
-# Unit + contract tests (default; the contract tests need Node for `npm run spec`)
+# Unit + contract tests (default; the build needs Node for `npm run spec`, see below)
 dotnet test
 
 # Integration tests only
@@ -84,8 +88,11 @@ dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false -p:RunContractTest
 dotnet test -p:RunIntegrationTests=true
 ```
 
-Contract tests host the API in-process (`WebApplicationFactory`) and check it against the contract:
-their build runs `npm run spec` from the repo root (incremental) and copies `artifacts/spec/openapi.json`
+The API project's build runs `npm run spec` from the repo root (incremental: skipped while
+`artifacts/` is newer than the spec, `tspconfig.yaml` and the emitter) and compiles the generated
+`artifacts/generated/backend/*.g.cs`; `-p:SkipSpecGen=true` compiles already-generated files
+without Node (the Dockerfile does this). Contract tests host the API in-process
+(`WebApplicationFactory`) and check it against the contract, copying `artifacts/spec/openapi.json`
 next to the tests. A route-coverage test asserts every spec operation is mapped and every `/api`
 endpoint is in the spec; the contract tests exercise each operation's happy and error paths over raw
 HTTP and validate the status and body against the spec's schemas (objects closed, so undeclared
@@ -207,7 +214,7 @@ Sources in priority order (highest wins):
 The `Messages` feature is backed by an in-memory `EntityStore<Message>`. By default storage is
 `Ephemeral` (state is lost on restart). Set `Storage:Mode=Persistent` to have the store load on
 startup and save a debounced whole-snapshot JSON to `Storage:Directory` via the BCL-only
-`FileSnapshotStore` — both wired in `Messages/MessageEndpoints.cs`.
+`FileSnapshotStore` — both wired in `Messages/MessageServices.cs`.
 
 Everything sits behind the `ISnapshotStore` seam (`Stores/`), so the persistence ladder — in-memory →
 file → S3/MinIO → relational — is a one-line swap at registration without touching the store or
@@ -220,12 +227,23 @@ The contract is `src/spec/main.tsp` (TypeSpec). Everything generated lives in th
 `artifacts/`, never in source folders:
 
 ```bash
-npm run generate   # src/spec/main.tsp → artifacts/spec/openapi.json → artifacts/clients/ts (Hey API)
+npm run spec       # src/spec/main.tsp → artifacts/spec/openapi.json + artifacts/generated/backend/*.g.cs
+npm run generate   # … then → artifacts/clients/ts (Hey API)
+npm run codegen:test   # snapshot tests of the C# emitter (UPDATE_SNAPSHOTS=1 to accept changes)
 ```
 
 The frontend and CLI import the client as `@arm/client` and regenerate it as part of their own
-builds; the contract tests compile the spec as part of the .NET build. There is no C# client: the
-backend tests speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
+builds. The **backend surface** is generated by our own emitter,
+[`src/codegen/typespec-arm-csharp`](src/codegen/typespec-arm-csharp) (plain ESM): records per
+model (request shapes split by visibility, e.g. `MessageWritable`), discriminated unions, one
+request record + `I…Handler : IHandler<Req, Res>` per operation, `MapArmApi()` with routes,
+`.WithValidation` (from `@maxLength` etc.) and declared statuses, a JSON source-gen context and
+`ArmApi.HandlerTypes`. Hand-written runtime pieces live in `Olve.AgentRuntimeManager/Api/`:
+`ArmResults` maps a handler's `Result` to a declared status (a problem tagged `http:404` → 404
+when the operation declares it, else 400, else 500), `ArmBindingFailures` answers binding
+failures with the contract's error body, and `UseArmApi()` refuses to start if a handler is
+unregistered. The API build compiles the spec itself. There is no C# client: the backend tests
+speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
 
 Run everything the pipeline runs with `npx mise run ci` (mise pins node + dotnet; `npx mise
 tasks` lists the tasks).

@@ -1,0 +1,19 @@
+{
+  "name": "typespec-arm-csharp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeSpec emitter: the ARM contract (src/spec) → the C# minimal-API backend surface (records, IHandler interfaces, route mapping, validators, JSON context).",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:update": "UPDATE_SNAPSHOTS=1 node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "@typespec/compiler": "1.16.0",
+    "@typespec/http": "1.16.0"
+  }
+}

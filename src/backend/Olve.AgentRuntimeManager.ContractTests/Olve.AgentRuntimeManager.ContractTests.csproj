@@ -2,8 +2,8 @@
 
   <!--
     Contract tests: run the API in-process (WebApplicationFactory) and check it against the
-    TypeSpec contract compiled to artifacts/spec/openapi.json. On by default; opt out (including
-    the Node-dependent spec compile) with -p:RunContractTests=false.
+    TypeSpec contract compiled to artifacts/spec/openapi.json. On by default; opt out with
+    -p:RunContractTests=false.
   -->
   <PropertyGroup>
     <IsTestProject Condition="'$(RunContractTests)' == 'false'">false</IsTestProject>
@@ -17,10 +17,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <SpecInput Include="$(RepoRoot)src/spec/**/*.tsp;$(RepoRoot)tspconfig.yaml;$(RepoRoot)package.json" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
@@ -31,19 +27,12 @@
     <ProjectReference Include="../Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
   </ItemGroup>
 
-  <!-- Compile main.tsp → artifacts/spec/openapi.json (skipped when the spec is up to date). -->
-  <Target Name="CompileContractSpec"
-          BeforeTargets="BeforeBuild"
-          Condition="'$(RunContractTests)' != 'false'"
-          Inputs="@(SpecInput)"
-          Outputs="$(OpenApiSpecFile)">
-    <Exec Command="npm run spec" WorkingDirectory="$(RepoRoot)" />
-    <!-- tsp leaves the file untouched when unchanged; touch it so the target stays incremental. -->
-    <Touch Files="$(OpenApiSpecFile)" />
-  </Target>
-
-  <!-- The spec does not exist at evaluation time on a clean checkout, so add it after compiling. -->
-  <Target Name="IncludeContractSpec" AfterTargets="CompileContractSpec" BeforeTargets="AssignTargetPaths"
+  <!--
+    The API project's build compiles the spec (its GenerateArmApi target writes
+    artifacts/spec/openapi.json alongside the generated C#), so it exists once project references
+    are resolved; it doesn't at evaluation time on a clean checkout, hence the target.
+  -->
+  <Target Name="IncludeContractSpec" AfterTargets="ResolveProjectReferences" BeforeTargets="AssignTargetPaths"
           Condition="'$(RunContractTests)' != 'false'">
     <ItemGroup>
       <None Include="$(OpenApiSpecFile)" Link="openapi.json" CopyToOutputDirectory="PreserveNewest" />

@@ -24,6 +24,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncInitializ
     // appsettings (OTLP exporter, real OIDC authority) don't leak into the tests; these settings
     // arrive as command-line args, which Program adds last and so take precedence.
     private readonly string _contentRoot = Directory.CreateTempSubdirectory("arm-contract-").FullName;
+    private int _disposed;
 
     public Task InitializeAsync()
     {
@@ -50,6 +51,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncInitializ
 
     public override async ValueTask DisposeAsync()
     {
+        // Several test classes share this factory; dispose it once even if their teardowns race
+        // (a concurrent second WebApplicationFactory.DisposeAsync can throw a NullReferenceException).
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         await base.DisposeAsync();
         try
         {

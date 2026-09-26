@@ -5,6 +5,46 @@
     <OpenApiGenerateDocumentsOptions>--file-name api</OpenApiGenerateDocumentsOptions>
   </PropertyGroup>
 
+  <!--
+    The API surface is generated from the TypeSpec contract (docs/SPEC-FIRST.md, M2):
+    `npm run spec` compiles src/spec/main.tsp with our emitter (src/codegen/typespec-arm-csharp)
+    into artifacts/generated/backend/*.g.cs, plus artifacts/spec/openapi.json for the clients and
+    the contract tests. Incremental: skipped while the outputs are newer than the spec, the tsp
+    config and the emitter. -p:SkipSpecGen=true compiles already-generated files without Node
+    (the Dockerfile's .NET stage, which copies them from its Node stage).
+  -->
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../'))</RepoRoot>
+    <ArmGeneratedDir>$(RepoRoot)artifacts/generated/backend/</ArmGeneratedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ArmSpecInput Include="$(RepoRoot)src/spec/**/*.tsp;$(RepoRoot)tspconfig.yaml;$(RepoRoot)package.json" />
+    <ArmSpecInput Include="$(RepoRoot)src/codegen/typespec-arm-csharp/package.json;$(RepoRoot)src/codegen/typespec-arm-csharp/src/**/*.js" />
+    <ArmSpecOutput Include="$(ArmGeneratedDir)ArmApi.g.cs;$(ArmGeneratedDir)ArmModels.g.cs;$(ArmGeneratedDir)ArmJsonContext.g.cs;$(RepoRoot)artifacts/spec/openapi.json" />
+    <!-- Static include for IDEs; re-added after generation below for a clean checkout. -->
+    <Compile Include="$(ArmGeneratedDir)*.g.cs" Link="Api/Generated/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <Target Name="GenerateArmApi"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(SkipSpecGen)' != 'true'"
+          Inputs="@(ArmSpecInput)"
+          Outputs="@(ArmSpecOutput)">
+    <Exec Command="npm run spec" WorkingDirectory="$(RepoRoot)" />
+    <!-- tsp leaves unchanged files untouched; touch them so the target stays incremental. -->
+    <Touch Files="@(ArmSpecOutput)" />
+  </Target>
+
+  <Target Name="IncludeArmApi" AfterTargets="GenerateArmApi" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(ArmGeneratedDir)ArmApi.g.cs')"
+           Text="Generated API not found in $(ArmGeneratedDir). Run `npm run spec` from the repo root (or build without -p:SkipSpecGen=true)." />
+    <ItemGroup>
+      <Compile Remove="$(ArmGeneratedDir)*.g.cs" />
+      <Compile Include="$(ArmGeneratedDir)*.g.cs" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Duende.IdentityModel" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />

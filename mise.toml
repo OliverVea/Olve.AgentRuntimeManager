@@ -14,8 +14,12 @@ description = "Install npm workspace dependencies (root lockfile)"
 run = "npm ci"
 
 [tasks.generate]
-description = "TypeSpec → artifacts/spec/openapi.json → artifacts/clients/ts"
+description = "TypeSpec → artifacts/spec/openapi.json + artifacts/generated/backend (C#) → artifacts/clients/ts"
 run = "npm run generate"
+
+[tasks."codegen:test"]
+description = "Snapshot tests of the C# backend emitter (src/codegen/typespec-arm-csharp)"
+run = "npm run codegen:test"
 
 [tasks."backend:test"]
 description = "Backend build + unit and contract tests"
@@ -42,6 +46,7 @@ description = "Everything the pipeline gate runs"
 run = [
   { task = "install" },
   { task = "generate" },
+  { task = "codegen:test" },
   { task = "backend:test" },
   { task = "frontend:check" },
   { task = "cli:check" },
