@@ -56,8 +56,24 @@ public sealed class ApiTarget : IAsyncInitializer, IAsyncDisposable
         health.EnsureSuccessStatusCode();
     }
 
-    public HttpClient CreateClient() =>
-        IsInProcess ? _factory!.CreateClient() : new HttpClient { BaseAddress = _baseUrl };
+    /// <remarks>
+    /// One at a time: the factory records its clients in a plain list (to dispose them with it), and
+    /// tests creating clients in parallel could corrupt it (then disposing throws a NullReferenceException).
+    /// </remarks>
+    public HttpClient CreateClient()
+    {
+        if (!IsInProcess)
+        {
+            return new HttpClient { BaseAddress = _baseUrl };
+        }
+
+        lock (_clients)
+        {
+            return _factory!.CreateClient();
+        }
+    }
+
+    private readonly Lock _clients = new();
 
     /// <summary>A client with a valid bearer token; skips the calling test if none can be minted.</summary>
     public HttpClient CreateAuthenticatedClient()
