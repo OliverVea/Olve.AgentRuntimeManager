@@ -23,13 +23,13 @@ src/
 │   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
 │   │   ├── Events/                             # Event bus + GET /api/events (SSE)
 │   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (FakeProvider)
-│   │   ├── Stores/                             # EntityStore snapshot persistence (promotion-shaped)
+│   │   ├── Persistence/                        # EF Core + SQLite: ArmDbContext, EfSessionStore, Migrations/
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
 │   ├── Olve.AgentRuntimeManager.UnitTests/     # Unit tests (TUnit + Rocks)
 │   ├── Olve.AgentRuntimeManager.ApiTests/      # API behaviour tests over raw HTTP (in-process, or any server via ARM_API_BASE_URL)
 │   ├── tools/version.cs                        # CalVer versioning script
-│   ├── .config/dotnet-tools.json               # Local tools (dotnet-outdated)
+│   ├── .config/dotnet-tools.json               # Local tools (dotnet-outdated, dotnet-ef)
 │   ├── global.json                             # SDK pin
 │   ├── Directory.Build.props                   # Shared build properties (TFM, nullable, etc.)
 │   └── Directory.Packages.props                # Central package version management
@@ -198,8 +198,6 @@ Sources in priority order (highest wins):
 | `Auth:Audience` | `olve-arm` | JWT audience |
 | `Auth:SigningKey` | _(null)_ | Local HS256 key (bypasses OIDC, for dev) |
 | `OpenTelemetry:Endpoint` | `https://otel.ovea.pro` | OTLP endpoint (null = disabled) |
-| `Storage:Mode` | `Ephemeral` | `Ephemeral` (in-memory) or `Persistent` (snapshot to disk) |
-| `Storage:Directory` | `data` | Directory for `Persistent` snapshots |
 | `ConnectionStrings:Arm` | _(a file in the user's local data folder)_ | The SQLite database, e.g. `Data Source=/var/lib/olve-arm/arm.db` |
 | `Events:HeartbeatInterval` | `00:00:30` | Heartbeat period of `GET /api/events` connections |
 | `Events:ReplayCapacity` | `1000` | Recent events kept for `Last-Event-ID` replay (and how far a connection may lag) |
