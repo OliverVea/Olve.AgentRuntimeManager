@@ -14,7 +14,11 @@ public static class SessionServices
         services.Configure<FakeProviderOptions>(configuration.GetSection(FakeProviderOptions.Section));
         services.Configure<ClaudeProviderOptions>(configuration.GetSection(ClaudeProviderOptions.Section));
         services.TryAddSingleton(TimeProvider.System);
-        services.AddSingleton<IAgentProvider, FakeProvider>();
+        if (configuration.GetSection(FakeProviderOptions.Section).Get<FakeProviderOptions>()?.Enabled ?? true)
+        {
+            services.AddSingleton<IAgentProvider, FakeProvider>();
+        }
+
         services.AddSingleton<IAgentProvider, ClaudeProvider>();
         services.AddSingleton<SessionManager>();
         services.AddSingleton<IdempotencyStore<SessionsCreateResponse>>();
