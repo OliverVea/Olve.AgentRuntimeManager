@@ -3,21 +3,36 @@
 # the pipeline's deploy steps copy this directory plus the built image.tar over and run it.
 # Idempotent end to end: the first run creates the VM, later runs only ship a new release.
 #
-#   vm-deploy.sh <beta|prod> <version> <image.tar>
+#   vm-deploy.sh <beta|prod> <version> <image.tar> <claude-dir> [--claude-token-stdin]
+#
+# <claude-dir> is the bundle's claude-code step output: the verified Claude Code binary for the
+# agents (`claude`) and its version (`claude-version.txt`); `none` for a bundle built before that
+# step existed (the release then has no Claude Code). With --claude-token-stdin the first stdin line is the Claude Code OAuth token (`claude
+# setup-token`, a pipeline secret) for the VM's agents; stdin keeps it off every command line.
 #
 # 1. ensure the VM: Ubuntu cloud image overlay + cloud-init, fixed MAC + DHCP reservation,
 #    autostart (libvirt `default` NAT network)
 # 2. extract /app from the image tarball (the same self-contained publish the container ships)
-# 3. install it as /opt/olve-arm/releases/<version>, point `current` at it, restart the service
-# 4. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
+# 3. ensure that Claude Code version in the VM (/opt/olve-arm/claude/<version>, uploaded once)
+# 4. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
+#    Code (so a release rolls back with its own), point `current` at it, restart the service
+# 5. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
 #    Pods can't open NEW connections into libvirt's NAT network, so the Olve.Homelab route
 #    targets this relay via `hostEndpoint` instead of the VM directly.
 set -euo pipefail
 
-ENV_NAME=${1:?usage: vm-deploy.sh <beta|prod> <version> <image.tar>}
+ENV_NAME=${1:?usage: vm-deploy.sh <beta|prod> <version> <image.tar> <claude-dir> [--claude-token-stdin]}
 VERSION=${2:?version}
 IMAGE_TAR=${3:?image.tar}
+CLAUDE_DIR=${4:?claude-dir}
 HERE=$(cd "$(dirname "$0")" && pwd)
+CLAUDE_VERSION=""
+[ "$CLAUDE_DIR" = none ] || CLAUDE_VERSION=$(cat "$CLAUDE_DIR/claude-version.txt")
+# Read before anything else: every ssh below would swallow stdin.
+CLAUDE_TOKEN=""
+if [ "${5:-}" = --claude-token-stdin ]; then
+  IFS= read -r CLAUDE_TOKEN || true
+fi
 
 case "$ENV_NAME" in
   beta) NAME=olve-arm-beta; MAC=52:54:00:a7:00:50; IP=192.168.122.50; RELAY_PORT=18792
@@ -78,6 +93,18 @@ wait_for_vm() {
   $SSH_VM "cloud-init status --wait >/dev/null; test -d /opt/olve-arm/releases"
 }
 
+ensure_claude() {
+  [ -n "$CLAUDE_VERSION" ] || { log "no Claude Code in this bundle"; return; }
+  local dir=/opt/olve-arm/claude/$CLAUDE_VERSION
+  if $SSH_VM "test -x $dir/claude"; then return; fi
+  log "installing Claude Code $CLAUDE_VERSION"
+  scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    "$CLAUDE_DIR/claude" "arm@$IP:/tmp/claude"
+  $SSH_VM "set -e
+    mkdir -p $dir && install -m 0755 /tmp/claude $dir/claude && rm -f /tmp/claude
+    $dir/claude --version"
+}
+
 extract_app() {
   # image.tar is a `docker save`-style tarball (manifest.json + layer tarballs). Replay the
   # layers in order and keep what lands under app/.
@@ -108,6 +135,11 @@ write_env() {
     printf 'OpenTelemetry__OAuth2__ClientSecret=%s\n' \
       "$(kubectl -n apps get secret authentik-oidc-secrets -o jsonpath='{.data.otel-client-secret}' | base64 -d)" >> "$WORK/env"
   fi
+  if [ -n "$CLAUDE_TOKEN" ]; then
+    printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_TOKEN" >> "$WORK/env"
+  else
+    log "no Claude Code token: claude sessions will fail to log in"
+  fi
   kubectl -n "$NAMESPACE" get configmap authentik-ca -o jsonpath="{.data.${CA_KEY//./\\.}}" > "$WORK/authentik-ca.crt"
 }
 
@@ -119,6 +151,7 @@ install_release() {
   $SSH_VM "set -e
     rel=/opt/olve-arm/releases/$VERSION
     rm -rf \$rel && mkdir -p \$rel && tar -C \$rel -xzf /tmp/app.tgz
+    [ -z '$CLAUDE_VERSION' ] || ln -sfn /opt/olve-arm/claude/$CLAUDE_VERSION/claude \$rel/claude
     ln -sfn \$rel /opt/olve-arm/current
     sudo install -m 0600 -o arm /tmp/env /etc/olve-arm/env
     sudo install -m 0644 /tmp/authentik-ca.crt /usr/local/share/ca-certificates/authentik-ca.crt
@@ -128,7 +161,10 @@ install_release() {
     sudo systemctl enable olve-arm >/dev/null 2>&1
     sudo systemctl restart olve-arm
     rm -f /tmp/app.tgz /tmp/env
-    ls -1dt /opt/olve-arm/releases/* | tail -n +4 | xargs -r rm -rf   # keep 3 releases"
+    ls -1dt /opt/olve-arm/releases/* | tail -n +3 | xargs -r rm -rf   # keep 2 releases: current + previous
+    # keep the Claude Code versions the kept releases link to
+    used=\$(readlink /opt/olve-arm/releases/*/claude | xargs -r -n1 dirname)
+    for d in /opt/olve-arm/claude/*; do echo \"\$used\" | grep -qx \"\$d\" || rm -rf \"\$d\"; done"
   for _ in $(seq 60); do
     curl -fs "http://$IP:5000/health" >/dev/null && { log "healthy on $IP:5000"; return; }
     sleep 2
@@ -174,6 +210,7 @@ EOF
 
 ensure_vm
 wait_for_vm
+ensure_claude
 extract_app
 write_env
 install_release

@@ -22,7 +22,7 @@ src/
 │   │   ├── Api/                                # Runtime for the generated API surface (typed responses, error envelope, validation, binding failures, handler check)
 │   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
 │   │   ├── Events/                             # Event bus + GET /api/events (SSE)
-│   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (FakeProvider)
+│   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (fake, Claude)
 │   │   ├── Persistence/                        # EF Core + SQLite: ArmDbContext, EfSessionStore, Migrations/
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
@@ -74,9 +74,15 @@ the app implements one generated `I…Handler` per operation and opts operations
 Sessions (`Sessions/`) are stored in SQLite (see [Persistence](#persistence)): `SessionManager`
 keeps a FIFO queue in front of `Sessions:TotalSlots` slots, moves sessions through the state machine
 (`SessionLifecycle`), kills them at their timeout, and publishes a lifecycle event per change.
-Agents run through the `IAgentProvider` seam; the only provider so far is `fake`, which runs no
-LLM and follows `fake:` directives in the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`,
-`fake:summary=…`, `fake:fail=…`; see `FakeScript`).
+Agents run through the `IAgentProvider` seam. `fake` runs no LLM and follows `fake:` directives in
+the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:summary=…`, `fake:fail=…`; see
+`FakeScript`). `claude` runs Claude Code (`Providers/Claude/`): one `claude -p` process per session,
+spoken to in its `stream-json` protocol, locked down (no built-in tools, none of the machine's
+settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
+variables), with the ARM session id as Claude's session id. It answers one prompt with one turn;
+the final result is the session's summary, and the raw output is kept in
+`<WorkRoot>/<session id>/output.jsonl`. It uses the machine's Claude Code login (or
+`CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
 
 `GET /api/events` (`Events/`) streams every session change as SSE (`arm events` tails it). Each
 event's JSON data carries `type` (= the SSE event name), `at` and its subject id; every event but
@@ -146,13 +152,16 @@ The repo deploys via [**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipe
 `.pipelines/config.yaml` is the **single source of truth**; the pipeline is bound to this repo, so
 **pushing to `main` redeploys automatically**.
 
-- **Production steps (parallel):** `build-and-package` (Kaniko → image tarball + `src/deploy/vm`)
-  and `check` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI). A
-  failure gates everything after.
+- **Production steps (parallel):** `build-and-package` (Kaniko → image tarball + `src/deploy/vm`),
+  `check` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI) and
+  `claude-code` (the latest Claude Code release for the agents: manifest signature and checksum
+  verified, lockdown flags checked, the binary staged in the bundle). A failure gates everything after.
 - **Processing steps (sequential):** `deploy-beta` → `test-after-beta` (the API test suite against
   live beta) → `deploy` (prod).
-- **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`); values live in the pipeline's k8s
-  secret. Step scripts source the shared
+- **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN_BETA`,
+  `CLAUDE_CODE_OAUTH_TOKEN_PROD`); values live in the pipeline's k8s secret. The Claude Code
+  tokens come from `claude setup-token` (valid one year; set with `pl secret set`); keep the beta
+  one for rare manual checks. Step scripts source the shared
   [`olve-lib.sh`](https://github.com/OliverVea/Olve.Pipelines/blob/main/.pipelines/scripts/olve-lib.sh).
 
 **Where it runs.** ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`,
@@ -164,9 +173,12 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
 2. extracts the published app from the image and installs it as
    `/opt/olve-arm/releases/<version>` with a systemd service (`KillMode=process`, so agent
    processes survive a server restart);
-3. writes the config (`src/deploy/vm/env.{beta,prod}` + the prod OTLP secret from the cluster) and
-   the Authentik CA;
-4. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
+3. installs the bundle's Claude Code as `/opt/olve-arm/claude/<version>` (uploaded once per
+   version) and links it into the release as `claude`, so rolling back a release rolls back its
+   Claude Code too;
+4. writes the config (`src/deploy/vm/env.{beta,prod}`, the prod OTLP secret from the cluster, the
+   Claude Code token from the pipeline secret, passed over stdin) and the Authentik CA;
+5. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
 
 **Routing** lives in [`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab): `arm-beta.ovea.pro`
 and `arm-private.ovea.pro` (Tailscale-private) use `hostEndpoint` to target the relay — pods
@@ -205,6 +217,10 @@ Sources in priority order (highest wins):
 | `Sessions:MaxQueueSize` | `200` | Sessions that may wait for a slot; more are a 503 `QUEUE_FULL` |
 | `Sessions:IdempotencyWindow` | `1.00:00:00` | How long an `Idempotency-Key` replays its original response |
 | `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
+| `Providers:Claude:Command` | `claude` | The Claude Code executable |
+| `Providers:Claude:WorkRoot` | `olve-arm/sessions` in the user's local data folder | Each session's folder: working directory (`work/`) and raw output |
+| `Providers:Claude:ConfigDirectory` | *(Claude Code's default, `~/.claude`)* | `CLAUDE_CONFIG_DIR` for the agents |
+| `Providers:Claude:ExitGrace` | `00:00:10` | How long an agent may take to exit after its turn before it's stopped |
 
 ### Persistence
 

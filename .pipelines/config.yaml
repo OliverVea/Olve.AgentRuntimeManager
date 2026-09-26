@@ -25,6 +25,10 @@ secrets:
     description: GitHub read token used to fetch the repo tarball during build.
   - name: SSH_PRIVATE_KEY
     description: SSH key for deploying to the homelab host (VM provisioning + releases).
+  - name: CLAUDE_CODE_OAUTH_TOKEN_BETA
+    description: Claude Code OAuth token (`claude setup-token`, one year) for the beta VM's agents. Use sparingly.
+  - name: CLAUDE_CODE_OAUTH_TOKEN_PROD
+    description: Claude Code OAuth token (`claude setup-token`, one year) for the prod VM's agents.
 
 # Production steps run in parallel and write to bundle/<step-name>/.
 productionSteps:
@@ -40,6 +44,13 @@ productionSteps:
     configuration:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
       scriptFile: scripts/check.sh
+  # Claude Code for the `claude` provider: the latest release, signature- and checksum-verified,
+  # its lockdown flags checked, staged as `claude` + claude-version.txt. The deploy steps install
+  # exactly this binary, so beta and prod match and an older bundle rolls it back too.
+  - name: claude-code
+    configuration:
+      image: debian:stable-slim
+      scriptFile: scripts/claude-code.sh
 
 # Processing steps run sequentially (order = list position), each receiving the
 # bundle. deploy-beta runs first and gates deploy (prod).

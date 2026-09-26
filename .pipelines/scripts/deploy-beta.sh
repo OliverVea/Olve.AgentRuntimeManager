@@ -17,12 +17,24 @@ olve_ssh_host bulwark-m2
 
 INPUT_DIR=$(olve_bundle_input)
 VERSION=$(cat "$INPUT_DIR/version.txt")
+# The claude-code step's output (Claude Code for the agents), found by the file only it writes;
+# a bundle from before that step has none.
+CLAUDE_FILE=$(ls /input/*/claude-version.txt 2>/dev/null | head -1 || true)
 REMOTE=olve-arm-deploy-beta
 
 echo "Deploying olve-arm:$VERSION to the beta VM"
 ssh -o StrictHostKeyChecking=no "$HOST" "rm -rf $REMOTE && mkdir -p $REMOTE"
 scp -q -o StrictHostKeyChecking=no "$INPUT_DIR"/vm/* "$INPUT_DIR/image.tar" "$HOST:$REMOTE/"
-ssh -o StrictHostKeyChecking=no "$HOST" "cd $REMOTE && bash vm-deploy.sh beta $VERSION image.tar && cd && rm -rf $REMOTE"
+CLAUDE_ARG=none
+if [ -n "$CLAUDE_FILE" ]; then
+  CLAUDE_DIR=$(dirname "$CLAUDE_FILE")
+  ssh -o StrictHostKeyChecking=no "$HOST" "mkdir -p $REMOTE/claude-code"
+  scp -q -o StrictHostKeyChecking=no "$CLAUDE_DIR/claude" "$CLAUDE_DIR/claude-version.txt" "$HOST:$REMOTE/claude-code/"
+  CLAUDE_ARG=claude-code
+fi
+# The agents' Claude Code token goes over stdin, never on a command line.
+printf '%s\n' "${CLAUDE_CODE_OAUTH_TOKEN_BETA:-}" | ssh -o StrictHostKeyChecking=no "$HOST" \
+  "cd $REMOTE && bash vm-deploy.sh beta $VERSION image.tar $CLAUDE_ARG --claude-token-stdin && cd && rm -rf $REMOTE"
 
 echo "Verifying /health via the private (Tailscale) route..."
 for i in 1 2 3 4 5; do
