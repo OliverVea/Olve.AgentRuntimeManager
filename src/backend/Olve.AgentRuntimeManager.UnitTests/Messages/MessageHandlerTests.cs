@@ -1,5 +1,8 @@
 using Olve.Results.TUnit;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Messages;
 using Olve.Utilities.Ids;
 using Olve.Utilities.Stores;
@@ -17,6 +20,26 @@ public class MessageHandlerTests
     }
 
     private static MessageWritable Body(string text) => new() { Text = text };
+
+    private static readonly DateTimeOffset Now = new(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A bus on a fixed clock, and a subscription recording what the handler publishes.</summary>
+    private static (EventBus Bus, EventBus.Subscription Published) Events()
+    {
+        var bus = new EventBus(new FakeTimeProvider(Now), Options.Create(new EventOptions()));
+        return (bus, bus.Subscribe());
+    }
+
+    private static List<ArmEvent> Drain(EventBus.Subscription subscription)
+    {
+        var published = new List<ArmEvent>();
+        while (subscription.Live.TryRead(out var stored))
+        {
+            published.Add(stored.Data);
+        }
+
+        return published;
+    }
 
     [Test]
     public async Task List_ClampsAndPages()
@@ -55,7 +78,8 @@ public class MessageHandlerTests
     public async Task Create_StoresMessageWithGeneratedId()
     {
         var store = new EntityStore<Message>([]);
-        var handler = new CreateMessageHandler(store);
+        var (bus, published) = Events();
+        var handler = new CreateMessageHandler(store, bus);
 
         var result = await handler.HandleAsync(new MessagesCreateRequest(Body("hello")), CancellationToken.None);
 
@@ -64,18 +88,21 @@ public class MessageHandlerTests
         await Assert.That(created!.Text).IsEqualTo("hello");
         await Assert.That(created.Id).IsNotEqualTo(Guid.Empty);
         await Assert.That(store.List().Count).IsEqualTo(1);
+        await Assert.That(Drain(published)).IsEquivalentTo(new ArmEvent[] { new MessageCreated { At = Now, MessageId = created.Id, Message = created } });
     }
 
     [Test]
     public async Task Create_BlankText_Fails()
     {
         var store = new EntityStore<Message>([]);
-        var handler = new CreateMessageHandler(store);
+        var (bus, published) = Events();
+        var handler = new CreateMessageHandler(store, bus);
 
         var result = await handler.HandleAsync(new MessagesCreateRequest(Body("  ")), CancellationToken.None);
 
         await Assert.That(result).Failed();
         await Assert.That(store.List().Count).IsEqualTo(0);
+        await Assert.That(Drain(published)).IsEmpty();
     }
 
     [Test]
@@ -112,21 +139,24 @@ public class MessageHandlerTests
     public async Task Update_ExistingMessage_ChangesText()
     {
         var store = new EntityStore<Message>([]);
+        var (bus, published) = Events();
         var existing = Seed(store, "before");
-        var handler = new UpdateMessageHandler(store);
+        var handler = new UpdateMessageHandler(store, bus);
 
         var result = await handler.HandleAsync(new MessagesUpdateRequest(existing.Id.ToString(), Body("after")), CancellationToken.None);
 
         await Assert.That(result).Succeeded();
         result.TryPickValue(out var updated);
         await Assert.That(updated!.Text).IsEqualTo("after");
+        await Assert.That(Drain(published)).IsEquivalentTo(new ArmEvent[] { new MessageUpdated { At = Now, MessageId = updated.Id, Message = updated } });
     }
 
     [Test]
     public async Task Update_MissingMessage_FailsAs400()
     {
         var store = new EntityStore<Message>([]);
-        var handler = new UpdateMessageHandler(store);
+        var (bus, published) = Events();
+        var handler = new UpdateMessageHandler(store, bus);
 
         var result = await handler.HandleAsync(new MessagesUpdateRequest(Guid.NewGuid().ToString(), Body("x")), CancellationToken.None);
 
@@ -134,29 +164,34 @@ public class MessageHandlerTests
         result.TryPickProblems(out var problems);
         // `update` declares no 404, so the not-found tag falls back to its 400.
         await Assert.That(ArmResults.StatusFor(problems!, ArmOperations.MessagesUpdate)).IsEqualTo(400);
+        await Assert.That(Drain(published)).IsEmpty();
     }
 
     [Test]
     public async Task Delete_ExistingMessage_Succeeds()
     {
         var store = new EntityStore<Message>([]);
+        var (bus, published) = Events();
         var existing = Seed(store, "bye");
-        var handler = new DeleteMessageHandler(store);
+        var handler = new DeleteMessageHandler(store, bus);
 
         var result = await handler.RunAsync(new MessagesDeleteRequest(existing.Id.ToString()), CancellationToken.None);
 
         await Assert.That(result).Succeeded();
         await Assert.That(store.Contains(existing.Id)).IsFalse();
+        await Assert.That(Drain(published)).IsEquivalentTo(new ArmEvent[] { new MessageDeleted { At = Now, MessageId = existing.Id.Value.Value } });
     }
 
     [Test]
     public async Task Delete_MissingMessage_Fails()
     {
         var store = new EntityStore<Message>([]);
-        var handler = new DeleteMessageHandler(store);
+        var (bus, published) = Events();
+        var handler = new DeleteMessageHandler(store, bus);
 
         var result = await handler.RunAsync(new MessagesDeleteRequest(Guid.NewGuid().ToString()), CancellationToken.None);
 
         await Assert.That(result).Failed();
+        await Assert.That(Drain(published)).IsEmpty();
     }
 }

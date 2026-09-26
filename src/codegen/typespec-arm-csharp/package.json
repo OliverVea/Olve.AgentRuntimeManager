@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "TypeSpec emitter: the ARM contract (src/spec) → the C# minimal-API backend surface (records, IHandler interfaces, route mapping, validators, JSON context).",
+  "description": "TypeSpec emitter: the ARM contract (src/spec) \u2192 the C# minimal-API backend surface (records, IHandler interfaces, route mapping, validators, JSON context).",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js"
@@ -16,7 +16,10 @@
   },
   "devDependencies": {
     "@typespec/compiler": "1.16.0",
+    "@typespec/events": "0.86.0",
     "@typespec/http": "1.16.0",
-    "@typespec/openapi3": "1.16.0"
+    "@typespec/openapi3": "1.16.0",
+    "@typespec/sse": "0.86.0",
+    "@typespec/streams": "0.86.0"
   }
 }

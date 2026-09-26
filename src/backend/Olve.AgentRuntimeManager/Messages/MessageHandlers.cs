@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Events;
 using Olve.Results;
 using Olve.Utilities.Ids;
 using Olve.Utilities.Stores;
@@ -8,7 +9,8 @@ namespace Olve.AgentRuntimeManager.Messages;
 
 // Handlers for the generated Messages_* operation interfaces (artifacts/generated/backend). They
 // speak the generated DTOs (Api.Message, Api.MessageWritable, …) at the edge and the domain
-// Message (with its Id<Message>) against the store.
+// Message (with its Id<Message>) against the store. Every change is published on the EventBus
+// (message.created / message.updated / message.deleted on GET /api/events).
 
 /// <summary><c>GET /api/messages</c>: one 1-based page of messages; out-of-range values are clamped.</summary>
 public sealed class ListMessagesHandler(EntityStore<Message> store) : IMessagesListHandler
@@ -42,7 +44,7 @@ public sealed class ListMessagesHandler(EntityStore<Message> store) : IMessagesL
 }
 
 /// <summary><c>POST /api/messages</c>: creates a message with a freshly generated id.</summary>
-public sealed class CreateMessageHandler(EntityStore<Message> store) : IMessagesCreateHandler
+public sealed class CreateMessageHandler(EntityStore<Message> store, EventBus events) : IMessagesCreateHandler
 {
     public Task<Result<Api.Message>> HandleAsync(MessagesCreateRequest request, CancellationToken cancellationToken)
     {
@@ -53,7 +55,9 @@ public sealed class CreateMessageHandler(EntityStore<Message> store) : IMessages
 
         var message = new Message(Id.New<Message>(), request.Body.Text);
         store.Set(message);
-        return Task.FromResult<Result<Api.Message>>(message.ToDto());
+        var dto = message.ToDto();
+        events.Publish(new MessageCreated { At = events.Now, MessageId = dto.Id, Message = dto });
+        return Task.FromResult<Result<Api.Message>>(dto);
     }
 }
 
@@ -72,7 +76,7 @@ public sealed class GetMessageHandler(EntityStore<Message> store) : IMessagesGet
 }
 
 /// <summary><c>PUT /api/messages/{id}</c>: replaces a message's text.</summary>
-public sealed class UpdateMessageHandler(EntityStore<Message> store) : IMessagesUpdateHandler
+public sealed class UpdateMessageHandler(EntityStore<Message> store, EventBus events) : IMessagesUpdateHandler
 {
     public Task<Result<Api.Message>> HandleAsync(MessagesUpdateRequest request, CancellationToken cancellationToken)
     {
@@ -93,12 +97,14 @@ public sealed class UpdateMessageHandler(EntityStore<Message> store) : IMessages
         }
 
         store.TryGet(id, out var updated);
-        return Task.FromResult<Result<Api.Message>>(updated!.ToDto());
+        var dto = updated!.ToDto();
+        events.Publish(new MessageUpdated { At = events.Now, MessageId = dto.Id, Message = dto });
+        return Task.FromResult<Result<Api.Message>>(dto);
     }
 }
 
 /// <summary><c>DELETE /api/messages/{id}</c>: deletes a message (no response body).</summary>
-public sealed class DeleteMessageHandler(EntityStore<Message> store) : IMessagesDeleteHandler
+public sealed class DeleteMessageHandler(EntityStore<Message> store, EventBus events) : IMessagesDeleteHandler
 {
     public Task<Result> RunAsync(MessagesDeleteRequest request, CancellationToken cancellationToken)
     {
@@ -107,6 +113,7 @@ public sealed class DeleteMessageHandler(EntityStore<Message> store) : IMessages
             return Task.FromResult<Result>(MessageMapping.NotFound(request.Id));
         }
 
+        events.Publish(new MessageDeleted { At = events.Now, MessageId = id.Value.Value });
         return Task.FromResult(Result.Success());
     }
 }

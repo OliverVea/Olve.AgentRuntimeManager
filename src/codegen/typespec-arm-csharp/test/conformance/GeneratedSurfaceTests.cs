@@ -104,6 +104,42 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
     }
 
     [Test]
+    public async Task EventStream_NamesEachEventByItsType_AndPassesIdsThrough()
+    {
+        using var response = await fixture.CreateClient().GetAsync("/api/widget-events");
+        var events = OpenApiContract.ParseEvents(await response.Content.ReadAsStringAsync());
+
+        await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("text/event-stream");
+        await Assert.That(events.Select(e => $"{e.EventType}#{e.EventId}").ToList())
+            .IsEquivalentTo(["ping#", "widget.changed#1", "widget.removed#2"]);
+        foreach (var e in events)
+        {
+            using var data = JsonDocument.Parse(e.Data);
+            await Assert.That(data.RootElement.GetProperty("type").GetString()).IsEqualTo(e.EventType);
+        }
+    }
+
+    [Test]
+    public async Task EventStream_BindsExplodeFalseListsAndHeaders()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/widget-events?type=widget.removed, widget.changed,");
+        request.Headers.Add("Last-Event-ID", "1");
+
+        using var response = await fixture.CreateClient().SendAsync(request);
+        var events = OpenApiContract.ParseEvents(await response.Content.ReadAsStringAsync());
+
+        await Assert.That(events.Select(e => e.EventType).ToList()).IsEquivalentTo(["widget.removed"]);
+    }
+
+    [Test]
+    public async Task RequiredExplodeFalseList_SplitsTrimsAndDropsEmptyEntries()
+    {
+        var names = await fixture.CreateClient().GetFromJsonAsync<string[]>("/api/tags?names=a, b,,c");
+
+        await Assert.That(names).IsEquivalentTo(["a", "b", "c"]);
+    }
+
+    [Test]
     public async Task HandlerFailure_OnOperationDeclaringNoErrors_Is500WithProblems()
     {
         using var response = await fixture.CreateClient().GetAsync("/api/widgets?limit=-1");
@@ -116,6 +152,7 @@ public class GeneratedSurfaceTests(FixtureApp fixture)
     [Test]
     [Arguments("/api/widgets?limit=abc")]
     [Arguments("/api/widgets?color=blue")]
+    [Arguments("/api/tags")]
     public async Task BindingFailure_OnOperationWithoutDeclared400_IsBodyless400(string url)
     {
         using var response = await fixture.CreateClient().GetAsync(url);

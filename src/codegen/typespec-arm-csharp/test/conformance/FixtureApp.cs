@@ -70,6 +70,8 @@ public static class FixtureHandlers
         services.AddSingleton<IWidgetsUpdateHandler, UpdateWidget>();
         services.AddSingleton<IWidgetsDeleteHandler, DeleteWidget>();
         services.AddSingleton<IShapesGetHandler, GetShape>();
+        services.AddSingleton<IWidgetEventsStreamHandler, StreamWidgetEvents>();
+        services.AddSingleton<ITagsEchoHandler, EchoTags>();
     }
 
     /// <summary>The failure a magic id asks for, if any.</summary>
@@ -186,6 +188,45 @@ public static class FixtureHandlers
     {
         public Task<Result> RunAsync(WidgetsDeleteRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(FailureFor(request.Id) is { } problem ? (Result)problem : Result.Success());
+    }
+
+    /// <summary>
+    /// A finite stream: a ping (no id), then <c>widget.changed</c> (id 1) and <c>widget.removed</c>
+    /// (id 2). <c>type</c> keeps only the named events (an unknown name fails before streaming);
+    /// <c>Last-Event-ID</c> skips ids up to it.
+    /// </summary>
+    private sealed class StreamWidgetEvents : IWidgetEventsStreamHandler
+    {
+        public static readonly Guid WidgetId = Guid.Parse("0b6f7f0e-4a52-4d0e-9d7a-5b1f0f6c2a11");
+
+        public Task<Result<IAsyncEnumerable<ArmSseItem<WidgetEvent>>>> HandleAsync(
+            WidgetEventsStreamRequest request, CancellationToken cancellationToken)
+        {
+            if (request.Type?.FirstOrDefault(t => !WidgetEvent.EventTypes.Contains(t)) is { } unknown)
+            {
+                return Task.FromResult<Result<IAsyncEnumerable<ArmSseItem<WidgetEvent>>>>(
+                    new ResultProblem("Unknown event type '{0}'.", unknown));
+            }
+
+            var after = long.TryParse(request.LastEventId, out var id) ? id : 0;
+            var events = Events()
+                .Where(e => request.Type is null || request.Type.Contains(e.Data.EventType))
+                .Where(e => e.Id is null || long.Parse(e.Id, System.Globalization.CultureInfo.InvariantCulture) > after);
+            return Task.FromResult(Result.Success(events.ToAsyncEnumerable()));
+        }
+
+        private static IEnumerable<ArmSseItem<WidgetEvent>> Events()
+        {
+            yield return new(new Ping { At = DateTimeOffset.UnixEpoch });
+            yield return new(new WidgetChanged { At = DateTimeOffset.UnixEpoch, WidgetId = WidgetId, Name = "sample", Shape = new Square { Side = 2 } }, "1");
+            yield return new(new WidgetRemoved { At = DateTimeOffset.UnixEpoch, WidgetId = WidgetId }, "2");
+        }
+    }
+
+    private sealed class EchoTags : ITagsEchoHandler
+    {
+        public Task<Result<IReadOnlyList<string>>> HandleAsync(TagsEchoRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(Result.Success(request.Names));
     }
 
     private sealed class GetShape : IShapesGetHandler

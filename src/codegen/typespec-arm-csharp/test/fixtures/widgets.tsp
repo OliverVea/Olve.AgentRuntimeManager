@@ -1,7 +1,11 @@
 // Snapshot fixture: exercises every shape the emitter supports (see ../emitter.test.js).
 import "@typespec/http";
+import "@typespec/streams";
+import "@typespec/events";
+import "@typespec/sse";
 
 using Http;
+using SSE;
 
 @service(#{ title: "Fixture" })
 @route("/api")
@@ -99,4 +103,52 @@ interface Widgets {
 @route("/shapes")
 interface Shapes {
   @get get(@path id: string): Shape | NotFound;
+}
+
+@route("/tags")
+interface Tags {
+  /** Echoes a required `explode: false` list (`?names=a,b`). */
+  @get echo(@query(#{ explode: false }) names: string[]): string[];
+}
+
+// --- server-sent events ----------------------------------------------------------------------
+
+/** Keeps the connection alive. */
+model Ping {
+  type: "ping";
+  at: utcDateTime;
+}
+
+// Carries the nested Shape union rather than a Widget: @typespec/openapi3 0.86 fails with
+// duplicate-type-name when an event nests a model with properties invisible on read (Widget's
+// update-only `note`).
+model WidgetChanged {
+  type: "widget.changed";
+  at: utcDateTime;
+  @format("uuid") widgetId: string;
+  name: string;
+  shape: Shape;
+}
+
+model WidgetRemoved {
+  type: "widget.removed";
+  at: utcDateTime;
+  @format("uuid") widgetId: string;
+}
+
+/** The widget event stream. */
+@TypeSpec.Events.events
+union WidgetEvent {
+  @TypeSpec.Events.contentType("application/json") ping: Ping,
+  @TypeSpec.Events.contentType("application/json") `widget.changed`: WidgetChanged,
+  @TypeSpec.Events.contentType("application/json") `widget.removed`: WidgetRemoved,
+}
+
+@route("/widget-events")
+interface WidgetEvents {
+  /** Streams widget events; `type` limits them to these event names. */
+  @get stream(
+    @query(#{ explode: false }) type?: string[],
+    @header("Last-Event-ID") lastEventId?: string,
+  ): SSEStream<WidgetEvent> | BadRequest;
 }

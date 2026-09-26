@@ -76,5 +76,21 @@ test("unsupported shapes are reported, not silently mistyped", async () => {
   const { diagnostics } = await emit("unsupported");
   assert.deepEqual(diagnosticCodes(diagnostics), [
     "warning typespec-arm-csharp/unsupported-type: Unsupported type shape (union without a discriminator); emitted as System.Text.Json.JsonElement.",
+    "warning typespec-arm-csharp/unsupported-operation: Operation 'tags': array parameter 'tag' must be a string list in the query with explode: false.",
+    "warning typespec-arm-csharp/unsupported-operation: Operation 'ticks': event 'tick' of 'Ticks' must be a model with `type: \"tick\"`.",
   ]);
+});
+
+test("SSE operations stream their @events union with ids; explode:false lists bind from one string", async () => {
+  const { files } = await emit("widgets", { "external-types": { ResultProblem: "ResultProblem" } });
+  const api = files["ArmApi.g.cs"];
+  const models = files["ArmModels.g.cs"];
+  assert.match(api, /IWidgetEventsStreamHandler : IHandler<WidgetEventsStreamRequest, IAsyncEnumerable<ArmSseItem<WidgetEvent>>>/);
+  assert.match(api, /ArmResults\.Stream\(await handler\.HandleAsync\(new WidgetEventsStreamRequest\(ArmQuery\.List\(type\), lastEventId\)/);
+  assert.match(api, /\.Produces<WidgetEvent>\(200, "text\/event-stream"\)/);
+  assert.match(models, /\[JsonPolymorphic\(TypeDiscriminatorPropertyName = "type"\)\]\n\[JsonDerivedType\(typeof\(Ping\), "ping"\)\]/);
+  assert.match(models, /public abstract record WidgetEvent : IArmEvent/);
+  assert.match(record(models, "WidgetChanged : WidgetEvent"), /override string EventType => "widget\.changed"/);
+  // The discriminator is written by the polymorphism, not a property of its own.
+  assert.doesNotMatch(record(models, "WidgetChanged : WidgetEvent"), /"type"/);
 });

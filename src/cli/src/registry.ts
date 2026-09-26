@@ -23,6 +23,14 @@ export type CommandContext = {
   options: OptionValues;
   /** Generated Hey API client, configured with base URL, token and fetch. */
   client: Client;
+  /** Output mode: `--json` (else `--pretty`). Only streaming commands, which print as they go, need it. */
+  json: boolean;
+  /** Writes one line to stdout, for commands that stream their output. */
+  stdout(line: string): void;
+  /** Writes one line to stderr (warnings; errors are thrown). */
+  stderr(line: string): void;
+  /** Aborted when the user interrupts (Ctrl+C); a streaming command then returns normally. */
+  signal: AbortSignal;
 };
 
 /** What a command produced: the raw API payload (`--json`) and its human-readable form (`--pretty`). */
@@ -36,13 +44,18 @@ export type Command = {
   summary: string;
   args: ArgSpec[];
   options: Record<string, OptionSpec>;
-  run(ctx: CommandContext): Promise<CommandOutput>;
+  /** Streams until interrupted: Ctrl+C then aborts `ctx.signal` (exit 0) instead of killing the process. */
+  streaming?: boolean;
+  /** The output to print, or undefined when the command streamed its own output. */
+  run(ctx: CommandContext): Promise<CommandOutput | undefined>;
 };
 
 export type CommandGroup = {
   name: string;
   summary: string;
   commands: Command[];
+  /** The command `arm <group>` runs when no command is named (e.g. `arm events`). */
+  defaultCommand?: string;
 };
 
 /** Options accepted by every command. */

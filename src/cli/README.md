@@ -15,6 +15,8 @@ arm message create <text>
 arm message update <id> <text>
 arm message delete <id>
 
+arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
+
 arm --help | arm <group> --help | arm <group> <command> --help
 arm --version
 ```
@@ -30,6 +32,15 @@ Global options (any position):
 
 Precedence is flag, then env, then default. Use `--` for text that starts with a dash:
 `arm message create -- "-5 degrees"`.
+
+`arm events` tails `GET /api/events` (Hey API's SSE client) until Ctrl+C, which exits `0`. By
+default it prints one line per event (`12:03:04 message.created <messageId> "text"`, local time;
+heartbeats hidden); with `--json` it prints NDJSON, one `{"event","id","data"}` object per line
+(heartbeats included, without an `id`), e.g. `arm events --json | jq .data`. Filters are
+enforced by the server (`message.*` matches a namespace; an unknown name is a 400, exit 1). A
+dropped connection is retried with backoff; a stream the server ends (e.g. a redeploy) is
+reopened with `Last-Event-ID`, so nothing retained is missed. `--last-event-id` starts from an id
+seen in earlier `--json` output.
 
 Exit codes: `0` success, `1` API or network error, `2` usage error. Errors always go to **stderr**,
 so stdout only ever holds successful output. With `--json`, the error is printed to stderr as JSON:
@@ -52,6 +63,8 @@ path alias to `artifacts/clients/ts` (Bun honours it when bundling).
 ## Adding commands
 
 Each command group is a `CommandGroup` in `src/commands/<group>.ts` (name, summary, and commands
-with their positional `args`, `options` and an async `run` that returns `{ json, pretty }`).
+with their positional `args`, `options` and an async `run` that returns `{ json, pretty }`, or
+`undefined` after streaming its own lines through `ctx.stdout`, as `events` does until
+`ctx.signal` aborts). A group's `defaultCommand` runs when none is named (`arm events`).
 Register it in `src/commands/index.ts`; parsing, help, `--json`/`--pretty` output and exit codes
 come from the runner in `src/cli.ts`.

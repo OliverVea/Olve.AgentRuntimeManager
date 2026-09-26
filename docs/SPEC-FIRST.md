@@ -91,25 +91,42 @@ union). Lives in [`src/codegen/typespec-arm-csharp`](../src/codegen/typespec-arm
 - [x] String-enum parameters bind by wire value (`?color=red`), not C# member name (found by the conformance suite)
 - [x] Build wiring: MSBuild target runs `tsp compile` (Inputs `src/spec/**`, Outputs the `.g.cs`); Docker copies the generated `.cs` from the Node stage (`-p:SkipSpecGen=true` in the .NET stage)
 - [x] Migrate `Message` + auth-config onto the generated surface; delete the hand-written DTOs/mapping
-- [ ] Later milestones extend it: PATCH tri-state, `QUERY` decorator, `explode:false` arrays + headers, multiple 2xx, SSE, `Id<T>` decorator, M4 error envelope
+- [ ] Later milestones extend it: PATCH tri-state, `QUERY` decorator, multiple 2xx, `Id<T>` decorator, M4 error envelope (`explode:false` string arrays in the query and SSE landed in M3)
 
 Not yet covered (reported as `typespec-arm-csharp/unsupported-*` warnings where the spec uses
 them, so nothing is silently mistyped): untagged unions, enveloped discriminated unions and
 model-inheritance `@discriminator`, cookie parameters, multipart bodies, status ranges/default
-responses. Validation covers the top-level request body only (not nested models or
+responses, array parameters other than `explode: false` string lists in the query, SSE streams
+of anything but an `@events` union of JSON models with a matching `type`. Validation covers the top-level request body only (not nested models or
 path/query parameters); `@pattern` isn't enforced yet. Rules the spec can't express (e.g.
 non-blank `text`) stay in the handlers.
 
 ## M3 — SSE
 
 Scope: one typed event stream with filters and replay, modelled the way SPEC §Event Bus
-needs it.
+needs it. As built (`src/spec/main.tsp`):
 
 ```tsp
 import "@typespec/streams";
 import "@typespec/events";
 import "@typespec/sse";
-using Events; using SSE;
+using SSE;
+
+model Heartbeat { type: "heartbeat"; at: utcDateTime; }
+model MessageCreated { type: "message.created"; at: utcDateTime; @format("uuid") messageId: string; message: Message; }
+// … MessageUpdated, MessageDeleted
+
+@TypeSpec.Events.events   // qualified: `interface Events` below shadows the namespace
+union ArmEvent {
+  @TypeSpec.Events.contentType("application/json") heartbeat: Heartbeat,
+  @TypeSpec.Events.contentType("application/json") `message.created`: MessageCreated,
+  // …
+}
+
+// The same payloads, discriminated on `type`: Hey API types stream items as `unknown` (it
+// ignores itemSchema), so clients cast items to this narrowable union.
+@discriminated(#{ envelope: "none", discriminatorPropertyName: "type" })
+union ArmEventData { heartbeat: Heartbeat, `message.created`: MessageCreated, /* … */ }
 
 model EventFilter {
   @query(#{ explode: false }) event?: string[];
@@ -117,22 +134,22 @@ model EventFilter {
   @header("Last-Event-ID") lastEventId?: string;
 }
 
-@events
-union ArmEvent {
-  @Events.contentType("application/json") heartbeat: { type: "heartbeat", timestamp: utcDateTime },
-  @Events.contentType("application/json") `message.created`: { type: "message.created", message: Message },
+@route("/events") interface Events {
+  @get stream(...EventFilter): SSEStream<ArmEvent> | BadRequest | UnauthorizedResponse;
 }
-
-@route("/events") @get op events(...EventFilter): SSEStream<ArmEvent>;
 ```
 
-- [ ] Server: SSE endpoint (`TypedResults.ServerSentEvents`), server-enforced include/exclude filter, `Last-Event-ID` replay from an in-memory buffer
-- [ ] **Every event payload carries a `type` discriminator.** Hey API ignores `itemSchema`, so the discriminated payload union is what gives clients per-event types
-- [ ] Clients use Hey API's SSE stream (`for await`, built-in reconnect + `Last-Event-ID` + backoff)
-- [ ] Conformance suite: each emitted event's `data` validates against its `event`'s schema (fixture SSE operation)
-- [ ] `arm events [--event X] [--exclude-event X]` tails with `--pretty` / `--json` (NDJSON)
+- [x] Server: SSE endpoint (`TypedResults.ServerSentEvents`), server-enforced include/exclude filter, `Last-Event-ID` replay from an in-memory buffer. The emitter turns an `SSEStream<@events union>` response into `I…Handler : IHandler<Req, IAsyncEnumerable<ArmSseItem<TUnion>>>` and maps it with `ArmResults.Stream` (runtime `Api/ArmServerSentEvents.cs`): event name = the variant's `type`, id from the item (none for heartbeats), data serialized as the union so `type` is always written; a failed `Result` before streaming is a normal declared error (400); streams end on disconnect or app shutdown. The backend (`Events/`) has an `EventBus` (monotonic ids seeded from the start time, so they keep rising across restarts; bounded replay buffer without heartbeats; a subscriber that falls a buffer behind is disconnected rather than blocking publishers), `EventFilter` (unknown names are a 400; heartbeats always pass and can't be named) and a heartbeat on connect plus every `Events:HeartbeatInterval` (30s)
+- [x] **Every event payload carries a `type` discriminator.** The emitter enforces it: each `@events` variant must be JSON and a model whose `type` literal is its variant name (else `unsupported-operation`)
+- [x] Clients use Hey API's SSE stream (`for await`, built-in reconnect + `Last-Event-ID` + backoff). The CLI wraps it: non-2xx and a refused first connection fail instead of retrying forever, a stream the server ends is reopened from the last id, and each event's own id is recovered (the client reports the last id seen, heartbeats included)
+- [x] Conformance suite: each emitted event's `data` validates against its `event`'s schema (fixture SSE operation `WidgetEvents_stream`): the event name must be declared, the data valid for that branch's `contentSchema`, and `data.type` equal to the name; plus `explode:false` list and header binding
+- [x] `arm events [--event X] [--exclude-event X] [--last-event-id ID]` tails with `--pretty` / `--json` (NDJSON)
 
 Exit: a filter in the spec is enforced by the server and exposed by the CLI.
+
+Deferred to M6: replay across server restarts (SPEC §Events) needs a persistent event log; the
+buffer is in memory. `@typespec/openapi3` 0.86 fails (`duplicate-type-name`) when an event nests
+a model with properties invisible on read (e.g. update-only); none of ARM's do yet.
 
 ## M4 (part) — `QUERY` + `queryMethod`
 

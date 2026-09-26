@@ -33,10 +33,36 @@ public enum Priority
 [JsonDerivedType(typeof(Square), "square")]
 public abstract record Shape;
 
+/// <summary>The widget event stream.</summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(Ping), "ping")]
+[JsonDerivedType(typeof(WidgetChanged), "widget.changed")]
+[JsonDerivedType(typeof(WidgetRemoved), "widget.removed")]
+public abstract record WidgetEvent : IArmEvent
+{
+    /// <summary>Every event name (<c>type</c>) of the stream, in contract order.</summary>
+    public static IReadOnlyList<string> EventTypes { get; } = ["ping", "widget.changed", "widget.removed"];
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public abstract string EventType { get; }
+}
+
 public sealed record Circle : Shape
 {
     [JsonPropertyName("radius")]
     public required double Radius { get; init; }
+}
+
+/// <summary>Keeps the connection alive.</summary>
+public sealed record Ping : WidgetEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string EventType => "ping";
+
+    [JsonPropertyName("at")]
+    public required DateTimeOffset At { get; init; }
 }
 
 public sealed record Square : Shape
@@ -86,6 +112,25 @@ public sealed record Widget
     public required Shape Shape { get; init; }
 }
 
+public sealed record WidgetChanged : WidgetEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string EventType => "widget.changed";
+
+    [JsonPropertyName("at")]
+    public required DateTimeOffset At { get; init; }
+
+    [JsonPropertyName("widgetId")]
+    public required Guid WidgetId { get; init; }
+
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("shape")]
+    public required Shape Shape { get; init; }
+}
+
 /// <summary>Request shape of <see cref="Widget"/> (only the properties a client may send).</summary>
 public sealed record WidgetCreate
 {
@@ -122,6 +167,19 @@ public sealed record WidgetCreate
 
     [JsonPropertyName("shape")]
     public required Shape Shape { get; init; }
+}
+
+public sealed record WidgetRemoved : WidgetEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string EventType => "widget.removed";
+
+    [JsonPropertyName("at")]
+    public required DateTimeOffset At { get; init; }
+
+    [JsonPropertyName("widgetId")]
+    public required Guid WidgetId { get; init; }
 }
 
 /// <summary>Request shape of <see cref="Widget"/> (only the properties a client may send).</summary>

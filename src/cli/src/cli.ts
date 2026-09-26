@@ -26,6 +26,10 @@ export type Io = {
   env: Record<string, string | undefined>;
   /** Injected for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
+  /** Aborted on Ctrl+C (main.ts); streaming commands stop and exit 0. */
+  signal?: AbortSignal;
+  /** Called before a streaming command runs, so Ctrl+C aborts `signal` rather than the process. */
+  onStreaming?(): void;
 };
 
 type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string }>;
@@ -89,14 +93,15 @@ export async function run(
     );
   }
 
-  if (!commandName) {
+  const defaultCommand = !commandName && group.defaultCommand ? findCommand(group, group.defaultCommand) : undefined;
+  if (!commandName && !defaultCommand) {
     if (help) return print(io, groupHelp(group));
     if (version) return print(io, `arm ${VERSION}`);
     io.stderr(groupHelp(group));
     return ExitCode.Usage;
   }
 
-  const command = findCommand(group, commandName);
+  const command = defaultCommand ?? findCommand(group, commandName!);
   if (!command) {
     return usage(
       new UsageError(
@@ -108,7 +113,7 @@ export async function run(
   if (help) return print(io, commandHelp(group, command));
   if (version) return print(io, `arm ${VERSION}`);
 
-  const hint = `Run 'arm ${group.name} ${command.name} --help' for usage.`;
+  const hint = `Run '${commandPath(group, command)} --help' for usage.`;
 
   // Pass 2 (strict): only the globals and this command's options are valid.
   let values: OptionValues;
@@ -121,7 +126,7 @@ export async function run(
       allowPositionals: true,
     });
     values = parsed.values as OptionValues;
-    positionals = parsed.positionals.slice(2);
+    positionals = parsed.positionals.slice(defaultCommand ? 1 : 2);
   } catch (error) {
     return usage(new UsageError((error as Error).message, hint));
   }
@@ -149,8 +154,20 @@ export async function run(
   const args = Object.fromEntries(command.args.map((a, i) => [a.name, positionals[i]!]));
   const options = Object.fromEntries(Object.keys(command.options).map((name) => [name, values[name]]));
 
+  const signal = io.signal ?? new AbortController().signal;
+  if (command.streaming) io.onStreaming?.();
+
   try {
-    const output = await command.run({ args, options, client });
+    const output = await command.run({
+      args,
+      options,
+      client,
+      json: wantsJson,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      signal,
+    });
+    if (!output) return ExitCode.Ok;
     return print(io, wantsJson ? formatJson(output.json) : output.pretty);
   } catch (error) {
     if (error instanceof UsageError) return usage(new UsageError(error.message, error.help ?? hint));
@@ -166,6 +183,11 @@ export async function run(
     );
     return ExitCode.Failure;
   }
+}
+
+/** How the command is invoked: `arm message list`, or `arm events` for a group's default command. */
+export function commandPath(group: CommandGroup, command: { name: string }): string {
+  return group.defaultCommand === command.name ? `arm ${group.name}` : `arm ${group.name} ${command.name}`;
 }
 
 function print(io: Io, text: string): number {

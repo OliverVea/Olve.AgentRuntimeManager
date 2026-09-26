@@ -5,8 +5,8 @@ using System.Net.Http.Json;
 namespace Olve.AgentRuntimeManager.ApiTests;
 
 /// <summary>
-/// Which operations need a user: writes do, reads and the SPA's auth config don't. Also the
-/// auth config ARM serves.
+/// Which operations need a user: writes and the event stream do, reads and the SPA's auth
+/// config don't. Also the auth config ARM serves.
 /// </summary>
 [ClassDataSource<ApiTarget>(Shared = SharedType.PerAssembly)]
 public class AuthTests(ApiTarget target)
@@ -18,6 +18,7 @@ public class AuthTests(ApiTarget target)
         yield return () => ("POST", "/api/messages");
         yield return () => ("PUT", $"/api/messages/{SomeId}");
         yield return () => ("DELETE", $"/api/messages/{SomeId}");
+        yield return () => ("GET", "/api/events");
     }
 
     [Test]
@@ -77,5 +78,5 @@ public class AuthTests(ApiTarget target)
     }
 
     private static HttpRequestMessage Request(string method, string path) =>
-        new(new HttpMethod(method), path) { Content = method == "DELETE" ? null : Wire.TextBody("hello") };
+        new(new HttpMethod(method), path) { Content = method is "POST" or "PUT" ? Wire.TextBody("hello") : null };
 }

@@ -24,6 +24,16 @@ public static class ArmResults
             ? Problems(problems, operation)
             : TypedResults.StatusCode(operation.SuccessStatus);
 
+    /// <summary>
+    /// An SSE operation: the events as <c>text/event-stream</c> (<see cref="ArmServerSentEventsResult{T}"/>),
+    /// or, when the handler fails before streaming, its problems mapped like any other operation's.
+    /// </summary>
+    public static IResult Stream<T>(Result<IAsyncEnumerable<ArmSseItem<T>>> result, ArmOperation operation)
+        where T : IArmEvent =>
+        result.TryPickProblems(out var problems, out var events)
+            ? Problems(problems, operation)
+            : new ArmServerSentEventsResult<T>(events);
+
     /// <summary>The problem body the contract declares for errors.</summary>
     public static IResult Problems(IEnumerable<ResultProblem> problems, int status) =>
         TypedResults.Json<IReadOnlyList<ResultProblem>>([.. problems], statusCode: status);

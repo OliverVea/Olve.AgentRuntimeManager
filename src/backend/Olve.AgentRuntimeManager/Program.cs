@@ -1,5 +1,6 @@
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Configuration;
+using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Health;
 using Olve.AgentRuntimeManager.Messages;
 using Olve.Utilities.AsyncOnStartup;
@@ -10,6 +11,7 @@ builder.ConfigureHost(args);
 builder.ConfigureJson();
 builder.ConfigureAuthentication();
 builder.ConfigureTelemetry();
+builder.Services.AddEventServices(builder.Configuration);
 builder.Services.AddMessageServices(builder.Configuration);
 builder.Services.AddSingleton<IAuthConfigGetHandler, GetAuthConfigHandler>();
 
@@ -28,7 +30,8 @@ app.MapHealthEndpoints();
 
 // The JSON API (under /api/, so the SPA can own the site root) is generated from the contract
 // (src/spec/main.tsp → artifacts/generated/backend). Every operation needs an authenticated
-// user (the fallback policy) unless opted out here.
+// user (the fallback policy) unless opted out here. The event stream (GET /api/events) stays
+// authenticated: later milestones stream session activity on it.
 var api = app.UseArmApi();
 api.MessagesList.AllowAnonymous();
 api.MessagesGet.AllowAnonymous();

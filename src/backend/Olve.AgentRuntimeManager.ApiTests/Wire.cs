@@ -25,6 +25,9 @@ public sealed record AuthConfigBody(string? Authority, string? ClientId, string 
 
 public static class Wire
 {
+    /// <summary>The API's JSON conventions (camelCase), for reading nested event data.</summary>
+    public static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+
     public static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
     public static StringContent TextBody(string text) => JsonContent(new { text });

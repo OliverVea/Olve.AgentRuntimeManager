@@ -44,7 +44,8 @@ Run 'arm <group> --help' for a group's commands.`;
 
 function usageLine(group: CommandGroup, command: Command): string {
   const args = command.args.map((a) => `<${a.name}>`).join(" ");
-  return ["arm", group.name, command.name, args, "[options]"].filter(Boolean).join(" ");
+  const name = group.defaultCommand === command.name ? "" : command.name;
+  return ["arm", group.name, name, args, "[options]"].filter(Boolean).join(" ");
 }
 
 export function groupHelp(group: CommandGroup): string {

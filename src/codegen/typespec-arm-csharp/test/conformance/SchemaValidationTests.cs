@@ -51,6 +51,28 @@ public class SchemaValidationTests
     public async Task MissingBodyOnJsonResponse_Fails() =>
         await Assert.That(Validate("Widgets_list", 200, "")).IsNotEmpty();
 
+    private const string ValidChanged =
+        $$$"""{"type":"widget.changed","at":"2026-01-01T00:00:00Z","widgetId":"{{{Id}}}","name":"w","shape":{"kind":"circle","radius":1}}""";
+
+    [Test]
+    public async Task ValidEventStream_Passes() =>
+        await Assert.That(Validate("WidgetEvents_stream", 200,
+            $"event: ping\ndata: {{\"type\":\"ping\",\"at\":\"2026-01-01T00:00:00Z\"}}\n\nevent: widget.changed\nid: 1\ndata: {ValidChanged}\n\n")).IsEmpty();
+
+    [Test]
+    // An event the contract doesn't declare.
+    [Arguments("event: widget.exploded\ndata: {\"type\":\"widget.exploded\",\"at\":\"2026-01-01T00:00:00Z\"}\n\n")]
+    // Data invalid for its event's schema (a required property missing).
+    [Arguments("event: widget.removed\ndata: {\"type\":\"widget.removed\",\"at\":\"2026-01-01T00:00:00Z\"}\n\n")]
+    // Data whose type isn't the event name (and so doesn't match that event's schema either).
+    [Arguments("event: ping\ndata: {\"type\":\"widget.removed\",\"at\":\"2026-01-01T00:00:00Z\",\"widgetId\":\"" + Id + "\"}\n\n")]
+    // No type at all.
+    [Arguments("event: ping\ndata: {\"at\":\"2026-01-01T00:00:00Z\"}\n\n")]
+    // Not JSON.
+    [Arguments("event: ping\ndata: pong\n\n")]
+    public async Task InvalidEventStream_Fails(string body) =>
+        await Assert.That(Validate("WidgetEvents_stream", 200, body)).IsNotEmpty();
+
     private static IReadOnlyList<string> Validate(string operationId, int status, string body) =>
         OpenApiContract.Validate(OpenApiContract.Operation(operationId), status, body);
 }

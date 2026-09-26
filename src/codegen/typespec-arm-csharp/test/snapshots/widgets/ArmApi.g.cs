@@ -20,6 +20,18 @@ public sealed record ShapesGetRequest(string Id);
 
 public interface IShapesGetHandler : IHandler<ShapesGetRequest, Shape>;
 
+/// <summary>Input of <c>Tags_echo</c> (GET /api/tags).</summary>
+public sealed record TagsEchoRequest(IReadOnlyList<string> Names);
+
+/// <summary>Echoes a required `explode: false` list (`?names=a,b`).</summary>
+public interface ITagsEchoHandler : IHandler<TagsEchoRequest, IReadOnlyList<string>>;
+
+/// <summary>Input of <c>WidgetEvents_stream</c> (GET /api/widget-events).</summary>
+public sealed record WidgetEventsStreamRequest(IReadOnlyList<string>? Type, string? LastEventId);
+
+/// <summary>Streams widget events; `type` limits them to these event names.</summary>
+public interface IWidgetEventsStreamHandler : IHandler<WidgetEventsStreamRequest, IAsyncEnumerable<ArmSseItem<WidgetEvent>>>;
+
 /// <summary>Input of <c>Widgets_create</c> (POST /api/widgets).</summary>
 public sealed record WidgetsCreateRequest(WidgetCreate Body);
 
@@ -45,6 +57,8 @@ public interface IWidgetsUpdateHandler : IHandler<WidgetsUpdateRequest, Widget>;
 public static class ArmOperations
 {
     public static readonly ArmOperation ShapesGet = new("Shapes_get", 200, [404]);
+    public static readonly ArmOperation TagsEcho = new("Tags_echo", 200, []);
+    public static readonly ArmOperation WidgetEventsStream = new("WidgetEvents_stream", 200, [400]);
     public static readonly ArmOperation WidgetsCreate = new("Widgets_create", 200, [400]);
     public static readonly ArmOperation WidgetsDelete = new("Widgets_delete", 204, [404]);
     public static readonly ArmOperation WidgetsList = new("Widgets_list", 200, []);
@@ -55,6 +69,8 @@ public static class ArmOperations
 public sealed class ArmEndpoints
 {
     public required RouteHandlerBuilder ShapesGet { get; init; }
+    public required RouteHandlerBuilder TagsEcho { get; init; }
+    public required RouteHandlerBuilder WidgetEventsStream { get; init; }
     public required RouteHandlerBuilder WidgetsCreate { get; init; }
     public required RouteHandlerBuilder WidgetsDelete { get; init; }
     public required RouteHandlerBuilder WidgetsList { get; init; }
@@ -67,6 +83,8 @@ public static class ArmApi
     public static IReadOnlyList<Type> HandlerTypes { get; } =
     [
         typeof(IShapesGetHandler),
+        typeof(ITagsEchoHandler),
+        typeof(IWidgetEventsStreamHandler),
         typeof(IWidgetsCreateHandler),
         typeof(IWidgetsDeleteHandler),
         typeof(IWidgetsListHandler),
@@ -85,6 +103,24 @@ public static class ArmApi
             .WithMetadata(ArmOperations.ShapesGet)
             .Produces<Shape>(200)
             .Produces<IReadOnlyList<ResultProblem>>(404),
+        TagsEcho = app.MapGet("/api/tags", async (
+                [FromServices] ITagsEchoHandler handler,
+                [FromQuery(Name = "names")] string names,
+                CancellationToken ct) =>
+                ArmResults.Map(await handler.HandleAsync(new TagsEchoRequest(ArmQuery.List(names)), ct), ArmOperations.TagsEcho))
+            .WithName("Tags_echo")
+            .WithMetadata(ArmOperations.TagsEcho)
+            .Produces<IReadOnlyList<string>>(200),
+        WidgetEventsStream = app.MapGet("/api/widget-events", async (
+                [FromServices] IWidgetEventsStreamHandler handler,
+                [FromQuery(Name = "type")] string? type,
+                [FromHeader(Name = "Last-Event-ID")] string? lastEventId,
+                CancellationToken ct) =>
+                ArmResults.Stream(await handler.HandleAsync(new WidgetEventsStreamRequest(ArmQuery.List(type), lastEventId), ct), ArmOperations.WidgetEventsStream))
+            .WithName("WidgetEvents_stream")
+            .WithMetadata(ArmOperations.WidgetEventsStream)
+            .Produces<WidgetEvent>(200, "text/event-stream")
+            .Produces<IReadOnlyList<ResultProblem>>(400),
         WidgetsCreate = app.MapPost("/api/widgets", async (
                 [FromServices] IWidgetsCreateHandler handler,
                 [FromBody] WidgetCreate body,

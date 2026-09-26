@@ -1,6 +1,6 @@
 # Olve.AgentRuntimeManager
 
-A .NET 10 minimal API service template. Install with `dotnet new` and scaffold a full solution with auth, telemetry, Helm chart, and client generation.
+ARM — Agent Runtime Manager: a standalone runtime for LLM agent sessions (see [`docs/SPEC.md`](docs/SPEC.md)). Scaffolded from the `olve-api` template; spec-first (TypeSpec) with a generated backend surface, TS client and CLI.
 
 ## Usage
 
@@ -38,7 +38,7 @@ src/
 │   └── test/                                   # Snapshot tests + conformance/ (the generator's contract-conformance suite, .NET)
 ├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
 └── deploy/
-    └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
+    └── vm/                                     # VM deployment: vm-deploy.sh (run on the host), systemd unit, cloud-init, env
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
 Dockerfile                                      # Multi-stage build (self-contained JIT, chiseled); repo root is the build context
 mise.toml                                       # Toolchain pins + tasks (`mise run ci`)
@@ -58,16 +58,25 @@ artifacts/                                      # Everything generated (gitignor
 | POST | `/api/messages` | Yes (JWT) | Create a message (`{ "text": "…" }`) |
 | PUT | `/api/messages/{id}` | Yes (JWT) | Update a message (`{ "text": "…" }`) |
 | DELETE | `/api/messages/{id}` | Yes (JWT) | Delete a message |
+| GET | `/api/events?event=<a,b>&exclude_event=<a,b>` | Yes (JWT) | Server-sent events: `message.created` / `.updated` / `.deleted`, heartbeats; `Last-Event-ID` replays missed events |
 | GET | `/openapi/v1.json` | No | OpenAPI spec |
 
 The JSON API lives under `/api/` so the SPA can own the site root; `/health` stays at the root
-for Kubernetes probes. Unmatched non-API GETs fall back to `index.html` for SPA client routing.
+for health probes. Unmatched non-API GETs fall back to `index.html` for SPA client routing.
 
 The `/api` endpoints are generated from the contract (see [Client Generation](#client-generation)):
 the app implements one generated `I…Handler` per operation and opts operations out of auth in
 `Program.cs`. The `Messages` feature is the worked example — handlers of the generated
 `Messages_*` interfaces over an `EntityStore<Message>` (domain `Message` with `Id<T>`), `Page<T>`
 pagination, and `IAsyncOnStartup` wiring (a welcome message is seeded on first run).
+
+`GET /api/events` (`Events/`) streams every message change as SSE (`arm events` tails it). Each
+event's JSON data carries `type` (= the SSE event name), `at` and its subject id; every event but
+`heartbeat` has a monotonic id. Handlers publish on the in-process `EventBus`, which keeps the
+last `Events:ReplayCapacity` events in memory for `Last-Event-ID` replay (not across restarts
+yet). Filters are enforced server-side: `event` keeps only the listed names (`message.*` matches
+a namespace), `exclude_event` then drops names; an unknown name is a 400, and heartbeats (sent
+on connect, then every `Events:HeartbeatInterval`) always pass.
 
 ## Build & Test
 
@@ -121,54 +130,40 @@ Test execution is controlled by MSBuild properties:
 ```bash
 # Local (from src/backend/)
 dotnet run --project Olve.AgentRuntimeManager
-
-# Kubernetes (from the repo root)
-helm install olve-arm src/deploy/helm/
 ```
 
 ## Deployment (GitOps)
 
-This template ships a `.pipelines/` directory, which makes it deploy out of the box via
-[**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipelines) — Oliver's lightweight GitOps CD
-service. `.pipelines/config.yaml` is the **single source of truth** for how the app is built and
-deployed (the deploy equivalent of `.github/workflows/`): once a pipeline is bound to the repo, the
-controller reconciles it to this file and **pushing to `main` redeploys automatically**.
+The repo deploys via [**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipelines).
+`.pipelines/config.yaml` is the **single source of truth**; the pipeline is bound to this repo, so
+**pushing to `main` redeploys automatically**.
 
-The pipeline shape:
+- **Production steps (parallel):** `build-and-package` (Kaniko → image tarball + `src/deploy/vm`)
+  and `check` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI). A
+  failure gates everything after.
+- **Processing steps (sequential):** `deploy-beta` → `test-after-beta` (the API test suite against
+  live beta) → `deploy` (prod).
+- **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`); values live in the pipeline's k8s
+  secret. Step scripts source the shared
+  [`olve-lib.sh`](https://github.com/OliverVea/Olve.Pipelines/blob/main/.pipelines/scripts/olve-lib.sh).
 
-- **Production steps run in parallel** — `build-and-package` (Kaniko build → image tar + Helm chart)
-  and `code-test` (the unit suite). A test failure fails the group and **gates the deploy** (nothing
-  ships).
-- **Processing steps run sequentially** — `deploy-beta` (namespace `apps-beta`) → `deploy`
-  (namespace `apps`). **Beta gates prod**: if the beta rollout or its post-deploy health check fails,
-  prod never deploys.
-- **Secrets are by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`); their values live in the
-  pipeline's own k8s secret, never in the repo.
-- The step scripts source a shared [`olve-lib.sh`](https://github.com/OliverVea/Olve.Pipelines/blob/main/.pipelines/scripts/olve-lib.sh)
-  (Kaniko/SSH/Helm footgun helpers) and only parameterize app-specifics, so they stay tiny. They
-  fetch it from `main`; swap that for a tag/SHA to pin.
+**Where it runs.** ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`,
+`olve-arm-prod`), not in Kubernetes — agents must survive server restarts. Each deploy step copies
+the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, which:
 
-**Homelab conformance.** The Helm chart renders a **`ClusterIP` Service only — no Ingress**
-([`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab) is the edge chart that owns all Ingress).
-Routing is registered by adding the app's host + service to the edge chart's `apps:` list in
-`values-{beta,prod}.yaml` — **not** in this chart. The `deploy-beta` health-gate probes the
-Tailscale-private host `https://<app>-private.ovea.pro/health` from the homelab node, so that host
-must be registered in the edge chart before the gate can pass.
+1. ensures the VM (Ubuntu 24.04 cloud image + cloud-init, fixed IP on libvirt's `default` network,
+   autostart) — the first deploy creates it;
+2. extracts the published app from the image and installs it as
+   `/opt/olve-arm/releases/<version>` with a systemd service (`KillMode=process`, so agent
+   processes survive a server restart);
+3. writes the config (`src/deploy/vm/env.{beta,prod}` + the prod OTLP secret from the cluster) and
+   the Authentik CA;
+4. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
 
-### Per-namespace prerequisites (what bites a fresh deploy)
-
-Building and rolling out is automatic, but a generated app needs a few things provisioned in each
-target namespace before the pod actually runs. Each of these surfaced on a real deploy:
-
-- **Edge route** — add an entry to `Olve.Homelab`'s `values-{beta,prod}.yaml` `apps:` list (host
-  `<app>-private.ovea.pro`, external-dns target `100.100.117.17`, LE TLS). Without it the health
-  gate has nothing to probe.
-- **OTLP telemetry auth** — beta's `otel-beta.ovea.pro` is unauthenticated (Tailscale); prod's
-  `otel.ovea.pro` needs OAuth2 as the shared `otel` client, whose secret is the
-  `authentik-oidc-secrets` key **`otel-client-secret`**. (The chart defaults are correct; just
-  ensure that secret exists in `apps`.)
-- **Authentik CA** — the chiseled image can't validate `*.ovea.pro` TLS, so the chart mounts the
-  shared `authentik-ca` configMap (`authentikCa.enabled`). That configMap must exist in the namespace.
+**Routing** lives in [`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab): `olve-arm-beta.ovea.pro`
+and `olve-arm-private.ovea.pro` (Tailscale-private) use `hostEndpoint` to target the relay — pods
+can't open new connections into libvirt's NAT network directly. Authentik applications `olve-arm`
+and `olve-arm-spa` are defined in `Olve.Authentik`.
 
 Inspect runs, jobs, and logs with the **`pl` CLI** (`pl pipeline list`, `pl job logs <id>`,
 `pl binding status <id>`). The [`ovea-olve-pipelines`](https://github.com/OliverVea/Olve.Pipelines)
@@ -197,6 +192,8 @@ Sources in priority order (highest wins):
 | `OpenTelemetry:Endpoint` | `https://otel.ovea.pro` | OTLP endpoint (null = disabled) |
 | `Storage:Mode` | `Ephemeral` | `Ephemeral` (in-memory) or `Persistent` (snapshot to disk) |
 | `Storage:Directory` | `data` | Directory for `Persistent` snapshots |
+| `Events:HeartbeatInterval` | `00:00:30` | Heartbeat period of `GET /api/events` connections |
+| `Events:ReplayCapacity` | `1000` | Recent events kept for `Last-Event-ID` replay (and how far a connection may lag) |
 
 ### Persistence
 

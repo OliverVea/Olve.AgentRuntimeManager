@@ -24,6 +24,8 @@ import {
   resolveRequestVisibility,
   Visibility,
 } from "@typespec/http";
+import { getContentType, isEvents } from "@typespec/events";
+import { getStreamOf } from "@typespec/streams";
 import { reportDiagnostic } from "./lib.js";
 import { camel, ordinal, pascal } from "./names.js";
 
@@ -59,6 +61,7 @@ const VALUE_TYPES = new Set([
   "DateTimeOffset", "DateOnly", "TimeOnly", "Guid", "System.Text.Json.JsonElement",
 ]);
 const JSON_ELEMENT = "System.Text.Json.JsonElement";
+const EVENT_STREAM = "text/event-stream";
 
 const READ = Visibility.Read;
 const WRITE = Visibility.Create | Visibility.Update;
@@ -208,21 +211,57 @@ export function collect(program, options = {}) {
       const named = [...disc.variants].map(([key, t]) => ({ key, name: csType(t, vis, undefined, type.name + pascal(key)) }));
       // Keep the union's name in step with its variants' visibility naming (`Pet` / `PetWritable`).
       const suffix = [...disc.variants].map(([, t], i) => named[i].name.slice(baseName(t, "").length)).find(Boolean) ?? "";
-      const name = type.name + suffix;
-      if (!unions.has(name)) {
-        unions.set(name, { name, doc: getDoc(program, type), discriminator, variants: named });
-        for (const v of named) {
-          const model = models.get(v.name);
-          if (model) {
-            model.union = { name, discriminator };
-            model.props = model.props.filter((p) => p.wire !== discriminator);
-          }
-        }
-      }
-      return name + q;
+      registerUnion({ name: type.name + suffix, doc: getDoc(program, type), discriminator, variants: named });
+      return type.name + suffix + q;
     }
     warnType(type, disc ? "discriminated union with an envelope" : "union without a discriminator");
     return JSON_ELEMENT + q;
+  }
+
+  /** Registers a polymorphic union; its variant records derive from it and lose the discriminator property. */
+  function registerUnion(union) {
+    if (unions.has(union.name)) return;
+    unions.set(union.name, union);
+    for (const v of union.variants) {
+      const model = models.get(v.name);
+      if (model) {
+        model.union = { name: union.name, discriminator: union.discriminator, key: v.key, events: !!union.events };
+        model.props = model.props.filter((p) => p.wire !== union.discriminator);
+      }
+    }
+  }
+
+  /**
+   * The `@events` union an SSE response streams, as a polymorphic C# union discriminated on
+   * `type`. Every variant must be named (the SSE event name), carry JSON, and be a model whose
+   * `type` is that same name, so the event name and the data's `type` can't disagree.
+   * @returns the union's C# name, or undefined (with a diagnostic) when it doesn't fit.
+   */
+  function eventsType(union, unsupported) {
+    if (union?.kind !== "Union" || !isEvents(program, union) || !union.name) {
+      unsupported("an SSE stream must be of a named @events union");
+      return undefined;
+    }
+    const variants = [];
+    for (const [key, variant] of union.variants) {
+      const model = variant.type;
+      const typeProp = model.kind === "Model" ? model.properties.get("type") : undefined;
+      if (typeof key !== "string") {
+        unsupported(`event variants of '${union.name}' must be named (the SSE event name)`);
+        return undefined;
+      }
+      if (getContentType(program, variant) !== "application/json") {
+        unsupported(`event '${key}' of '${union.name}' must be @contentType("application/json")`);
+        return undefined;
+      }
+      if (typeProp?.type.kind !== "String" || typeProp.type.value !== key) {
+        unsupported(`event '${key}' of '${union.name}' must be a model with \`type: "${key}"\``);
+        return undefined;
+      }
+      variants.push({ key, name: csType(model, READ, undefined, union.name + pascal(key)) });
+    }
+    registerUnion({ name: union.name, doc: getDoc(program, union), discriminator: "type", variants, events: true });
+    return union.name;
   }
 
   function csType(type, vis, prop, hint) {
@@ -276,8 +315,14 @@ export function collect(program, options = {}) {
         continue;
       }
       let type = csType(p.param.type, reqVis, p.param, name + pascal(p.param.name));
+      // Arrays: only `@query(#{ explode: false })` lists of strings (`?event=a,b`) so far.
+      const list = isArrayModelType(p.param.type);
+      if (list && (p.type !== "query" || p.explode || type !== "IReadOnlyList<string>")) {
+        unsupported(`array parameter '${p.name}' must be a string list in the query with explode: false`);
+        continue;
+      }
       if (p.param.optional && !type.endsWith("?")) type += "?";
-      params.push({ kind: p.type, wire: p.name, name: pascal(p.param.name), local: camel(p.param.name), type });
+      params.push({ kind: p.type, wire: p.name, name: pascal(p.param.name), local: camel(p.param.name), type, list });
     }
 
     let body;
@@ -292,8 +337,12 @@ export function collect(program, options = {}) {
         unsupported("status code ranges and default responses are not supported");
         continue;
       }
+      const stream = r.responses.some((x) => x.body?.contentTypes?.includes(EVENT_STREAM));
       const bodyType = r.responses.find((x) => x.body)?.body?.type;
-      const response = { status: r.statusCodes, type: bodyType ? csType(bodyType, READ, undefined, `${name}Response`) : undefined };
+      const response = stream
+        ? { status: r.statusCodes, type: eventsType(getStreamOf(program, r.type), unsupported), stream: true }
+        : { status: r.statusCodes, type: bodyType ? csType(bodyType, READ, undefined, `${name}Response`) : undefined };
+      if (stream && !response.type) continue;
       if (r.statusCodes >= 300) errors.push(response);
       else if (!success) success = response;
       else unsupported("multiple success statuses are not supported yet; only the first is generated");

@@ -14,9 +14,11 @@ namespace Fixture.Api;
 [JsonSerializable(typeof(Color))]
 [JsonSerializable(typeof(IReadOnlyList<ResultProblem>))]
 [JsonSerializable(typeof(IReadOnlyList<Widget>))]
+[JsonSerializable(typeof(IReadOnlyList<string>))]
 [JsonSerializable(typeof(Priority))]
 [JsonSerializable(typeof(Shape))]
 [JsonSerializable(typeof(Widget))]
 [JsonSerializable(typeof(WidgetCreate))]
+[JsonSerializable(typeof(WidgetEvent))]
 [JsonSerializable(typeof(WidgetWritable))]
 public partial class ArmJsonContext : JsonSerializerContext;

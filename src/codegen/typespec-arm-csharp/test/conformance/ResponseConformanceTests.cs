@@ -63,6 +63,20 @@ public class ResponseConformanceTests(FixtureApp fixture)
         yield return () => new("Shapes_get", "circle", 200, c => c.GetAsync("/api/shapes/circle"));
         yield return () => new("Shapes_get", "square", 200, c => c.GetAsync("/api/shapes/square"));
         yield return () => new("Shapes_get", "untagged failure falls back to the first declared error", 404, c => c.GetAsync($"/api/shapes/{FixtureHandlers.Untagged}"));
+
+        // GET /api/tags (a required explode:false list)
+        yield return () => new("Tags_echo", "a comma list", 200, c => c.GetAsync("/api/tags?names=a,b"));
+
+        // GET /api/widget-events (an SSE stream: every event's data against its event's schema)
+        yield return () => new("WidgetEvents_stream", "every event", 200, c => c.GetAsync("/api/widget-events"));
+        yield return () => new("WidgetEvents_stream", "filtered by an explode:false list", 200, c => c.GetAsync("/api/widget-events?type=widget.changed,ping"));
+        yield return () => new("WidgetEvents_stream", "resumed after Last-Event-ID", 200, c =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/widget-events");
+            request.Headers.Add("Last-Event-ID", "1");
+            return c.SendAsync(request);
+        });
+        yield return () => new("WidgetEvents_stream", "handler failure before streaming", 400, c => c.GetAsync("/api/widget-events?type=widget.exploded"));
     }
 
     [Test]

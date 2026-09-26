@@ -39,7 +39,15 @@ export function renderModels(ir, namespace) {
     let s = summary(u.doc);
     s += `[JsonPolymorphic(TypeDiscriminatorPropertyName = ${str(u.discriminator)})]\n`;
     for (const v of u.variants) s += `[JsonDerivedType(typeof(${v.name}), ${str(v.key)})]\n`;
-    s += `public abstract record ${u.name};\n`;
+    if (!u.events) {
+      s += `public abstract record ${u.name};\n`;
+    } else {
+      // An SSE event union: each event knows its event name (its `type`, written by the polymorphism).
+      s += `public abstract record ${u.name} : IArmEvent\n{\n`;
+      s += "    /// <summary>Every event name (<c>type</c>) of the stream, in contract order.</summary>\n";
+      s += `    public static IReadOnlyList<string> EventTypes { get; } = [${u.variants.map((v) => str(v.key)).join(", ")}];\n\n`;
+      s += "    /// <inheritdoc />\n    [JsonIgnore]\n    public abstract string EventType { get; }\n}\n";
+    }
     out.push(s);
   }
 
@@ -48,7 +56,9 @@ export function renderModels(ir, namespace) {
       ? `/// <summary>Request shape of <see cref="${m.writableOf}"/> (only the properties a client may send).</summary>\n`
       : summary(m.doc);
     s += `public sealed record ${m.name}${m.union ? ` : ${m.union.name}` : ""}\n{\n`;
-    s += m.props.map((p) => renderProperty(p)).join("\n");
+    const members = m.props.map((p) => renderProperty(p));
+    if (m.union?.events) members.unshift(`    /// <inheritdoc />\n    [JsonIgnore]\n    public override string EventType => ${str(m.union.key)};\n`);
+    s += members.join("\n");
     out.push(`${s}}\n`);
   }
 
@@ -96,7 +106,7 @@ export function renderApi(ir, namespace) {
     let s = `/// <summary>Input of <c>${o.operationId}</c> (${o.verb.toUpperCase()} ${o.path}).</summary>\n`;
     s += `public sealed record ${o.name}Request${fields.length ? `(${fields.join(", ")})` : ""};\n\n`;
     s += summary(o.doc);
-    s += `public interface I${o.name}Handler : IHandler<${o.name}Request${o.success.type ? `, ${o.success.type}` : ""}>;\n`;
+    s += `public interface I${o.name}Handler : IHandler<${o.name}Request${o.success.type ? `, ${responseType(o.success)}` : ""}>;\n`;
     out.push(s);
   }
 
@@ -127,6 +137,11 @@ export function renderApi(ir, namespace) {
   return out.join("\n");
 }
 
+/** What a handler returns on success: the body, or for an SSE stream the events with their ids. */
+function responseType(success) {
+  return success.stream ? `IAsyncEnumerable<ArmSseItem<${success.type}>>` : success.type;
+}
+
 /** The string enum a parameter binds to, if any (minimal APIs would parse it by C# member name). */
 function stringEnumOf(p, ir) {
   const e = ir.enums.get(p.type.replace(/\?$/, ""));
@@ -149,20 +164,22 @@ function renderEnumParsers(enums) {
 }
 
 function renderEndpoint(o, ir) {
-  const map = MAP_METHODS[o.verb]
+  const route = MAP_METHODS[o.verb]
     ? `app.${MAP_METHODS[o.verb]}(${str(o.path)}, `
     : `app.MapMethods(${str(o.path)}, [${str(o.verb.toUpperCase())}], `;
   const lambdaParams = [
     `[FromServices] I${o.name}Handler handler`,
     ...o.params.map((p) => {
-      // String enums bind as strings and are parsed by wire value (see renderEnumParsers).
-      const type = stringEnumOf(p, ir) ? (p.type.endsWith("?") ? "string?" : "string") : p.type;
+      // String enums bind as strings and are parsed by wire value (see renderEnumParsers);
+      // explode:false lists bind as one string and are split (ArmQuery.List).
+      const type = stringEnumOf(p, ir) || p.list ? (p.type.endsWith("?") ? "string?" : "string") : p.type;
       return `[${FROM[p.kind]}(Name = ${str(p.wire)})] ${type} ${p.local}`;
     }),
     ...(o.body ? [`[FromBody] ${o.body.type} body`] : []),
     "CancellationToken ct",
   ];
   const arg = (p) => {
+    if (p.list) return `ArmQuery.List(${p.local})`;
     const e = stringEnumOf(p, ir);
     if (!e) return p.local;
     const parse = `ArmParameters.Parse${e}(${p.local}, ${str(p.wire)})`;
@@ -170,15 +187,18 @@ function renderEndpoint(o, ir) {
   };
   const args = [...o.params.map(arg), ...(o.body ? ["body"] : [])].join(", ");
   const call = o.success.type ? "HandleAsync" : "RunAsync";
+  const map = o.success.stream ? "ArmResults.Stream" : "ArmResults.Map";
   const i = "        ";
-  let s = `${i}${o.name} = ${map}async (\n`;
+  let s = `${i}${o.name} = ${route}async (\n`;
   s += lambdaParams.map((p) => `${i}        ${p}`).join(",\n");
   s += ") =>\n";
-  s += `${i}        ArmResults.Map(await handler.${call}(new ${o.name}Request(${args}), ct), ArmOperations.${o.name}))\n`;
+  s += `${i}        ${map}(await handler.${call}(new ${o.name}Request(${args}), ct), ArmOperations.${o.name}))\n`;
   s += `${i}    .WithName(${str(o.operationId)})\n`;
   s += `${i}    .WithMetadata(ArmOperations.${o.name})`;
   if (o.body?.validator) s += `\n${i}    .WithValidation<${o.body.type}, ${o.body.validator}>()`;
-  s += `\n${i}    .Produces${o.success.type ? `<${o.success.type}>` : ""}(${o.success.status})`;
+  s += o.success.stream
+    ? `\n${i}    .Produces<${o.success.type}>(${o.success.status}, "text/event-stream")`
+    : `\n${i}    .Produces${o.success.type ? `<${o.success.type}>` : ""}(${o.success.status})`;
   for (const e of o.errors) s += `\n${i}    .Produces${e.type ? `<${e.type}>` : ""}(${e.status})`;
   return `${s},\n`;
 }
