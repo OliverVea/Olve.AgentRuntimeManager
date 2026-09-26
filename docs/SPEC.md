@@ -112,8 +112,9 @@ a repeated key within 24 hours returns the original response.
 ```
 
 **Status:** `queued → working → completed`; `working ⇄ waiting` (waiting = pending approval);
-`queued|working|waiting → killed`; `queued|working → failed`. Terminal: `completed`, `killed`,
-`failed`.
+`queued|working|waiting → killed`; `queued|working → failed`; `working → queued` (the provider
+refused the agent before it did anything; retried up to `Sessions:ProviderRetries`). Terminal:
+`completed`, `killed`, `failed`.
 
 - **`secretEnv`** is write-only: never returned or logged, and only passed to commands run through
   `approved_bash`. It is stored encrypted (so restart and revive keep working) and deleted once
@@ -299,7 +300,7 @@ subject ID (`sessionId`, `completionId`, or `provider`). The table lists the rem
 | `completion.started` | completionId, model, provider |
 | `completion.completed` | completionId, tokens, durationMs |
 | `completion.failed` | completionId, error |
-| `provider.unavailable` | provider, error |
+| `provider.health` | health (provider, status, reason, since, until) |
 | `server.restart_scheduled` | deadline |
 | `server.draining` | remainingSessions |
 

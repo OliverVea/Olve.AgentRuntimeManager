@@ -10,6 +10,7 @@ public sealed record SessionBody(
     string Model,
     string Caller,
     int? TimeoutSeconds,
+    int Attempts,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt,

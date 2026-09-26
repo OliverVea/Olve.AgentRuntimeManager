@@ -4,6 +4,7 @@ import "./errors.tsp";
 import "./auth-config.tsp";
 import "./server-info.tsp";
 import "./sessions.tsp";
+import "./providers.tsp";
 import "./events.tsp";
 
 using Http;

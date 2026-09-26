@@ -25,8 +25,8 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
         var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
         var process = Process.Start(StartInfo(settings, launch, workDirectory))
             ?? throw new InvalidOperationException($"'{settings.Command}' did not start.");
-        logger.LogInformation("Session {SessionId}: started Claude Code (pid {Pid}) in {Folder}", launch.SessionId, process.Id, folder);
-        return new ClaudeRun(process, launch.SessionId, launch.Prompt, folder, settings.ExitGrace);
+        logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, pid {Pid}) in {Folder}", launch.SessionId, launch.Attempt, process.Id, folder);
+        return new ClaudeRun(process, launch.ProviderSessionId, launch.Prompt, folder, settings.ExitGrace);
     }
 
     /// <summary>How the agent is launched: the lockdown flags and a minimal environment.</summary>
@@ -43,8 +43,8 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
         string[] arguments =
         [
             "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
-            // ARM's session id is Claude's too, so a later `--resume` needs nothing else.
-            "--session-id", launch.SessionId.ToString(),
+            // ARM's session id on the first attempt; a retry needs a new one (Claude keeps the failed attempt's).
+            "--session-id", launch.ProviderSessionId.ToString(),
             // No built-in tools, and anything that would still ask for permission is denied.
             "--tools", "", "--permission-prompts", "none",
             // Nothing of the user's: settings (and with them hooks and plugins), MCP servers, skills.

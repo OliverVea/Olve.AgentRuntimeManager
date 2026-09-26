@@ -75,14 +75,23 @@ Sessions (`Sessions/`) are stored in SQLite (see [Persistence](#persistence)): `
 keeps a FIFO queue in front of `Sessions:TotalSlots` slots, moves sessions through the state machine
 (`SessionLifecycle`), kills them at their timeout, and publishes a lifecycle event per change.
 Agents run through the `IAgentProvider` seam. `fake` runs no LLM and follows `fake:` directives in
-the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`; see
+the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`, `fake:down=unreachable:1`; see
 `FakeScript`). `claude` runs Claude Code (`Providers/Claude/`): one `claude -p` process per session,
 spoken to in its `stream-json` protocol, locked down (no built-in tools, none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
-variables), with the ARM session id as Claude's session id. It answers one prompt with one turn; its
+variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers one prompt with one turn; its
 output (the agent's answer included) is kept in `<WorkRoot>/<session id>/output.jsonl` until the
 conversation is in the API (M5b). It uses the machine's Claude Code login (or
 `CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
+
+A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
+429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)
+says why and until when: `limited` until the limit resets, `unreachable` for a wait that doubles
+(`Sessions:ProviderBackoff` up to `Sessions:ProviderMaxBackoff`) before one queued session tries
+again, `unauthorized` until a restart. New sessions still queue; other providers' sessions pass
+them. The refused session goes back to the head of the queue (`working → queued`, with the
+error) and fails after `Sessions:ProviderRetries` retries; waiting out a known limit reset uses
+none. Health is in memory only, and every change is a `provider.health` event.
 
 `GET /api/events` (`Events/`) streams every session change as SSE (`arm events` tails it). Each
 event's JSON data carries `type` (= the SSE event name), `at` and its subject id; every event but
@@ -217,6 +226,9 @@ Sources in priority order (highest wins):
 | `Sessions:TotalSlots` | `10` | Sessions that run at once; more are queued (202) |
 | `Sessions:MaxQueueSize` | `200` | Sessions that may wait for a slot; more are a 503 `QUEUE_FULL` |
 | `Sessions:IdempotencyWindow` | `1.00:00:00` | How long an `Idempotency-Key` replays its original response |
+| `Sessions:ProviderRetries` | `2` | Retries of a session its provider refused (outage, bad credentials), then it fails |
+| `Sessions:ProviderBackoff` | `00:01:00` | How long an unreachable provider waits before one session tries again; doubles per failed try |
+| `Sessions:ProviderMaxBackoff` | `00:15:00` | The longest that wait gets |
 | `Providers:Fake:Enabled` | `true` | Whether the `fake` provider exists; `false` in prod |
 | `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
 | `Providers:Claude:Command` | `claude` | The Claude Code executable |

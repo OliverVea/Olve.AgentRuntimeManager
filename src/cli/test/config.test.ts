@@ -13,6 +13,7 @@ const session = {
   model: "fake",
   caller: "me",
   timeoutSeconds: 600,
+  attempts: 1,
   createdAt: "2026-09-26T08:00:00Z",
 };
 

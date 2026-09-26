@@ -6,9 +6,9 @@ internal sealed class FakeRun : IAgentRun
     // Never disposed: Kill may come after the run ended, and a CTS without a timer holds nothing.
     private readonly CancellationTokenSource _kill = new();
 
-    public FakeRun(FakeScript script, TimeProvider time)
+    public FakeRun(FakeScript script, int attempt, TimeProvider time)
     {
-        Completion = RunAsync(script, time);
+        Completion = script.IsDownOn(attempt) ? Task.FromResult(Refused(script, time)) : RunAsync(script, time);
     }
 
     public string ProviderSessionId { get; } = $"fake-{Guid.NewGuid():N}";
@@ -32,4 +32,11 @@ internal sealed class FakeRun : IAgentRun
             ? new AgentOutcome.Failed(failure)
             : new AgentOutcome.Completed(script.ExitCode);
     }
+
+    private static AgentOutcome Refused(FakeScript script, TimeProvider time) => script.Down switch
+    {
+        ProviderTrouble.Limited => new AgentOutcome.Unavailable(ProviderTrouble.Limited, "Fake usage limit reached.", time.GetUtcNow() + script.Delay),
+        ProviderTrouble.Unauthorized => new AgentOutcome.Unavailable(ProviderTrouble.Unauthorized, "Fake credentials rejected."),
+        _ => new AgentOutcome.Unavailable(ProviderTrouble.Unreachable, "Fake API unreachable."),
+    };
 }

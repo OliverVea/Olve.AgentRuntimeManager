@@ -34,6 +34,24 @@ public class FakeScriptTests
     }
 
     [Test]
+    public async Task Down_IsReadWithItsAttempts()
+    {
+        var always = FakeScript.Parse("fake:down=limited", Default);
+        var once = FakeScript.Parse("fake:down=unreachable:1", Default);
+
+        await Assert.That(always.Down).IsEqualTo(ProviderTrouble.Limited);
+        await Assert.That(always.IsDownOn(1) && always.IsDownOn(99)).IsTrue();
+        await Assert.That(once.Down).IsEqualTo(ProviderTrouble.Unreachable);
+        await Assert.That(once.IsDownOn(1)).IsTrue();
+        await Assert.That(once.IsDownOn(2)).IsFalse();
+        await Assert.That(FakeScript.Parse("Fix it", Default).IsDownOn(1)).IsFalse();
+    }
+
+    [Test]
+    [Arguments("fake:down=sideways")]
+    [Arguments("fake:down=unreachable:0")]
+    [Arguments("fake:down=unreachable:x")]
+    [Arguments("fake:down=3")]
     [Arguments("fake:explode")]
     [Arguments("fake:sleep=soon")]
     [Arguments("fake:exit=x")]

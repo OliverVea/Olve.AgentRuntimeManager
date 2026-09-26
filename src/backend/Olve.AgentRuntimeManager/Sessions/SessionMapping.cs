@@ -15,6 +15,7 @@ public static class SessionMapping
         Model = session.Model,
         Caller = session.Caller,
         TimeoutSeconds = session.TimeoutSeconds,
+        Attempts = session.Attempts,
         CreatedAt = session.CreatedAt,
         StartedAt = session.StartedAt,
         EndedAt = session.EndedAt,

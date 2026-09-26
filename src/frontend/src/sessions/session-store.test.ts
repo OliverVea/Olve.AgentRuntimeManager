@@ -131,6 +131,27 @@ describe("SessionStore", () => {
     expect(store.active).toEqual([]);
   });
 
+  it("takes a working session its provider refused back to the queue, then to work again", async () => {
+    const api = fakeApi({ sessions: [session("s1")] });
+    const store = start(api);
+    await connected(api, store);
+
+    api.push({ type: "session.queued", at, sessionId: "s1", position: 1, error: "API Error: 529" });
+    await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:queued"]));
+    expect(store.active[0]).toMatchObject({ queuePosition: 1, error: "API Error: 529" });
+
+    api.push({
+      type: "session.started",
+      at,
+      sessionId: "s1",
+      previous: "queued",
+      providerSessionId: "p2",
+    });
+    await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:working"]));
+    expect(store.active[0]).toMatchObject({ attempts: 2, providerSessionId: "p2" });
+    expect(store.active[0]?.error).toBeUndefined();
+  });
+
   it("moves a session that ends to History, with its outcome", async () => {
     const api = fakeApi({ sessions: [session("s1"), session("s2")] });
     const store = start(api);

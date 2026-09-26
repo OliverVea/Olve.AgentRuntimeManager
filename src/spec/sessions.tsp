@@ -6,7 +6,8 @@ namespace Arm;
 
 /**
  * `queued → working → completed`; `queued → cancelled` (withdrawn before it started);
- * `working → killed` (stopped while running); `queued|working → failed`.
+ * `working → killed` (stopped while running); `queued|working → failed`; `working → queued` (the
+ * provider failed before the agent did anything, and the session has retries left).
  * Terminal: completed, cancelled, killed, failed.
  */
 enum SessionStatus {
@@ -62,9 +63,12 @@ model Session {
   /** Set when the session has a timeout. */
   timeoutSeconds?: int32;
 
+  /** How often the agent was started: 0 while first queued, more than 1 after retries. */
+  attempts: int32;
+
   createdAt: utcDateTime;
 
-  /** Set once the agent started: when status is `working`, `completed` or `killed`, and `failed` after starting. */
+  /** When the agent last started. Set once it started: when status is `working`, `completed` or `killed`, and `failed` or `queued` after starting. */
   startedAt?: utcDateTime;
 
   /** Set when status is `completed`, `cancelled`, `killed` or `failed`. */
@@ -76,7 +80,7 @@ model Session {
   /** Set when status is `completed`. */
   exitCode?: int32;
 
-  /** Set when status is `failed`. */
+  /** Set when status is `failed`, and when `queued` after a failed attempt (that attempt's error). */
   error?: string;
 
   /** Set when status is `cancelled` or `killed` and a reason was given. */
@@ -195,6 +199,9 @@ model SessionQueued {
 
   /** 1 = next to start. */
   position: int32;
+
+  /** Set when the session went back to the queue after a failed attempt: that attempt's error. */
+  error?: string;
 }
 
 /** A session's agent started. */

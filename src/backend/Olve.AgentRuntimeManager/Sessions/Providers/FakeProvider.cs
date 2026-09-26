@@ -13,5 +13,5 @@ public sealed class FakeProvider(TimeProvider time, IOptions<FakeProviderOptions
     public string Name => ProviderName;
 
     public IAgentRun Start(AgentLaunch launch) =>
-        new FakeRun(FakeScript.Parse(launch.Prompt, options.Value.Delay), time);
+        new FakeRun(FakeScript.Parse(launch.Prompt, options.Value.Delay), launch.Attempt, time);
 }

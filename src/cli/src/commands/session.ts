@@ -39,6 +39,7 @@ export function formatSession(s: Session): string {
     ["model", s.model],
     ["caller", s.caller],
     ["timeoutSeconds", s.timeoutSeconds],
+    ["attempts", s.attempts],
     ["createdAt", s.createdAt],
     ["startedAt", s.startedAt],
     ["endedAt", s.endedAt],

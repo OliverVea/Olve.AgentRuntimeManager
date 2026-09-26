@@ -13,6 +13,12 @@ case "$prompt" in
   *stub:crash*) echo "Invalid API key · Please run /login" >&2; exit 3 ;;
   *stub:hang*) exec sleep 3600 ;;
   *stub:error*) cat "$here/error.jsonl" ;;
+  # The API refusing the first request (captured against a local stub API, 2.1.283).
+  *stub:unauthorized*) cat "$here/unauthorized.jsonl" ;;
+  *stub:limited*) cat "$here/limited.jsonl" ;;
+  *stub:overloaded*) cat "$here/overloaded.jsonl" ;;
+  *stub:server-error*) cat "$here/server-error.jsonl" ;;
+  *stub:offline*) cat "$here/offline.jsonl" ;;
   *) cat "$here/success.jsonl" ;;
 esac
 

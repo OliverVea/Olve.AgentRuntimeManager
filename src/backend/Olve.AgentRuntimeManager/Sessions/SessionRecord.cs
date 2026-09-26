@@ -18,11 +18,23 @@ public sealed record SessionRecord
     /// <summary>Seconds it may run once started; null: no timeout.</summary>
     public int? TimeoutSeconds { get; init; }
 
+    /// <summary>How often its agent was started.</summary>
+    public int Attempts { get; init; }
+
+    /// <summary>
+    /// Attempts the provider refused (<see cref="Providers.AgentOutcome.Unavailable"/>), except
+    /// waits for a known usage-limit reset: what <see cref="SessionOptions.ProviderRetries"/> caps.
+    /// </summary>
+    public int FailedAttempts { get; init; }
+
     public required DateTimeOffset CreatedAt { get; init; }
+    /// <summary>When its agent last started.</summary>
     public DateTimeOffset? StartedAt { get; init; }
     public DateTimeOffset? EndedAt { get; init; }
+    /// <summary>The provider's id for the latest attempt's agent.</summary>
     public string? ProviderSessionId { get; init; }
     public int? ExitCode { get; init; }
+    /// <summary>Why it failed, or (queued again) why its last attempt did.</summary>
     public string? Error { get; init; }
     public string? KillReason { get; init; }
     public KillSource? KillSource { get; init; }

@@ -14,7 +14,7 @@ export type StreamState = "connecting" | "connected" | "reconnecting" | "down";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
 
-type SessionEvent = Exclude<ArmEventData, { type: "heartbeat" }>;
+type SessionEvent = Extract<ArmEventData, { type: `session.${string}` }>;
 
 /** How many active sessions the Overview loads (the search maximum). */
 const ACTIVE_LIMIT = 100;
@@ -22,7 +22,7 @@ const ACTIVE_LIMIT = 100;
 /** Failed (re)connects in a row after which the stream counts as down rather than reconnecting. */
 const DOWN_AFTER_ERRORS = 3;
 
-/** Queued, working, ended: a session only moves forward. */
+/** Queued, working, ended: a session only moves forward (but for a retry: `isRetry`). */
 function rank(status: SessionStatus): number {
   if (status === "queued") return 0;
   if (status === "working") return 1;
@@ -163,7 +163,7 @@ export class SessionStore extends EventTarget {
 
   /** Apply one event (exposed for tests). */
   apply(event: ArmEventData): void {
-    if (event.type === "heartbeat") return;
+    if (!isSessionEvent(event)) return;
     if (this.#buffer) {
       this.#buffer.push(event);
       return;
@@ -291,7 +291,7 @@ export class SessionStore extends EventTarget {
     if (!current) return; // not one this page shows
     const next = patch(current, event);
     if (
-      rank(next.status) < rank(current.status) ||
+      (rank(next.status) < rank(current.status) && !isRetry(current, event)) ||
       (isEnded(current) && next.status !== current.status)
     ) {
       return; // stale: the session is already further along
@@ -304,20 +304,37 @@ export class SessionStore extends EventTarget {
   }
 }
 
+function isSessionEvent(event: ArmEventData): event is SessionEvent {
+  return event.type.startsWith("session.");
+}
+
+/** A working session its provider refused, back in the queue (the only move back). */
+function isRetry(current: Session, event: SessionEvent): boolean {
+  return (
+    event.type === "session.queued" && event.error !== undefined && current.status === "working"
+  );
+}
+
 /** A session after one of its lifecycle events. */
 function patch(
   session: Session,
   event: Exclude<SessionEvent, { type: "session.created" }>,
 ): Session {
   switch (event.type) {
-    case "session.queued":
-      return { ...session, status: "queued", queuePosition: event.position };
-    case "session.started":
+    case "session.queued": {
+      const next: Session = { ...session, status: "queued", queuePosition: event.position };
+      if (event.error !== undefined) next.error = event.error;
+      return next;
+    }
+    case "session.started": {
+      const { error: _, ...rest } = moveTo(session, "working");
       return {
-        ...moveTo(session, "working"),
+        ...rest,
+        attempts: session.attempts + 1,
         providerSessionId: event.providerSessionId,
         startedAt: event.at,
       };
+    }
     case "session.completed":
       return { ...moveTo(session, "completed"), endedAt: event.at, exitCode: event.exitCode };
     case "session.failed":

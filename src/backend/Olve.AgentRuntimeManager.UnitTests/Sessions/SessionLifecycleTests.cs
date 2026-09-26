@@ -5,7 +5,8 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
 public class SessionLifecycleTests
 {
-    // queued → working → completed; queued → cancelled; working → killed; queued|working → failed.
+    // queued → working → completed; queued → cancelled; working → killed; queued|working → failed;
+    // working → queued (a retry).
     private static readonly HashSet<(SessionStatus, SessionStatus)> Allowed =
     [
         (SessionStatus.Queued, SessionStatus.Working),
@@ -14,6 +15,7 @@ public class SessionLifecycleTests
         (SessionStatus.Working, SessionStatus.Killed),
         (SessionStatus.Queued, SessionStatus.Failed),
         (SessionStatus.Working, SessionStatus.Failed),
+        (SessionStatus.Working, SessionStatus.Queued),
     ];
 
     public static IEnumerable<Func<(SessionStatus From, SessionStatus To)>> AllMoves() =>

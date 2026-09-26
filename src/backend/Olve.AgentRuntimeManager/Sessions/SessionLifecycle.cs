@@ -4,7 +4,8 @@ namespace Olve.AgentRuntimeManager.Sessions;
 
 /// <summary>
 /// The session state machine: <c>queued → working → completed</c>; <c>queued → cancelled</c>
-/// (withdrawn before it started); <c>working → killed</c>; <c>queued|working → failed</c>.
+/// (withdrawn before it started); <c>working → killed</c>; <c>queued|working → failed</c>;
+/// <c>working → queued</c> (the provider refused the agent, and the session has retries left).
 /// Terminal: completed, cancelled, killed, failed. (SPEC's <c>waiting</c>
 /// state arrives with approvals, M8.)
 /// </summary>
@@ -13,7 +14,7 @@ public static class SessionLifecycle
     private static readonly IReadOnlyDictionary<SessionStatus, SessionStatus[]> Next = new Dictionary<SessionStatus, SessionStatus[]>
     {
         [SessionStatus.Queued] = [SessionStatus.Working, SessionStatus.Cancelled, SessionStatus.Failed],
-        [SessionStatus.Working] = [SessionStatus.Completed, SessionStatus.Killed, SessionStatus.Failed],
+        [SessionStatus.Working] = [SessionStatus.Completed, SessionStatus.Killed, SessionStatus.Failed, SessionStatus.Queued],
         [SessionStatus.Completed] = [],
         [SessionStatus.Cancelled] = [],
         [SessionStatus.Killed] = [],

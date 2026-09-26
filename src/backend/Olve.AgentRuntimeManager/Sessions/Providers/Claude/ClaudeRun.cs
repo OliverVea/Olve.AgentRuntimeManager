@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
@@ -16,10 +17,10 @@ internal sealed class ClaudeRun : IAgentRun
     private volatile bool _killed;
     private volatile bool _stoppedLingering;
 
-    public ClaudeRun(Process process, Guid sessionId, string prompt, string folder, TimeSpan exitGrace)
+    public ClaudeRun(Process process, Guid providerSessionId, string prompt, string folder, TimeSpan exitGrace)
     {
         _process = process;
-        ProviderSessionId = sessionId.ToString();
+        ProviderSessionId = providerSessionId.ToString();
         // Off the caller's thread: providers start agents under the session runtime's lock.
         Completion = Task.Run(() => RunAsync(prompt, folder, exitGrace));
     }
@@ -48,6 +49,7 @@ internal sealed class ClaudeRun : IAgentRun
         {
             var stderr = CollectStderrAsync(Path.Combine(folder, "stderr.log"));
             ClaudeResult? result = null;
+            var signals = new ClaudeSignals();
             try
             {
                 await _process.StandardInput.WriteLineAsync(ClaudeStreamJson.UserMessage(prompt));
@@ -64,7 +66,13 @@ internal sealed class ClaudeRun : IAgentRun
                 while (await _process.StandardOutput.ReadLineAsync() is { } line)
                 {
                     await output.WriteLineAsync(line);
-                    if (result is null && ClaudeStreamJson.ParseResult(line) is { } turnResult)
+                    if (result is not null || ClaudeStreamJson.Parse(line) is not { } e)
+                    {
+                        continue;
+                    }
+
+                    signals = signals.Read(e);
+                    if (ClaudeStreamJson.Result(e) is { } turnResult)
                     {
                         result = turnResult;
                         await output.FlushAsync();
@@ -83,7 +91,7 @@ internal sealed class ClaudeRun : IAgentRun
             var stderrTail = await stderr;
             // An agent stopped only for lingering after a good turn still finished its work.
             var exitCode = _stoppedLingering && result is { IsError: false } ? 0 : _process.ExitCode;
-            return _killed ? new AgentOutcome.Killed() : Outcome(result, exitCode, stderrTail);
+            return _killed ? new AgentOutcome.Killed() : Outcome(result, exitCode, stderrTail, signals);
         }
         catch (Exception exception) when (!_killed)
         {
@@ -99,16 +107,37 @@ internal sealed class ClaudeRun : IAgentRun
         }
     }
 
-    internal static AgentOutcome Outcome(ClaudeResult? result, int exitCode, string stderrTail) => result switch
+    internal static AgentOutcome Outcome(ClaudeResult? result, int exitCode, string stderrTail, ClaudeSignals signals = default) => result switch
     {
         { IsError: false } => new AgentOutcome.Completed(exitCode),
+        { TerminalReason: "api_error" } refused when !signals.ModelAnswered && Unavailable(refused, signals) is { } unavailable => unavailable,
         { } failed => new AgentOutcome.Failed(
-            $"Claude Code's turn ended with {failed.Subtype}"
+            (failed.Subtype == "success" ? "Claude Code's turn failed" : $"Claude Code's turn ended with {failed.Subtype}")
             + (failed.Errors.Count > 0 ? $": {string.Join("; ", failed.Errors)}" : failed.Text is { Length: > 0 } text ? $": {text}" : ".")),
         null => new AgentOutcome.Failed(
             $"Claude Code exited with code {exitCode} before finishing its turn"
             + (stderrTail.Trim() is { Length: > 0 } tail ? $": {tail}" : ".")),
     };
+
+    /// <summary>
+    /// The API refused the turn before the model wrote anything: the provider's trouble, not the
+    /// session's, when the status says so. Anything else (a 400, an unknown model's 404) is the
+    /// session's own failure.
+    /// </summary>
+    private static AgentOutcome.Unavailable? Unavailable(ClaudeResult refused, ClaudeSignals signals)
+    {
+        var error = refused.Text is { Length: > 0 } text ? text : $"The API refused the turn ({refused.ApiErrorStatus?.ToString(CultureInfo.InvariantCulture) ?? "unreachable"}).";
+        return refused.ApiErrorStatus switch
+        {
+            401 or 403 => new AgentOutcome.Unavailable(ProviderTrouble.Unauthorized, error),
+            429 when signals.LimitReached => new AgentOutcome.Unavailable(ProviderTrouble.Limited, error, signals.LimitResetsAt),
+            // Throttled without a usage limit: like an overloaded API.
+            429 => new AgentOutcome.Unavailable(ProviderTrouble.Unreachable, error),
+            // Not reached at all (network), or failing on its side (5xx, 529 overloaded).
+            null or >= 500 => new AgentOutcome.Unavailable(ProviderTrouble.Unreachable, error),
+            _ => null,
+        };
+    }
 
     /// <summary>Stops an agent that hasn't exited <paramref name="grace"/> after its input was closed.</summary>
     private async Task StopIfStillRunningAsync(TimeSpan grace)

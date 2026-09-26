@@ -11,10 +11,13 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 ///   <item><c>fake:hang</c>: run until killed (or timed out).</item>
 ///   <item><c>fake:exit=3</c>: complete with this exit code.</item>
 ///   <item><c>fake:fail=boom</c>: fail with this error (<c>_</c> reads as a space) instead of completing.</item>
+///   <item><c>fake:down=unreachable</c> (or <c>limited</c>, <c>unauthorized</c>): the provider refuses
+///   the agent at once, as if its API were down; <c>fake:down=unreachable:2</c> only on the first 2
+///   attempts. A <c>limited</c> provider is back after the run's delay (<c>fake:sleep=…</c>).</item>
 /// </list>
 /// An unknown directive or a bad value is an error: the agent fails to start.
 /// </summary>
-public sealed partial record FakeScript(TimeSpan Delay, bool Hang, int ExitCode, string? Failure)
+public sealed partial record FakeScript(TimeSpan Delay, bool Hang, int ExitCode, string? Failure, ProviderTrouble? Down = null, int DownAttempts = int.MaxValue)
 {
     public static FakeScript Parse(string prompt, TimeSpan defaultDelay)
     {
@@ -29,11 +32,29 @@ public sealed partial record FakeScript(TimeSpan Delay, bool Hang, int ExitCode,
                 ("sleep", { } v) => script with { Delay = ParseDuration(v) },
                 ("exit", { } v) when int.TryParse(v, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var code) => script with { ExitCode = code },
                 ("fail", { } v) => script with { Failure = v.Replace('_', ' ') },
+                ("down", { } v) => ParseDown(script, v),
                 _ => throw new FormatException($"Unknown fake directive '{match.Value}'."),
             };
         }
 
         return script;
+    }
+
+    /// <summary>Whether the provider refuses this attempt (counting from 1).</summary>
+    public bool IsDownOn(int attempt) => Down is not null && attempt <= DownAttempts;
+
+    private static FakeScript ParseDown(FakeScript script, string value)
+    {
+        var parts = value.Split(':', 2);
+        var trouble = Enum.TryParse<ProviderTrouble>(parts[0], ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : throw new FormatException($"'{parts[0]}' is not a provider trouble (limited, unreachable, unauthorized).");
+        var attempts = parts.Length == 1
+            ? int.MaxValue
+            : int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count > 0
+                ? count
+                : throw new FormatException($"'{parts[1]}' is not a number of attempts.");
+        return script with { Down = trouble, DownAttempts = attempts };
     }
 
     private static TimeSpan ParseDuration(string value)

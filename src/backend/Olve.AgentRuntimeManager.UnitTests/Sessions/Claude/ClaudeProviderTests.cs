@@ -127,6 +127,50 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task ApiRejectingTheToken_IsTheProvidersTrouble_Unauthorized()
+    {
+        var outcome = await Provider().Start(Launch("stub:unauthorized")).Completion;
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
+            ProviderTrouble.Unauthorized, "Failed to authenticate. API Error: 401 OAuth access token is invalid."));
+    }
+
+    [Test]
+    public async Task UsageLimit_IsLimited_UntilItResets()
+    {
+        var outcome = await Provider().Start(Launch("stub:limited")).Completion;
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
+            ProviderTrouble.Limited, "You've hit your session limit · resets 10pm (UTC)", DateTimeOffset.FromUnixTimeSeconds(1790460000)));
+    }
+
+    [Test]
+    [Arguments("stub:overloaded")]
+    [Arguments("stub:server-error")]
+    [Arguments("stub:offline")]
+    public async Task ApiDownOrUnreachable_IsUnreachable(string prompt)
+    {
+        var outcome = await Provider().Start(Launch(prompt)).Completion;
+
+        var unavailable = await Assert.That(outcome).IsTypeOf<AgentOutcome.Unavailable>();
+        await Assert.That(unavailable!.Trouble).IsEqualTo(ProviderTrouble.Unreachable);
+        await Assert.That(unavailable.Error).StartsWith("API Error: ");
+    }
+
+    [Test]
+    public async Task Retry_UsesTheAttemptsOwnSessionId()
+    {
+        var launch = Launch("Say READY") with { Attempt = 2, ProviderSessionId = Guid.NewGuid() };
+
+        var run = Provider().Start(launch);
+        await run.Completion;
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--session-id") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
+        await Assert.That(run.ProviderSessionId).IsEqualTo(launch.ProviderSessionId.ToString());
+    }
+
+    [Test]
     public async Task Exit_BeforeAResult_FailsWithTheExitCodeAndStderr()
     {
         var outcome = await Provider().Start(Launch("stub:crash")).Completion;
@@ -168,7 +212,11 @@ public class ClaudeProviderTests
         return new ClaudeProvider(Options.Create(options), NullLogger<ClaudeProvider>.Instance);
     }
 
-    private static AgentLaunch Launch(string prompt) => new(Guid.NewGuid(), prompt, "sonnet");
+    private static AgentLaunch Launch(string prompt)
+    {
+        var id = Guid.NewGuid();
+        return new(id, prompt, "sonnet", 1, id);
+    }
 
     private string Folder(AgentLaunch launch) => Path.Combine(_root, launch.SessionId.ToString());
 

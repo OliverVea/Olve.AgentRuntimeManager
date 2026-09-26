@@ -15,7 +15,7 @@ public class ClaudeStreamJsonTests
             .Select(ClaudeStreamJson.ParseResult).OfType<ClaudeResult>().ToList();
 
         await Assert.That(results).HasSingleItem();
-        await Assert.That(results[0]).IsEquivalentTo(new ClaudeResult("success", false, "READY\n\nNO-CANARY", []));
+        await Assert.That(results[0]).IsEquivalentTo(new ClaudeResult("success", false, "READY\n\nNO-CANARY", [], "completed"));
     }
 
     [Test]

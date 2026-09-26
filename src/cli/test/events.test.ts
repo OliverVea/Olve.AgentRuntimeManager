@@ -13,6 +13,7 @@ const session = {
   model: "sonnet",
   caller: "oribot",
   timeoutSeconds: 600,
+  attempts: 1,
   createdAt: at,
 };
 

@@ -129,7 +129,7 @@ public class SessionManagerTests : IDisposable
         await Assert.That(session.Model).IsEqualTo("m");
         await Assert.That(session.Caller).IsEqualTo("tests");
         await Assert.That(session.TimeoutSeconds).IsNull();
-        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m"));
+        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id));
     }
 
     [Test]

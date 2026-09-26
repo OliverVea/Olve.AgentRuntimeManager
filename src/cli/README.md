@@ -18,6 +18,8 @@ arm session delete <id>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
+arm provider [health]
+
 arm server [info]
 
 arm login [--device | --browser] | arm logout

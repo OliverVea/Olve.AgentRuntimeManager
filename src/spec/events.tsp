@@ -30,6 +30,7 @@ union ArmEvent {
   @TypeSpec.Events.contentType("application/json") `session.failed`: SessionFailed,
   @TypeSpec.Events.contentType("application/json") `session.cancelled`: SessionCancelled,
   @TypeSpec.Events.contentType("application/json") `session.killed`: SessionKilled,
+  @TypeSpec.Events.contentType("application/json") `provider.health`: ProviderHealthChanged,
 }
 
 /** Any event's data, discriminated on `type` (the same payloads as `ArmEvent`). */
@@ -43,6 +44,7 @@ union ArmEventData {
   `session.failed`: SessionFailed,
   `session.cancelled`: SessionCancelled,
   `session.killed`: SessionKilled,
+  `provider.health`: ProviderHealthChanged,
 }
 
 model EventFilter {
