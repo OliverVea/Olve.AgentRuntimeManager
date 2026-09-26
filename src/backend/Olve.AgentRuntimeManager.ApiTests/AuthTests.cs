@@ -21,6 +21,7 @@ public class AuthTests(ApiTarget target)
         yield return () => ("POST", $"/api/sessions/{SomeId}/kill");
         yield return () => ("DELETE", $"/api/sessions/{SomeId}");
         yield return () => ("GET", "/api/events");
+        yield return () => ("GET", "/api/server-info");
     }
 
     [Test]

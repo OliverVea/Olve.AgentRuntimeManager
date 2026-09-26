@@ -2,6 +2,7 @@ import "@typespec/http";
 import "./common.tsp";
 import "./errors.tsp";
 import "./auth-config.tsp";
+import "./server-info.tsp";
 import "./sessions.tsp";
 import "./events.tsp";
 

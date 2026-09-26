@@ -102,6 +102,8 @@ PY
 
 write_env() {
   cp "$HERE/env.$ENV_NAME" "$WORK/env"
+  # Served by GET /api/server-info (the web UI's BETA marker).
+  printf 'Arm__Version=%s\nArm__Environment=%s\n' "$VERSION" "$ENV_NAME" >> "$WORK/env"
   if [ "$ENV_NAME" = prod ]; then
     printf 'OpenTelemetry__OAuth2__ClientSecret=%s\n' \
       "$(kubectl -n apps get secret authentik-oidc-secrets -o jsonpath='{.data.otel-client-secret}' | base64 -d)" >> "$WORK/env"

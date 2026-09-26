@@ -55,6 +55,7 @@ artifacts/                                      # Everything generated (gitignor
 | GET | `/` | No | The SPA (`src/frontend/`), served from `wwwroot` — see [Frontend](#frontend) |
 | GET | `/health` | No | Health check, returns 200 |
 | GET | `/api/auth-config` | No | Public OIDC settings for the SPA login (authority, client id, scopes) |
+| GET | `/api/server-info` | Yes (JWT) | Build version and environment (`beta`/`prod`) from the deploy; both `null` on a local run |
 | POST | `/api/sessions` | Yes (JWT) | Create a session: 201 started, 202 queued (`queuePosition`), 503 queue full; `Idempotency-Key` honoured |
 | POST | `/api/sessions/search` | Yes (JWT) | Search sessions (filters in the body), newest first |
 | GET | `/api/sessions/{id}` | Yes (JWT) | Get a session |

@@ -18,6 +18,8 @@ arm session delete <id>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
+arm server [info]
+
 arm login [--device | --browser] | arm logout
 arm config [list] | arm config get <key> | arm config set <key> <value> | arm config unset <key>
 

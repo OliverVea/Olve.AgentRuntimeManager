@@ -14,6 +14,7 @@ builder.ConfigureTelemetry();
 builder.Services.AddEventServices(builder.Configuration);
 builder.Services.AddSessionServices(builder.Configuration);
 builder.Services.AddSingleton<IAuthConfigGetHandler, GetAuthConfigHandler>();
+builder.Services.AddSingleton<IServerInfoApiGetHandler, GetServerInfoHandler>();
 
 var app = builder.Build();
 
