@@ -38,7 +38,7 @@ src/
 └── deploy/
     └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
-Dockerfile                                      # Multi-stage build (AOT, chiseled); repo root is the build context
+Dockerfile                                      # Multi-stage build (self-contained JIT, chiseled); repo root is the build context
 mise.toml                                       # Toolchain pins + tasks (`mise run ci`)
 package.json                                    # npm workspace root: TypeSpec + Hey API tooling, frontend, cli
 tspconfig.yaml, openapi-ts.config.mjs           # Contract → OpenAPI → TS client generation config
@@ -91,7 +91,7 @@ endpoint is in the spec; the contract tests exercise each operation's happy and 
 HTTP and validate the status and body against the spec's schemas (objects closed, so undeclared
 fields fail).
 
-Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it over raw HTTP (no generated client, so the tests check the wire contract) — covering the AOT-published binary end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
+Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it over raw HTTP (no generated client, so the tests check the wire contract) — covering the published app end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
 
 To add a dependency (e.g. PostgreSQL):
 

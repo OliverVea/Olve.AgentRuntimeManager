@@ -11,12 +11,12 @@ src/spec/main.tsp  (the contract; nothing else lives in src/spec/)
 artifacts/spec/openapi.json  (OpenAPI 3.2, gitignored build artifact)
   ├─► Hey API ─► artifacts/clients/ts  ─► frontend + arm CLI (TS, hand-written on the client)
   ├─► (later) Python / Bash clients, same way
-  └─► route-coverage + contract tests ◄─ hand-written backend (minimal API, AOT)
+  └─► route-coverage + contract tests ◄─ backend (minimal API, JIT)
 ```
 
 **Principles**
 - TypeSpec defines the contract; it does not implement the server. The backend stays minimal
-  API + Olve.Results (AOT), and tests prove it matches the spec.
+  API + Olve.Results, and tests prove it matches the spec.
 - **Generated output never lives in source folders.** OpenAPI documents and clients go to the
   gitignored `artifacts/`.
 - **Each project's native build owns its link to `main.tsp`.** `npm run build` / `dotnet test`
@@ -139,7 +139,7 @@ TypeSpec has no `QUERY` verb decorator.
 - npm 11 blocks install scripts by default; `bun` and `@jdxcode/mise` are allowed via `allowScripts` in the root `package.json`. The Docker SPA stage uses `npm ci --ignore-scripts`.
 - The backend listens on 5000 today (SPEC says 18791); the CLI defaults to 5000 until that's reconciled.
 - Emit **OpenAPI 3.2**. 3.1 drops SSE `itemSchema`.
-- `@typespec/http-server-csharp` output is unusable (MVC, non-AOT, lossy, doesn't compile). Don't generate the server from it.
+- `@typespec/http-server-csharp` output (1.16) was lossy and didn't compile. MVC itself is no longer a blocker since AOT was dropped (2026-09-26).
 - `@typespec/http-client-js` (preview) is not usable yet: wrong query key for `exclude_event`, SSE returned as `Promise<string>`, read-only fields sent on create. Re-check later.
 - Hey API 0.99 reads 3.2, honours read-only (`MessageWritable`), serializes query params correctly, and has real SSE streaming; it types the stream as `unknown` (ignores `itemSchema`), hence the `type` discriminator. It crashed with the newest TypeScript and worked on TypeScript 5, so pin TypeScript.
 - A `bun build --compile` CLI on the Hey API client is ~81 MB and depends only on libc (a .NET AOT binary would be ~10–15 MB).

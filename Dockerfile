@@ -17,7 +17,6 @@ COPY src/frontend/ src/frontend/
 RUN npm run build --workspace src/frontend
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
-RUN apt-get update && apt-get install -y clang zlib1g-dev
 WORKDIR /src
 
 COPY src/backend/Directory.Build.props src/backend/Directory.Packages.props src/backend/
@@ -25,7 +24,8 @@ COPY src/backend/Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj src/ba
 RUN dotnet restore src/backend/Olve.AgentRuntimeManager -r linux-x64
 
 COPY src/backend/Olve.AgentRuntimeManager/ src/backend/Olve.AgentRuntimeManager/
-RUN dotnet publish src/backend/Olve.AgentRuntimeManager -c Release -r linux-x64 -o /app
+# JIT, self-contained: the runtime ships with the app, so the chiseled runtime-deps image suffices.
+RUN dotnet publish src/backend/Olve.AgentRuntimeManager -c Release -r linux-x64 --self-contained -o /app
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
 WORKDIR /app

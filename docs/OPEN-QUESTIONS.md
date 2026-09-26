@@ -57,7 +57,8 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
 
 ### A8. API definition — code-first vs spec-first
 - **Leaning (2026-09-25):** spec-first with TypeSpec (`src/spec/main.tsp`).
-  - Backend hand-written (minimal API, AOT), checked by route-coverage + contract tests.
+  - Backend checked by route-coverage + contract tests; hand-written until a generator is picked
+    (2026-09-26: AOT dropped — JIT, self-contained publish — which widens the generator options).
   - Clients via OpenAPI 3.2 → Hey API; CLI is TypeScript on that client, `bun build --compile`.
   - No C# client. Generated output lives only in gitignored `artifacts/`.
   - mise as the single build entry point; one root `package.json`.

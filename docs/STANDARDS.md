@@ -25,6 +25,7 @@ reason. Back a rule with a test where possible.
 
 - Generated output MUST go to `artifacts/`, never into source folders.
 - Expected failures use Olve.Results; exceptions are for bugs.
-- Code MUST stay AOT/trim-safe: no reflection-based serialization; source-generated JSON.
+- The backend runs on the JIT, published self-contained; Native AOT is not a goal. Source-generated
+  JSON is still preferred where it's cheap.
 - Package versions are central (`Directory.Packages.props`); no `Version` attributes in csproj.
 - Tests use TUnit; contract/integration tests speak raw HTTP.
