@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Sessions/Claude/Stub/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
   </ItemGroup>
 
