@@ -98,6 +98,11 @@ re-evaluated and scoped when it's picked up.
   darwin-arm64) into the bundle, the image carries it, and ARM serves it at `/download/{asset}`
   (outside `/api`, anonymous). Each environment serves the CLI matching its API; `arm` can warn
   when it's older than the server, or update itself.
+- **Named servers in the CLI** (same idea for `pl`): `~/.arm/config.json` lists servers by name
+  (`"servers": { "prod": "https://arm-private.ovea.pro", "beta": "https://arm-beta.ovea.pro" }`,
+  plus a `default`), picked with `--server beta` or `ARM_SERVER=beta`; `--url` still wins.
+  Credentials stay per URL, and `arm login` no longer changes the default server as a side effect
+  (today it does, so the next command quietly goes to the last server logged in to).
 - **Setup page without auth**: the web UI's logged-out view (and `/setup`) shows the install
   one-liner for the viewer's OS from this server's `/download`, then `arm login`, plus the server
   version. Anonymous because it's what you need before you have a token; nothing on it is secret
