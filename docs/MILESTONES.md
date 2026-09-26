@@ -33,11 +33,11 @@ deleted once the whole screen is built and approved.
 
 | Mock feature | Milestone |
 |---|---|
-| Overview (queued/working, oldest first) and History (ended, newest first); composer (prompt, model, caller, timeout; Ctrl+Enter; "Advanced" on phones); kill ✕ with reason, delete (trash); card: status · duration, task, id · model · caller; copy id; click a time for clock times; Options (defaults for new sessions, theme, wrap/expand defaults); light/dark; Tab/Shift+Tab/Delete keys; clickable cards → the session page | **Next** (the web UI catch-up, before M5), on today's API plus no timeout by default and `cancelled` for queued sessions (contract changes, reviewed first); the model is a text field until M4b |
+| Overview (queued/working, oldest first) and History (ended, newest first); composer (prompt, model, caller, timeout; Ctrl+Enter; "Advanced" on phones); kill ✕ with reason, delete (trash); card: status · duration, task, id · model · caller; copy id; click a time for clock times; Options (defaults for new sessions, theme); light/dark; Tab/Shift+Tab/Delete keys; clickable cards → the session page | Done 2026-09-26 (the web UI catch-up), on today's API plus no timeout by default, `cancelled` for queued sessions and search by several statuses; the model is a `provider/model` text field until M4b |
 | Model dropdown with display names | M4b |
-| Live updates: the Overview (and later the session page) follows the event stream — subscribe and fetch the snapshot in parallel, buffer, apply what the snapshot lacks (per-session `seq`) — and the live dot shows the stream's state | Next for the Overview (on today's `session.*` events); the `seq` dedupe with M5b/M6 |
-| BETA marker with the build version (beta only) | Next (needs the version from the server) |
-| Log column: last 3 lines, filling from the bottom; expand; wrap (the box keeps its height); fade at the edges; links; outcome as the last line | M5b |
+| Live updates: the Overview (and later the session page) follows the event stream — subscribe and fetch the snapshot in parallel, buffer, apply what the snapshot lacks (per-session `seq`) — and the live dot shows the stream's state | Done 2026-09-26 for the Overview (on today's `session.*` events, re-reading the snapshot once subscribed); the `seq` dedupe with M5b/M6 |
+| BETA marker with the build version (beta only) | Done 2026-09-26 (`GET /api/server-info`) |
+| Log column: last 3 lines, filling from the bottom; expand; wrap (the box keeps its height); fade at the edges; links; outcome as the last line; wrap/expand defaults in Options | M5b |
 | Session page (details + the full transcript) | M5b — **needs its own mock first** |
 | Context use (% ↔ tokens/window, green < 15%, yellow < 30%, red from 30%) | M6 (context events), from real numbers with M9 |
 | Child sessions nested under their parent (rail, fold, "+N ended"); no parent field in the composer | M5c |
