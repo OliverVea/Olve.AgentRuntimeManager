@@ -13,6 +13,8 @@ reason. Back a rule with a test where possible.
   and every `/api` endpoint MUST be in the contract.
 - Timestamps MUST be UTC ISO-8601; IDs are opaque strings.
 - Secrets MUST NOT appear in responses, logs, events or traces.
+- `/health` is anonymous and says only up/down; diagnostics live behind auth (`GET /api/health`).
+  Whether `/health` is reachable publicly is decided in networking (edge/firewall), not in code.
 
 ## Events
 
