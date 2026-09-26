@@ -73,6 +73,13 @@ public static class ClaudeStreamJson
     }
 
     /// <summary>
+    /// The kind of API error (<c>authentication_failed</c>, <c>rate_limit</c>, <c>server_error</c>, …)
+    /// if <paramref name="e"/> is the assistant message Claude Code reports one with; else null.
+    /// </summary>
+    public static string? ApiError(JsonObject e) =>
+        Text(e["type"]) == "assistant" ? Text(e["error"]) : null;
+
+    /// <summary>
     /// Whether <paramref name="e"/> is a message the model wrote. Claude Code reports API errors as
     /// assistant messages too, but from model <c>&lt;synthetic&gt;</c>.
     /// </summary>

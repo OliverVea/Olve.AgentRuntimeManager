@@ -19,13 +19,12 @@ re-evaluated and scoped when it's picked up.
 
 - **Priority**: numeric priority for sessions and completions, with reserved capacity for
   high-priority work.
-- **Provider usage limits**: show how close each provider is to its usage limits, next to
-  provider health. For `claude` on a subscription, Claude Code's stream-json already reports a
-  `rate_limit_event` per run (`status`, `rateLimitType` such as `five_hour`, `isUsingOverage`),
-  a status rather than an amount left, so the first cut is the last known status per provider
-  (allowed / near the limit / limited, and the reset time when one is given). A real "X% left"
-  needs a source that reports it. Later the scheduler could use it: hold queued sessions
-  while a provider is limited instead of starting them to fail.
+- **Provider usage limits**: show how close each provider is to its usage limits, before it hits
+  them (M9 already pauses a provider once it has: `limited` until the reset). For `claude` on a
+  subscription, Claude Code's stream-json reports a `rate_limit_event` per run (`status`,
+  `rateLimitType` such as `five_hour`, `isUsingOverage`, `resetsAt`): a status rather than an
+  amount left, so a first cut is the last status per provider. A real "X% left" needs a source
+  that reports it. The scheduler could then hold low-priority sessions near a limit.
 - **Effort auto-adjustment** mid-session.
 - **Named agent configs**: persisted configs referenced by name at session creation instead of
   inline configuration.

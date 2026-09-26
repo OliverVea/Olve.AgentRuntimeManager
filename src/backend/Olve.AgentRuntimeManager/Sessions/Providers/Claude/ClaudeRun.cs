@@ -127,6 +127,12 @@ internal sealed class ClaudeRun : IAgentRun
     private static AgentOutcome.Unavailable? Unavailable(ClaudeResult refused, ClaudeSignals signals)
     {
         var error = refused.Text is { Length: > 0 } text ? text : $"The API refused the turn ({refused.ApiErrorStatus?.ToString(CultureInfo.InvariantCulture) ?? "unreachable"}).";
+        // Not logged in at all is no HTTP status (the request is never sent), but the same error kind.
+        if (signals.ApiError == "authentication_failed")
+        {
+            return new AgentOutcome.Unavailable(ProviderTrouble.Unauthorized, error);
+        }
+
         return refused.ApiErrorStatus switch
         {
             401 or 403 => new AgentOutcome.Unavailable(ProviderTrouble.Unauthorized, error),

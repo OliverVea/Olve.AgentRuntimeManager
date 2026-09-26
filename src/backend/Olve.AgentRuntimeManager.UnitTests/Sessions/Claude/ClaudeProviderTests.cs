@@ -136,6 +136,15 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task NoLogin_IsUnauthorized_ThoughNoRequestWasSent()
+    {
+        var outcome = await Provider().Start(Launch("stub:not-logged-in")).Completion;
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
+            ProviderTrouble.Unauthorized, "Not logged in · Please run /login"));
+    }
+
+    [Test]
     public async Task UsageLimit_IsLimited_UntilItResets()
     {
         var outcome = await Provider().Start(Launch("stub:limited")).Completion;

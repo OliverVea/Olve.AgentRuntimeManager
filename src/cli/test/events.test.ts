@@ -217,9 +217,20 @@ describe("arm events", () => {
 describe("formatEvent", () => {
   const line = (data: object) => formatEvent({ event: "x", id: "1", data: { at, sessionId, ...data } as never });
 
+  test("a provider's health: its name, status, until when and why", () => {
+    const health = (h: object) => formatEvent({ event: "provider.health", id: "1", data: { type: "provider.health", at, health: h } as never });
+    expect(health({ provider: "claude", status: "limited", until: at, reason: "session limit" })).toBe(
+      `${clock(at)} provider.health claude limited until=${clock(at)} "session limit"`,
+    );
+    expect(health({ provider: "claude", status: "available" })).toBe(`${clock(at)} provider.health claude available`);
+  });
+
   test("one line per session event", () => {
     const time = clock(at);
     expect(line({ type: "session.queued", position: 3 })).toBe(`${time} session.queued ${sessionId} position=3`);
+    expect(line({ type: "session.queued", position: 1, error: "API Error: 529" })).toBe(
+      `${time} session.queued ${sessionId} position=1 "API Error: 529"`,
+    );
     expect(line({ type: "session.completed", previous: "working", exitCode: 0 })).toBe(
       `${time} session.completed ${sessionId} exitCode=0`,
     );

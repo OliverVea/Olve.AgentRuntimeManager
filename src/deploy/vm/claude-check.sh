@@ -63,9 +63,21 @@ created = request(api + "/api/sessions", {
 session_id = created["id"]
 print(f"Session {session_id}")
 
+def give_up(message):
+    # Don't leave it queued on beta: a refused session would otherwise wait for the provider.
+    request(f"{api}/api/sessions/{session_id}/kill", {"caller": "deploy-beta", "reason": "Claude Code check gave up."}, auth)
+    fail(message)
+
 session = request(f"{api}/api/sessions/{session_id}", headers=auth)
 deadline = time.time() + 180
-while session["status"] in ("queued", "working") and time.time() < deadline:
+while session["status"] in ("queued", "working"):
+    if session["status"] == "queued" and session.get("error"):
+        # The provider refused it (bad token, usage limit, API down); ARM would retry later.
+        health = request(api + "/api/providers/health", headers=auth)
+        claude = next((h for h in health if h["provider"] == "claude"), {})
+        give_up(f"the claude provider refused it ({claude.get('status')}): {session['error']}")
+    if time.time() >= deadline:
+        give_up(f"still {session['status']} after 180s")
     time.sleep(2)
     session = request(f"{api}/api/sessions/{session_id}", headers=auth)
 if session["status"] != "completed":
