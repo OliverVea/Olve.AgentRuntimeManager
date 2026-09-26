@@ -13,7 +13,7 @@ reason. Back a rule with a test where possible.
 - Every status an operation can answer MUST be declared in the contract. Handlers return the
   generated per-operation response union (`SessionsKillResponse.Conflict(…)`), so an undeclared
   status doesn't compile; expected failures are declared responses, never exceptions.
-- The contract (`src/spec/main.tsp`) is the source of truth: every operation MUST be implemented,
+- The contract (`src/spec/`, entry point `main.tsp`) is the source of truth: every operation MUST be implemented,
   and every `/api` endpoint MUST be in the contract. The generated surface guarantees this (and
   the declared statuses and schemas); the emitter's conformance suite tests it once for all services.
 - Timestamps MUST be UTC ISO-8601; IDs are opaque strings.

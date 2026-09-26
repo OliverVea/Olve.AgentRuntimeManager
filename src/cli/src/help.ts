@@ -4,7 +4,7 @@ import { type Command, type CommandGroup, type OptionSpec, globalOptions } from 
 function optionLines(options: Record<string, OptionSpec>): string {
   const entries = Object.entries(options).map(([name, spec]) => {
     const flag = `${spec.short ? `-${spec.short}, ` : "    "}--${name}${spec.type === "string" ? ` ${spec.valueName ?? "VALUE"}` : ""}`;
-    return [flag, spec.multiple ? `${spec.description} (repeatable)` : spec.description] as const;
+    return [flag, spec.description] as const;
   });
   return indent(formatKeyValue(entries));
 }

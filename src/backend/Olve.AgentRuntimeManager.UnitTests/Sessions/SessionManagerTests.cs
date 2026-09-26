@@ -26,7 +26,7 @@ public class SessionManagerTests : IDisposable
         _sessions = new SessionManager(
             _bus,
             _time,
-            Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2, DefaultTimeoutSeconds = 60, DefaultProvider = _provider.Name }),
+            Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2, DefaultTimeoutSeconds = 60 }),
             [_provider],
             NullLogger<SessionManager>.Instance);
     }
@@ -37,11 +37,11 @@ public class SessionManagerTests : IDisposable
         _events.Dispose();
     }
 
-    private static CreateSession Request(string prompt = "do it", int? timeoutSeconds = null) =>
-        new() { Prompt = prompt, TimeoutSeconds = timeoutSeconds };
+    private CreateSession Request(string prompt = "do it", int? timeoutSeconds = null, string caller = "tests") =>
+        new() { Prompt = prompt, Provider = _provider.Name, Model = "m", Caller = caller, TimeoutSeconds = timeoutSeconds };
 
-    private SessionRecord Create(string prompt = "do it", int? timeoutSeconds = null) =>
-        _sessions.Create(Request(prompt, timeoutSeconds)) switch
+    private SessionRecord Create(string prompt = "do it", int? timeoutSeconds = null, string caller = "tests") =>
+        _sessions.Create(Request(prompt, timeoutSeconds, caller)) switch
         {
             CreateOutcome.Started s => s.Session,
             CreateOutcome.Queued q => q.Session,
@@ -103,16 +103,15 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
-    public async Task Create_ResolvesDefaults()
+    public async Task Create_KeepsTheRequest_AndDefaultsTheTimeout()
     {
         var session = Create();
 
         await Assert.That(session.Provider).IsEqualTo(_provider.Name);
+        await Assert.That(session.Model).IsEqualTo("m");
+        await Assert.That(session.Caller).IsEqualTo("tests");
         await Assert.That(session.TimeoutSeconds).IsEqualTo(60);
-        await Assert.That(session.Messaging).IsTrue();
-        await Assert.That(session.Headless).IsFalse();
-        await Assert.That(session.Tags).IsEmpty();
-        await Assert.That(session.Tools).IsEmpty();
+        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m"));
     }
 
     [Test]
@@ -148,7 +147,7 @@ public class SessionManagerTests : IDisposable
     [Test]
     public async Task Create_WithAnUnknownProvider_CreatesNothing()
     {
-        var outcome = _sessions.Create(new CreateSession { Prompt = "x", Provider = "nope" });
+        var outcome = _sessions.Create(Request() with { Provider = "nope" });
 
         var unknown = (CreateOutcome.UnknownProvider)outcome;
         await Assert.That(unknown.Provider).IsEqualTo("nope");
@@ -200,12 +199,13 @@ public class SessionManagerTests : IDisposable
     {
         var session = Create();
 
-        var outcome = _sessions.Kill(session.Id, "enough", KillSource.User);
+        var outcome = _sessions.Kill(session.Id, "enough", KillSource.User, "oliver");
 
         var killed = ((KillOutcome.Killed)outcome).Session;
         await Assert.That(killed.Status).IsEqualTo(SessionStatus.Killed);
         await Assert.That(killed.KillReason).IsEqualTo("enough");
         await Assert.That(killed.KillSource).IsEqualTo(KillSource.User);
+        await Assert.That(killed.KillCaller).IsEqualTo("oliver");
         await Assert.That(_provider.RunOf(session.Id).WasKilled).IsTrue();
         await Assert.That(EventTypes(session.Id)).IsEquivalentTo(
             ["session.created", "session.started", "session.killed"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
@@ -307,21 +307,18 @@ public class SessionManagerTests : IDisposable
     [Test]
     public async Task Search_FiltersAndPages_NewestFirst()
     {
-        var old = _sessions.Create(new CreateSession { Prompt = "Deploy the thing", Caller = "oribot", Tags = new Dictionary<string, string> { ["team"] = "a" } });
+        var old = Create(caller: "oribot");
         _time.Advance(TimeSpan.FromSeconds(1));
-        var newer = _sessions.Create(new CreateSession { Prompt = "deploy again", Caller = "oribot", Tags = new Dictionary<string, string> { ["team"] = "a", ["x"] = "y" } });
+        var newer = Create(caller: "oribot");
         _time.Advance(TimeSpan.FromSeconds(1));
-        _sessions.Create(new CreateSession { Prompt = "unrelated", Caller = "someone" });
+        Create(caller: "someone");
 
-        var page = _sessions.Search(
-            new SessionSearch { Caller = "oribot", Text = "DEPLOY", Tags = new Dictionary<string, string> { ["team"] = "a" } },
-            limit: 1,
-            offset: 0);
+        var page = _sessions.Search(new SessionSearch { Caller = "oribot" }, limit: 1, offset: 0);
+        var second = _sessions.Search(new SessionSearch { Caller = "oribot" }, limit: 1, offset: 1);
 
         await Assert.That(page.Total).IsEqualTo(2);
-        await Assert.That(page.Items.Single().Id).IsEqualTo(((CreateOutcome.Started)newer).Session.Id);
-        var second = _sessions.Search(new SessionSearch { Caller = "oribot" }, limit: 1, offset: 1);
-        await Assert.That(second.Items.Single().Id).IsEqualTo(((CreateOutcome.Started)old).Session.Id);
+        await Assert.That(page.Items.Single().Id).IsEqualTo(newer.Id);
+        await Assert.That(second.Items.Single().Id).IsEqualTo(old.Id);
         var byTime = _sessions.Search(new SessionSearch { CreatedAfter = Start, CreatedBefore = Start.AddSeconds(2) }, 10, 0);
         await Assert.That(byTime.Total).IsEqualTo(1);
         var byStatus = _sessions.Search(new SessionSearch { Status = SessionStatus.Queued }, 10, 0);

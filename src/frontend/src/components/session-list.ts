@@ -167,12 +167,6 @@ export class SessionList extends BaseElement {
         next = { ...next, providerSessionId: event.providerSessionId, startedAt: event.at };
         next = moveTo(next, "working");
         break;
-      case "session.waiting":
-        next = moveTo(next, "waiting");
-        break;
-      case "session.resumed":
-        next = moveTo(next, "working");
-        break;
       case "session.completed":
         next = { ...moveTo(next, "completed"), endedAt: event.at, exitCode: event.exitCode };
         if (event.summary !== undefined) next.summary = event.summary;
@@ -183,6 +177,7 @@ export class SessionList extends BaseElement {
       case "session.killed":
         next = { ...moveTo(next, "killed"), endedAt: event.at, killSource: event.source };
         if (event.reason !== undefined) next.killReason = event.reason;
+        if (event.caller !== undefined) next.killCaller = event.caller;
         break;
     }
     this.#sessions = this.#sessions.map((s, i) => (i === index ? next : s));
@@ -206,7 +201,7 @@ export class SessionList extends BaseElement {
       .id { font: 0.75rem ui-monospace, monospace; opacity: 0.55; }
       .prompt { margin-top: 0.25rem; overflow-wrap: anywhere; }
       .status { font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 999px; background: rgba(128,128,128,0.16); }
-      .status.working, .status.waiting { background: rgba(60,130,220,0.18); }
+      .status.working { background: rgba(60,130,220,0.18); }
       .status.completed { background: rgba(58,166,106,0.18); }
       .status.failed, .status.killed { background: rgba(200,60,60,0.16); }
       .error { margin: 0.75rem 0; padding: 0.6rem 0.8rem; border-radius: 6px; background: rgba(200,60,60,0.14); font-size: 0.88rem; }
@@ -270,7 +265,10 @@ function row(session: Session): string {
     session.status === "queued" && session.queuePosition !== undefined
       ? `<span class="queue">#${session.queuePosition} in queue</span>`
       : "";
-  const caller = session.caller ? `<span class="caller">${escapeHtml(session.caller)}</span>` : "";
+  const killedBy =
+    session.status === "killed" && session.killCaller !== undefined
+      ? `<span class="killed-by dim">killed by ${escapeHtml(session.killCaller)}</span>`
+      : "";
   return `
     <li data-id="${escapeHtml(session.id)}">
       <div class="meta">
@@ -278,7 +276,9 @@ function row(session: Session): string {
         ${queued}
         <span class="id" title="${escapeHtml(session.id)}">${escapeHtml(session.id.slice(0, 8))}</span>
         <span class="provider dim">${escapeHtml(session.provider)}</span>
-        ${caller}
+        <span class="model dim">${escapeHtml(session.model)}</span>
+        <span class="caller">${escapeHtml(session.caller)}</span>
+        ${killedBy}
         <time class="dim" datetime="${escapeHtml(session.createdAt)}">${escapeHtml(formatTime(session.createdAt))}</time>
       </div>
       <div class="prompt">${escapeHtml(truncate(session.prompt, PROMPT_PREVIEW))}</div>

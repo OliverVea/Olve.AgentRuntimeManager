@@ -9,7 +9,10 @@ namespace Olve.AgentRuntimeManager.ApiTests;
 public static class Wire
 {
     /// <summary>The API's JSON conventions (camelCase), for reading nested event data.</summary>
-    public static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+    public static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
 
     public static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
@@ -17,7 +20,10 @@ public static class Wire
         new(System.Text.Json.JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
 
     /// <summary>POST /api/sessions; fails unless the session was created (201 or 202).</summary>
-    public static async Task<SessionBody> CreateSessionAsync(this HttpClient client, object body)
+    public static Task<SessionBody> CreateSessionAsync(this HttpClient client, string prompt, string caller = "api-tests", int? timeoutSeconds = null) =>
+        client.CreateSessionAsync(new CreateSessionBody(prompt, caller, timeoutSeconds));
+
+    public static async Task<SessionBody> CreateSessionAsync(this HttpClient client, CreateSessionBody body)
     {
         using var response = await client.PostAsync("/api/sessions", JsonContent(body));
         response.EnsureSuccessStatusCode();
@@ -25,14 +31,14 @@ public static class Wire
     }
 
     /// <summary>A session whose (fake) agent runs until killed (or its timeout).</summary>
-    public static Task<SessionBody> CreateHangingSessionAsync(this HttpClient client, string? caller = null) =>
-        client.CreateSessionAsync(new { prompt = "Wait. fake:hang", caller });
+    public static Task<SessionBody> CreateHangingSessionAsync(this HttpClient client, string caller = "api-tests") =>
+        client.CreateSessionAsync("Wait. fake:hang", caller);
 
     public static async Task<SessionBody> GetSessionAsync(this HttpClient client, Guid id) =>
         (await client.GetFromJsonAsync<SessionBody>($"/api/sessions/{id}", JsonOptions))!;
 
-    public static async Task<HttpResponseMessage> KillSessionAsync(this HttpClient client, Guid id, string? reason = null) =>
-        await client.PostAsync($"/api/sessions/{id}/kill", JsonContent(new { reason }));
+    public static async Task<HttpResponseMessage> KillSessionAsync(this HttpClient client, Guid id, string? reason = null, string caller = "api-tests") =>
+        await client.PostAsync($"/api/sessions/{id}/kill", JsonContent(new { caller, reason }));
 
     /// <summary>Polls the session until <paramref name="condition"/> holds (agents end asynchronously).</summary>
     public static async Task<SessionBody> WaitForSessionAsync(this HttpClient client, Guid id, Func<SessionBody, bool> condition)

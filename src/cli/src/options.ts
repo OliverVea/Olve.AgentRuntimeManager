@@ -8,9 +8,13 @@ export function text(options: OptionValues, name: string): string | undefined {
   return typeof raw === "string" && raw !== "" ? raw : undefined;
 }
 
-/** A `true` boolean flag, else undefined (so unset flags are left out of request bodies). */
-export function flag(options: OptionValues, name: string): true | undefined {
-  return options[name] === true ? true : undefined;
+/** A required, non-empty string option (`--prompt`, `--caller`, …). */
+export function requiredText(options: OptionValues, name: string, short?: string): string {
+  const raw = options[name];
+  if (raw === undefined) throw new UsageError(`missing required option --${name}${short ? ` (-${short})` : ""}`);
+  const value = String(raw);
+  if (value === "") throw new UsageError(`--${name} must not be empty`);
+  return value;
 }
 
 /** An integer option within `[min, max]`. */
@@ -35,7 +39,7 @@ export function integer(
   return n;
 }
 
-/** A comma-separated list (`--tools a,b`); blanks are dropped, and an empty list is unset. */
+/** A comma-separated list (`--event a,b`); blanks are dropped, and an empty list is unset. */
 export function commaList(options: OptionValues, name: string): string[] | undefined {
   const raw = options[name];
   if (raw === undefined) return undefined;
@@ -44,30 +48,6 @@ export function commaList(options: OptionValues, name: string): string[] | undef
     .map((s) => s.trim())
     .filter(Boolean);
   return entries.length ? entries : undefined;
-}
-
-/**
- * A repeatable `KEY<sep>VALUE` option (`--tag team:infra`, `--env K=V`) as a map, split at the
- * first separator. The key must be non-empty; the value may be empty; a key given twice is an error.
- */
-export function pairs(
-  options: OptionValues,
-  name: string,
-  separator: ":" | "=",
-): Record<string, string> | undefined {
-  const raw = options[name];
-  if (raw === undefined) return undefined;
-  const entries = Array.isArray(raw) ? raw : [String(raw)];
-  const format = separator === ":" ? "key:value" : "KEY=VALUE";
-  const result: Record<string, string> = {};
-  for (const entry of entries) {
-    const at = entry.indexOf(separator);
-    if (at <= 0) throw new UsageError(`--${name} must be ${format}, got '${entry}'`);
-    const key = entry.slice(0, at);
-    if (Object.hasOwn(result, key)) throw new UsageError(`--${name} '${key}' is given more than once`);
-    result[key] = entry.slice(at + 1);
-  }
-  return entries.length ? result : undefined;
 }
 
 /** A date or date-time (`2026-09-01`, `2026-09-01T12:00:00Z`), sent as an ISO 8601 UTC timestamp. */

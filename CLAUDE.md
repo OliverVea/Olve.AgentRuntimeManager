@@ -5,7 +5,7 @@ See [README.md](README.md) for project structure, endpoints, configuration, CI e
 ## Layout
 
 `src/backend/` (.NET solution root — run `dotnet` commands there), `src/frontend/` (SPA),
-`src/spec/main.tsp` (API contract, TypeSpec), `src/codegen/typespec-arm-csharp/` (our emitter:
+`src/spec/` (API contract, TypeSpec: `main.tsp` imports one file per area), `src/codegen/typespec-arm-csharp/` (our emitter:
 contract → C# backend surface), `src/deploy/vm/` (VM deployment). `Dockerfile` + `.pipelines/`
 stay at the repo root (the root is the image build context). Generated output (OpenAPI documents,
 clients, the generated backend C#) goes to the gitignored `artifacts/`, never into source folders.
@@ -30,7 +30,7 @@ Docker image; needs Docker).
 - .NET 10, C# with file-scoped namespaces, nullable enabled, implicit usings
 - Package versions managed centrally in `Directory.Packages.props` — do not add `Version` attributes in csproj files
 - Local config via `dotnet user-secrets`, not appsettings files
-- The contract is `src/spec/main.tsp`; OpenAPI, clients and the backend surface (our TypeSpec emitter, M2, `docs/SPEC-FIRST.md`) are build artifacts
+- The contract is `src/spec/` (entry point `main.tsp`, one file per area); OpenAPI, clients and the backend surface (our TypeSpec emitter, M2, `docs/SPEC-FIRST.md`) are build artifacts
 - Contract conformance (routes, response schemas, declared statuses) is the generator's responsibility, tested once in `src/codegen/typespec-arm-csharp/test/conformance/`; service tests (`Olve.AgentRuntimeManager.ApiTests`) are plain behaviour tests
 - No C# client: backend tests use raw HTTP; the `arm` CLI (src/cli) is hand-written TypeScript on the generated Hey API client
 

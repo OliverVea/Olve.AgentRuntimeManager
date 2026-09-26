@@ -141,15 +141,12 @@ export function formatEvent(e: ReceivedEvent): string {
       return `${head} ${data.sessionId} position=${data.position}`;
     case "session.started":
       return `${head} ${data.sessionId} providerSessionId=${data.providerSessionId}`;
-    case "session.waiting":
-    case "session.resumed":
-      return `${head} ${data.sessionId}`;
     case "session.completed":
       return `${head} ${data.sessionId} exitCode=${data.exitCode}${data.summary ? ` ${JSON.stringify(truncate(data.summary, 60))}` : ""}`;
     case "session.failed":
       return `${head} ${data.sessionId} ${JSON.stringify(truncate(data.error, 60))}`;
     case "session.killed":
-      return `${head} ${data.sessionId} source=${data.source}${data.reason ? ` ${JSON.stringify(truncate(data.reason, 60))}` : ""}`;
+      return `${head} ${data.sessionId} source=${data.source}${data.caller ? ` caller=${data.caller}` : ""}${data.reason ? ` ${JSON.stringify(truncate(data.reason, 60))}` : ""}`;
     default: {
       // An event this CLI doesn't know yet: its name and the rest of its data.
       const { type, at, ...rest } = data as { type?: string; at?: string };

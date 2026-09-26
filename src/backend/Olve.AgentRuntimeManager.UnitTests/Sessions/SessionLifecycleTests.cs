@@ -5,17 +5,13 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
 public class SessionLifecycleTests
 {
-    // SPEC §Sessions: queued → working → completed; working ⇄ waiting; queued|working|waiting → killed;
-    // queued|working → failed.
+    // queued → working → completed; queued|working → killed; queued|working → failed.
     private static readonly HashSet<(SessionStatus, SessionStatus)> Allowed =
     [
         (SessionStatus.Queued, SessionStatus.Working),
         (SessionStatus.Working, SessionStatus.Completed),
-        (SessionStatus.Working, SessionStatus.Waiting),
-        (SessionStatus.Waiting, SessionStatus.Working),
         (SessionStatus.Queued, SessionStatus.Killed),
         (SessionStatus.Working, SessionStatus.Killed),
-        (SessionStatus.Waiting, SessionStatus.Killed),
         (SessionStatus.Queued, SessionStatus.Failed),
         (SessionStatus.Working, SessionStatus.Failed),
     ];
@@ -36,7 +32,6 @@ public class SessionLifecycleTests
     [Arguments(SessionStatus.Failed, true)]
     [Arguments(SessionStatus.Queued, false)]
     [Arguments(SessionStatus.Working, false)]
-    [Arguments(SessionStatus.Waiting, false)]
     public async Task IsTerminal_IsCompletedKilledOrFailed(SessionStatus status, bool terminal) =>
         await Assert.That(SessionLifecycle.IsTerminal(status)).IsEqualTo(terminal);
 

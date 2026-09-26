@@ -52,10 +52,9 @@ public sealed class SessionManager : IDisposable
     /// </summary>
     public CreateOutcome Create(CreateSession request)
     {
-        var providerName = request.Provider ?? _options.DefaultProvider;
-        if (!_providers.ContainsKey(providerName))
+        if (!_providers.ContainsKey(request.Provider))
         {
-            return new CreateOutcome.UnknownProvider(providerName, Providers);
+            return new CreateOutcome.UnknownProvider(request.Provider, Providers);
         }
 
         lock (_gate)
@@ -71,20 +70,10 @@ public sealed class SessionManager : IDisposable
                 Id = Guid.NewGuid(),
                 Status = SessionStatus.Queued,
                 Prompt = request.Prompt,
-                Provider = providerName,
+                Provider = request.Provider,
                 Model = request.Model,
-                Effort = request.Effort,
-                SystemPrompt = request.SystemPrompt,
                 Caller = request.Caller,
-                Tags = request.Tags ?? new Dictionary<string, string>(),
-                Env = request.Env ?? new Dictionary<string, string>(),
-                SecretEnv = request.SecretEnv ?? new Dictionary<string, string>(),
                 TimeoutSeconds = request.TimeoutSeconds ?? _options.DefaultTimeoutSeconds,
-                ApprovalPolicy = request.ApprovalPolicy,
-                Tools = request.Tools ?? [],
-                Skills = request.Skills ?? [],
-                Messaging = request.Messaging ?? true,
-                Headless = request.Headless ?? false,
                 CreatedAt = _time.GetUtcNow(),
             };
             _sessions[session.Id] = session;
@@ -123,10 +112,8 @@ public sealed class SessionManager : IDisposable
         var matches = all
             .Where(s => search.Status is not { } status || s.Status == status)
             .Where(s => search.Caller is not { } caller || s.Caller == caller)
-            .Where(s => search.Tags is not { } tags || tags.All(t => s.Tags.TryGetValue(t.Key, out var v) && v == t.Value))
             .Where(s => search.CreatedAfter is not { } after || s.CreatedAt > after)
             .Where(s => search.CreatedBefore is not { } before || s.CreatedAt < before)
-            .Where(s => search.Text is not { } text || s.Prompt.Contains(text, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(s => s.CreatedAt)
             .ThenBy(s => s.Id)
             .ToList();
@@ -135,10 +122,10 @@ public sealed class SessionManager : IDisposable
     }
 
     /// <summary>
-    /// Kills a queued, working or waiting session (<c>session.killed</c>) and starts the next
-    /// queued one in its slot.
+    /// Kills a queued or working session (<c>session.killed</c>) and starts the next queued one in
+    /// its slot. <paramref name="caller"/> is who asked, for kills by a user.
     /// </summary>
-    public KillOutcome Kill(Guid id, string? reason, KillSource source)
+    public KillOutcome Kill(Guid id, string? reason, KillSource source, string? caller = null)
     {
         IAgentRun? run = null;
         KillOutcome outcome;
@@ -173,9 +160,13 @@ public sealed class SessionManager : IDisposable
                 EndedAt = now,
                 KillReason = reason,
                 KillSource = source,
+                KillCaller = caller,
             };
             _sessions[id] = killed;
-            _events.Publish(new SessionKilled { At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source });
+            _events.Publish(new SessionKilled
+            {
+                At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller,
+            });
             StartNextLocked();
             outcome = new KillOutcome.Killed(_sessions[id]);
         }
@@ -223,8 +214,7 @@ public sealed class SessionManager : IDisposable
         IAgentRun run;
         try
         {
-            run = _providers[session.Provider].Start(new AgentLaunch(
-                session.Id, session.Prompt, session.Model, session.Effort, session.SystemPrompt, session.Env));
+            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model));
         }
         catch (Exception exception)
         {

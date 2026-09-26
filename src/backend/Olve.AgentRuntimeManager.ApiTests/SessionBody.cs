@@ -7,14 +7,9 @@ public sealed record SessionBody(
     int? QueuePosition,
     string Prompt,
     string Provider,
-    string? Caller,
-    Dictionary<string, string> Tags,
-    Dictionary<string, string> Env,
+    string Model,
+    string Caller,
     int TimeoutSeconds,
-    List<string> Tools,
-    List<string> Skills,
-    bool Messaging,
-    bool Headless,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt,
@@ -23,4 +18,5 @@ public sealed record SessionBody(
     string? Summary,
     string? Error,
     string? KillReason,
-    string? KillSource);
+    string? KillSource,
+    string? KillCaller);

@@ -9,14 +9,11 @@ single self-contained binary with `bun build --compile`.
 ```
 arm <group> <command> [arguments] [options]
 
-arm session create -p|--prompt TEXT [--provider X] [--model X] [--effort X] [--system-prompt TEXT]
-                   [--caller X] [--tag K:V]… [--timeout-seconds N] [--headless]
-                   [--messaging|--no-messaging] [--env K=V]… [--secret-env K=V]… [--policy X]
-                   [--tools T1,T2] [--skills S1,S2] [--idempotency-key KEY]
-arm session list [--status X] [--caller X] [--tag K:V]… [--after DATE] [--before DATE] [--text X]
-                 [--limit N] [--offset N]
+arm session create -p|--prompt TEXT --provider X --model X --caller X [--timeout-seconds N]
+                   [--idempotency-key KEY]
+arm session list [--status X] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
-arm session kill <id> [--reason TEXT]
+arm session kill <id> --caller X [--reason TEXT]
 arm session delete <id>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
@@ -34,12 +31,12 @@ Global options (any position):
 | `--json` | | | Print the raw API JSON |
 | `--pretty` | | on | Human-readable: a table for lists, key/value for objects |
 
-Precedence is flag, then env, then default. Options marked `…` repeat (`--tag team:infra --tag
-env:beta`); `--tools`/`--skills` are comma lists. A value starting with a dash needs the `=` form:
+Precedence is flag, then env, then default. A value starting with a dash needs the `=` form:
 `arm session create --prompt="-5 degrees"`. `--after`/`--before` take a date or date-time
-(`2026-09-01`, `2026-09-01T12:00:00Z`); a bare date is midnight UTC. Malformed values (`--tag`
-without `:`, `--env` without `=`, an unknown `--status`, `--limit` outside 1–100, …) are usage
-errors before any request is sent.
+(`2026-09-01`, `2026-09-01T12:00:00Z`); a bare date is midnight UTC. A missing or empty required
+option (`--prompt`, `--provider`, `--model`, `--caller` on create; `--caller` on kill) and malformed
+values (an unknown `--status`, `--limit` outside 1–100, …) are usage errors before any request is
+sent.
 
 `arm session create` prints `Started session <id>.` when the session got a slot (201) and
 `Queued session <id> at position N.` when it is waiting for one (202); with `--json` it prints the
@@ -48,7 +45,8 @@ first; its footer says which matches are shown and the `--offset` of the next pa
 
 `arm events` tails `GET /api/events` (Hey API's SSE client) until Ctrl+C, which exits `0`. By
 default it prints one line per event (`12:03:04 session.created <sessionId> "prompt"`, local
-time; heartbeats hidden); with `--json` it prints NDJSON, one `{"event","id","data"}` object per
+time; heartbeats hidden; `session.killed` shows `source=`, `caller=` when a user killed it, and
+the reason); with `--json` it prints NDJSON, one `{"event","id","data"}` object per
 line (heartbeats included, without an `id`), e.g. `arm events --json | jq .data`. Filters are
 enforced by the server (`session.*` matches a namespace; an unknown name is a 400, exit 1). A
 dropped connection is retried with backoff; a stream the server ends (e.g. a redeploy) is

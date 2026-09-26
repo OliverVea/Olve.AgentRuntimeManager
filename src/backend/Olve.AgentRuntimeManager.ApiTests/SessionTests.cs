@@ -17,17 +17,11 @@ public class SessionTests(ApiTarget target)
     private static bool Ended(SessionBody session) => session.Status is "completed" or "failed" or "killed";
 
     [Test]
-    public async Task Create_WithAFreeSlot_Is201_AndResolvesDefaults()
+    public async Task Create_WithAFreeSlot_Is201()
     {
         var client = target.CreateAuthenticatedClient();
 
-        using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(new
-        {
-            prompt = "Wait. fake:hang",
-            tags = new Dictionary<string, string> { ["team"] = "arm" },
-            env = new Dictionary<string, string> { ["A"] = "1" },
-            secretEnv = new Dictionary<string, string> { ["TOKEN"] = "hunter2" },
-        }));
+        using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("Wait. fake:hang", "creator") { Model = "fake-large" }));
         var session = (await response.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
         await client.KillSessionAsync(session.Id);
 
@@ -35,41 +29,18 @@ public class SessionTests(ApiTarget target)
         await Assert.That(session.Status).IsEqualTo("working");
         await Assert.That(session.QueuePosition).IsNull();
         await Assert.That(session.Provider).IsEqualTo("fake");
-        await Assert.That(session.Messaging).IsTrue();
-        await Assert.That(session.Headless).IsFalse();
+        await Assert.That(session.Model).IsEqualTo("fake-large");
+        await Assert.That(session.Caller).IsEqualTo("creator");
         await Assert.That(session.TimeoutSeconds).IsGreaterThan(0);
-        await Assert.That(session.Tags).IsEquivalentTo(new Dictionary<string, string> { ["team"] = "arm" });
-        await Assert.That(session.Env).IsEquivalentTo(new Dictionary<string, string> { ["A"] = "1" });
         await Assert.That(session.StartedAt).IsNotNull();
         await Assert.That(session.ProviderSessionId).IsNotNull();
-    }
-
-    [Test]
-    public async Task SecretEnv_IsNeverReturned()
-    {
-        var client = target.CreateAuthenticatedClient();
-        using var created = await client.PostAsync("/api/sessions", Wire.JsonContent(new { prompt = "fake:hang", secretEnv = new Dictionary<string, string> { ["TOKEN"] = "hunter2" } }));
-        var session = (await created.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!;
-
-        var bodies = new[]
-        {
-            await created.Content.ReadAsStringAsync(),
-            await client.GetStringAsync($"/api/sessions/{session.Id}"),
-            await (await client.KillSessionAsync(session.Id)).Content.ReadAsStringAsync(),
-        };
-
-        foreach (var body in bodies)
-        {
-            await Assert.That(body).DoesNotContain("hunter2");
-            await Assert.That(body).DoesNotContain("secretEnv");
-        }
     }
 
     [Test]
     public async Task Session_RunsToCompletion()
     {
         var client = target.CreateAuthenticatedClient();
-        var session = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms fake:exit=3 fake:summary=all_done" });
+        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=3 fake:summary=all_done");
 
         var completed = await client.WaitForSessionAsync(session.Id, Ended);
 
@@ -83,7 +54,7 @@ public class SessionTests(ApiTarget target)
     public async Task Session_WhoseAgentFails_Fails()
     {
         var client = target.CreateAuthenticatedClient();
-        var session = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms fake:fail=out_of_tokens" });
+        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:fail=out_of_tokens");
 
         var failed = await client.WaitForSessionAsync(session.Id, Ended);
 
@@ -95,7 +66,7 @@ public class SessionTests(ApiTarget target)
     public async Task Session_PastItsTimeout_IsKilled()
     {
         var client = target.CreateAuthenticatedClient();
-        var session = await client.CreateSessionAsync(new { prompt = "fake:hang", timeoutSeconds = 1 });
+        var session = await client.CreateSessionAsync("fake:hang", timeoutSeconds: 1);
 
         var killed = await client.WaitForSessionAsync(session.Id, Ended);
 
@@ -104,10 +75,12 @@ public class SessionTests(ApiTarget target)
     }
 
     [Test]
-    [Arguments("""{"prompt":""}""", "'prompt' must be at least 1 character.")]
-    [Arguments("""{"prompt":"   "}""", "'prompt' cannot be blank.")]
-    [Arguments("""{"prompt":"x","timeoutSeconds":0}""", "'timeoutSeconds' must be at least 1.")]
-    [Arguments("""{"text":"x"}""", null)]
+    [Arguments("""{"prompt":"","provider":"fake","model":"fake","caller":"c"}""", "'prompt' must be at least 1 character.")]
+    [Arguments("""{"prompt":"   ","provider":"fake","model":"fake","caller":"c"}""", "'prompt' cannot be blank.")]
+    [Arguments("""{"prompt":"x","provider":"fake","model":"fake","caller":"c","timeoutSeconds":0}""", "'timeoutSeconds' must be at least 1.")]
+    [Arguments("""{"prompt":"x","provider":"fake","model":"fake","caller":""}""", "'caller' must be at least 1 character.")]
+    [Arguments("""{"prompt":"x","provider":"fake","caller":"c"}""", null)]
+    [Arguments("""{"prompt":"x","model":"fake","caller":"c"}""", null)]
     [Arguments("""{""", null)]
     public async Task Create_WithAnInvalidBody_Is400(string body, string? message)
     {
@@ -125,7 +98,7 @@ public class SessionTests(ApiTarget target)
     [Test]
     public async Task Create_WithAnUnknownProvider_Is400()
     {
-        using var response = await target.CreateAuthenticatedClient().PostAsync("/api/sessions", Wire.JsonContent(new { prompt = "x", provider = "nope" }));
+        using var response = await target.CreateAuthenticatedClient().PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("x") { Provider = "nope" }));
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         await Assert.That((await response.ErrorAsync()).Code).IsEqualTo("UNKNOWN_PROVIDER");
@@ -136,7 +109,7 @@ public class SessionTests(ApiTarget target)
     {
         var client = target.CreateAuthenticatedClient();
 
-        var session = await client.CreateSessionAsync(new { prompt = "fake:explode" });
+        var session = await client.CreateSessionAsync("fake:explode");
 
         await Assert.That(session.Status).IsEqualTo("failed");
         await Assert.That(session.Error).Contains("fake:explode");
@@ -151,7 +124,7 @@ public class SessionTests(ApiTarget target)
 
         async Task<(HttpStatusCode, SessionBody)> Create()
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/sessions") { Content = Wire.JsonContent(new { prompt = "fake:sleep=0ms", caller }) };
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/sessions") { Content = Wire.JsonContent(new CreateSessionBody("fake:sleep=0ms", caller)) };
             request.Headers.Add("Idempotency-Key", key);
             using var response = await client.SendAsync(request);
             return (response.StatusCode, (await response.Content.ReadFromJsonAsync<SessionBody>(Wire.JsonOptions))!);
@@ -196,7 +169,7 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
         var session = await client.CreateHangingSessionAsync();
 
-        using var first = await client.KillSessionAsync(session.Id, "enough");
+        using var first = await client.KillSessionAsync(session.Id, "enough", caller: "killer");
         using var second = await client.KillSessionAsync(session.Id, "again");
 
         await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
@@ -204,6 +177,7 @@ public class SessionTests(ApiTarget target)
         await Assert.That(killed.Status).IsEqualTo("killed");
         await Assert.That(killed.KillReason).IsEqualTo("enough");
         await Assert.That(killed.KillSource).IsEqualTo("user");
+        await Assert.That(killed.KillCaller).IsEqualTo("killer");
         await Assert.That(second.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
         await Assert.That((await second.ErrorAsync()).Code).IsEqualTo("SESSION_ALREADY_ENDED");
         await Assert.That((await client.GetSessionAsync(session.Id)).KillReason).IsEqualTo("enough");
@@ -237,22 +211,21 @@ public class SessionTests(ApiTarget target)
     }
 
     [Test]
-    public async Task Search_FiltersAndPages_NewestFirst()
+    public async Task Search_FiltersByCallerAndPages_NewestFirst()
     {
         var client = target.CreateAuthenticatedClient();
         var caller = UniqueCaller();
-        var first = await client.CreateSessionAsync(new { prompt = "Deploy it fake:sleep=0ms", caller, tags = new { team = "a" } });
-        var second = await client.CreateSessionAsync(new { prompt = "deploy again fake:sleep=0ms", caller, tags = new { team = "a" } });
-        await client.CreateSessionAsync(new { prompt = "unrelated fake:sleep=0ms", caller, tags = new { team = "b" } });
+        var first = await client.CreateSessionAsync("fake:sleep=0ms", caller);
+        var second = await client.CreateSessionAsync("fake:sleep=0ms", caller);
+        await client.CreateSessionAsync("fake:sleep=0ms", UniqueCaller());
 
-        var page = await Search(client, new { caller, tags = new { team = "a" }, text = "DEPLOY", limit = 1 });
-        var next = await Search(client, new { caller, tags = new { team = "a" }, text = "DEPLOY", limit = 1, offset = 1 });
+        var page = await Search(client, new { caller, limit = 1 });
+        var next = await Search(client, new { caller, limit = 1, offset = 1 });
 
         await Assert.That(page.Total).IsEqualTo(2);
         await Assert.That(page.Limit).IsEqualTo(1);
         await Assert.That(page.Items.Single().Id).IsEqualTo(second.Id);
         await Assert.That(next.Items.Single().Id).IsEqualTo(first.Id);
-        await Assert.That((await Search(client, new { caller })).Total).IsEqualTo(3);
     }
 
     [Test]
@@ -261,7 +234,7 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
         var caller = UniqueCaller();
         var hanging = await client.CreateHangingSessionAsync(caller);
-        var done = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms", caller });
+        var done = await client.CreateSessionAsync("fake:sleep=0ms", caller);
         await client.WaitForSessionAsync(done.Id, s => s.Status == "completed");
 
         var working = await Search(client, new { caller, status = "working" });

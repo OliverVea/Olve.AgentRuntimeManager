@@ -37,7 +37,7 @@ src/
 ├── cli/                                        # `arm` CLI (TypeScript on the generated client; see src/cli/README.md)
 ├── codegen/typespec-arm-csharp/                # Our TypeSpec emitter: contract → C# backend surface
 │   └── test/                                   # Snapshot tests + conformance/ (the generator's contract-conformance suite, .NET)
-├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
+├── spec/                                       # API contract (TypeSpec): main.tsp + one file per area — see docs/SPEC-FIRST.md
 └── deploy/
     └── vm/                                     # VM deployment: vm-deploy.sh (run on the host), systemd unit, cloud-init, env
 .pipelines/                                     # Olve.Pipelines CD config (build, test, deploy beta→prod)
@@ -58,7 +58,7 @@ artifacts/                                      # Everything generated (gitignor
 | POST | `/api/sessions` | Yes (JWT) | Create a session: 201 started, 202 queued (`queuePosition`), 503 queue full; `Idempotency-Key` honoured |
 | POST | `/api/sessions/search` | Yes (JWT) | Search sessions (filters in the body), newest first |
 | GET | `/api/sessions/{id}` | Yes (JWT) | Get a session |
-| POST | `/api/sessions/{id}/kill` | Yes (JWT) | Kill a queued/working/waiting session (`{ "reason": "…" }`); 409 if it already ended |
+| POST | `/api/sessions/{id}/kill` | Yes (JWT) | Kill a queued or working session (`{ "caller": "…", "reason": "…" }`); 409 if it already ended |
 | DELETE | `/api/sessions/{id}` | Yes (JWT) | Delete a session that has ended; 409 otherwise |
 | GET | `/api/events?event=<a,b>&exclude_event=<a,b>` | Yes (JWT) | Server-sent events: `session.created` / `.queued` / `.started` / `.completed` / `.failed` / `.killed` (…), heartbeats; `Last-Event-ID` replays missed events |
 | GET | `/openapi/v1.json` | No | OpenAPI spec |
@@ -204,7 +204,6 @@ Sources in priority order (highest wins):
 | `Sessions:TotalSlots` | `10` | Sessions that run at once; more are queued (202) |
 | `Sessions:MaxQueueSize` | `200` | Sessions that may wait for a slot; more are a 503 `QUEUE_FULL` |
 | `Sessions:DefaultTimeoutSeconds` | `600` | Timeout of a session without `timeoutSeconds` (then killed, source `timeout`) |
-| `Sessions:DefaultProvider` | `fake` | Provider of a session without `provider` |
 | `Sessions:IdempotencyWindow` | `1.00:00:00` | How long an `Idempotency-Key` replays its original response |
 | `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
 
@@ -222,7 +221,7 @@ handlers. The `Stores/` module is written at library quality for later promotion
 
 ## Client Generation
 
-The contract is `src/spec/main.tsp` (TypeSpec). Everything generated lives in the gitignored
+The contract is `src/spec/` (TypeSpec; `main.tsp` imports one file per area). Everything generated lives in the gitignored
 `artifacts/`, never in source folders:
 
 ```bash

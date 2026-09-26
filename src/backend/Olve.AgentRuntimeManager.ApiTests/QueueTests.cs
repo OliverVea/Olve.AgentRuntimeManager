@@ -25,9 +25,9 @@ public class QueueTests(SmallQueueFactory factory)
     {
         var client = Client();
 
-        using var first = await client.PostAsync("/api/sessions", Wire.JsonContent(new { prompt = "fake:hang" }));
-        using var second = await client.PostAsync("/api/sessions", Wire.JsonContent(new { prompt = "fake:hang" }));
-        using var third = await client.PostAsync("/api/sessions", Wire.JsonContent(new { prompt = "fake:hang" }));
+        using var first = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("fake:hang")));
+        using var second = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("fake:hang")));
+        using var third = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("fake:hang")));
 
         await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.Created);
         await Assert.That(second.StatusCode).IsEqualTo(HttpStatusCode.Accepted);

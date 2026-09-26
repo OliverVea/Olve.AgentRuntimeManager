@@ -50,10 +50,13 @@ describe("help and version", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("arm session kill <id> [options]");
     expect(r.stdout).toContain("--reason TEXT");
+    expect(r.stdout).toContain("--caller X");
     const create = await runCli(["session", "create", "-h"]);
     expect(create.stdout).toContain("-p, --prompt TEXT");
-    expect(create.stdout).toContain("--tag K:V");
-    expect(create.stdout).toContain("(repeatable)");
+    for (const option of ["--provider X", "--model X", "--caller X", "--timeout-seconds N", "--idempotency-key KEY"]) {
+      expect(create.stdout).toContain(option);
+    }
+    expect(create.stdout).not.toContain("--tag");
   });
 });
 

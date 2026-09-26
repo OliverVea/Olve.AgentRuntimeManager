@@ -10,13 +10,9 @@ const session = {
   status: "queued",
   prompt: "say \"hello\"",
   provider: "claude",
-  tags: {},
-  env: {},
+  model: "sonnet",
+  caller: "oribot",
   timeoutSeconds: 600,
-  tools: [],
-  skills: [],
-  messaging: true,
-  headless: false,
   createdAt: at,
 };
 
@@ -223,8 +219,6 @@ describe("formatEvent", () => {
   test("one line per session event", () => {
     const time = clock(at);
     expect(line({ type: "session.queued", position: 3 })).toBe(`${time} session.queued ${sessionId} position=3`);
-    expect(line({ type: "session.waiting", previous: "working" })).toBe(`${time} session.waiting ${sessionId}`);
-    expect(line({ type: "session.resumed", previous: "waiting" })).toBe(`${time} session.resumed ${sessionId}`);
     expect(line({ type: "session.completed", previous: "working", exitCode: 0, summary: "done" })).toBe(
       `${time} session.completed ${sessionId} exitCode=0 "done"`,
     );
@@ -233,6 +227,9 @@ describe("formatEvent", () => {
     );
     expect(line({ type: "session.killed", previous: "queued", source: "timeout" })).toBe(
       `${time} session.killed ${sessionId} source=timeout`,
+    );
+    expect(line({ type: "session.killed", previous: "working", source: "user", caller: "ci", reason: "stuck" })).toBe(
+      `${time} session.killed ${sessionId} source=user caller=ci "stuck"`,
     );
   });
 

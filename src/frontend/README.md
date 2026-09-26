@@ -176,7 +176,7 @@ src/spec/main.tsp ──tsp compile──► artifacts/spec/openapi.json ──H
   and every SSE (re)connect, so a long-lived stream always reconnects with a fresh token.
 - **Live updates.** `<session-list>` subscribes to `GET /api/events?event=session.*` via the
   generated `eventsStream`: `session.created` inserts the session, and the lifecycle events
-  (`queued`, `started`, `waiting`, `resumed`, `completed`, `failed`, `killed`) patch the row in
+  (`queued`, `started`, `completed`, `failed`, `killed`) patch the row in
   place. The SSE client retries on its own and sends `Last-Event-ID`, so a dropped connection
   replays what it missed.
 

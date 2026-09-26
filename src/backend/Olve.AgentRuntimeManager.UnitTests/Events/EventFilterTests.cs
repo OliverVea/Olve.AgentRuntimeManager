@@ -55,7 +55,6 @@ public class EventFilterTests
     [Test]
     public async Task FilterableTypes_AreTheContractsEventsButTheHeartbeat() =>
         await Assert.That(EventFilter.FilterableTypes).IsEquivalentTo([
-            "session.created", "session.queued", "session.started", "session.waiting", "session.resumed",
-            "session.completed", "session.failed", "session.killed",
+            "session.created", "session.queued", "session.started", "session.completed", "session.failed", "session.killed",
         ]);
 }

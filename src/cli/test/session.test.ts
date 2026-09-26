@@ -10,19 +10,14 @@ const session = {
   status: "working",
   prompt: "fix the flaky test",
   provider: "claude",
+  model: "sonnet",
   caller: "oribot",
-  tags: { team: "infra" },
-  env: { A: "1" },
   timeoutSeconds: 600,
-  tools: ["arm-approved-bash"],
-  skills: [],
-  messaging: true,
-  headless: false,
   createdAt,
 };
 const queued = { ...session, status: "queued", queuePosition: 3 };
 const page = {
-  items: [session, { ...session, id: "0b1c", status: "completed", caller: undefined, prompt: "second\nline" }],
+  items: [session, { ...session, id: "0b1c", status: "completed", caller: "ci", prompt: "second\nline" }],
   total: 5,
   limit: 2,
   offset: 0,
@@ -34,10 +29,14 @@ const errorBody = (code: string, message: string, problems?: Array<{ code: strin
 const cli = (argv: string[], f: ReturnType<typeof fakeFetch>) =>
   runCli([...argv, "--url", url, "--token", "tok"], { fetch: f.fetch });
 
+/** The required create options other than the prompt. */
+const required = ["--provider", "claude", "--model", "sonnet", "--caller", "oribot"];
+const requiredBody = { provider: "claude", model: "sonnet", caller: "oribot" };
+
 describe("session create", () => {
   test("201: POSTs the body with the bearer; prints 'Started' and the session", async () => {
     const f = fakeFetch(() => ({ status: 201, body: session }));
-    const r = await cli(["session", "create", "-p", "fix the flaky test"], f);
+    const r = await cli(["session", "create", "-p", "fix the flaky test", ...required], f);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
     const req = f.requests[0]!;
@@ -47,19 +46,18 @@ describe("session create", () => {
     expect(req.headers.get("content-type")).toContain("application/json");
     expect(req.headers.get("idempotency-key")).toBe(null);
     // Unset options are left out, so the server applies its defaults.
-    expect(req.body).toEqual({ prompt: "fix the flaky test" });
+    expect(req.body).toEqual({ prompt: "fix the flaky test", ...requiredBody });
     const lines = r.stdout.split("\n");
     expect(lines[0]).toBe(`Started session ${id}.`);
     expect(r.stdout).toContain(`id              ${id}`);
-    expect(r.stdout).toContain("tags            team:infra");
-    expect(r.stdout).toContain("env             A=1");
-    expect(r.stdout).toContain("tools           arm-approved-bash");
-    expect(r.stdout).not.toContain("skills");
+    expect(r.stdout).toContain("model           sonnet");
+    expect(r.stdout).toContain("caller          oribot");
+    expect(r.stdout).not.toContain("startedAt");
   });
 
   test("202: prints 'Queued' with the queue position", async () => {
     const f = fakeFetch(() => ({ status: 202, body: queued }));
-    const r = await cli(["session", "create", "--prompt", "x"], f);
+    const r = await cli(["session", "create", "--prompt", "x", ...required], f);
     expect(r.code).toBe(0);
     expect(r.stdout.split("\n")[0]).toBe(`Queued session ${id} at position 3.`);
     expect(r.stdout).toContain("queued (position 3)");
@@ -67,33 +65,21 @@ describe("session create", () => {
 
   test("--json prints the raw session for both 201 and 202", async () => {
     const f = fakeFetch(() => ({ status: 202, body: queued }));
-    const r = await cli(["session", "create", "-p", "x", "--json"], f);
+    const r = await cli(["session", "create", "-p", "x", ...required, "--json"], f);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout)).toEqual(queued);
   });
 
-  test("every option maps to the create body; repeatable options accumulate", async () => {
+  test("every option maps to the create body", async () => {
     const f = fakeFetch(() => ({ status: 201, body: session }));
     const r = await cli(
       [
         "session", "create",
         "-p", "do it",
-        "--provider", "claude",
-        "--model", "sonnet",
-        "--effort", "high",
-        "--system-prompt", "be brief",
+        "--provider", "fake",
+        "--model", "opus",
         "--caller", "ci",
-        "--tag", "team:infra",
-        "--tag", "url:http://x",
         "--timeout-seconds", "600",
-        "--headless",
-        "--no-messaging",
-        "--env", "A=1",
-        "--env", "B=x=y",
-        "--secret-env", "TOKEN=s3cret",
-        "--policy", "permissive",
-        "--tools", "arm-approved-bash, arm-file-ops",
-        "--skills", "git",
         "--idempotency-key", "k-1",
       ],
       f,
@@ -101,41 +87,19 @@ describe("session create", () => {
     expect(r.code).toBe(0);
     const req = f.requests[0]!;
     expect(req.headers.get("idempotency-key")).toBe("k-1");
-    expect(req.body).toEqual({
-      prompt: "do it",
-      provider: "claude",
-      model: "sonnet",
-      effort: "high",
-      systemPrompt: "be brief",
-      caller: "ci",
-      tags: { team: "infra", url: "http://x" },
-      env: { A: "1", B: "x=y" },
-      secretEnv: { TOKEN: "s3cret" },
-      timeoutSeconds: 600,
-      approvalPolicy: "permissive",
-      tools: ["arm-approved-bash", "arm-file-ops"],
-      skills: ["git"],
-      messaging: false,
-      headless: true,
-    });
-  });
-
-  test("--messaging sends messaging: true", async () => {
-    const f = fakeFetch(() => ({ status: 201, body: session }));
-    await cli(["session", "create", "-p", "x", "--messaging"], f);
-    expect(f.requests[0]!.body).toEqual({ prompt: "x", messaging: true });
+    expect(req.body).toEqual({ prompt: "do it", provider: "fake", model: "opus", caller: "ci", timeoutSeconds: 600 });
   });
 
   test("a prompt starting with a dash uses the --prompt=… form", async () => {
     const f = fakeFetch(() => ({ status: 201, body: session }));
-    const r = await cli(["session", "create", "--prompt=-5 degrees"], f);
+    const r = await cli(["session", "create", "--prompt=-5 degrees", ...required], f);
     expect(r.code).toBe(0);
-    expect(f.requests[0]!.body).toEqual({ prompt: "-5 degrees" });
+    expect(f.requests[0]!.body).toEqual({ prompt: "-5 degrees", ...requiredBody });
   });
 
   test("503 (queue full) exits 5 with the envelope's code and message", async () => {
     const f = fakeFetch(() => ({ status: 503, body: errorBody("QUEUE_FULL", "The session queue is full.") }));
-    const r = await cli(["session", "create", "-p", "x"], f);
+    const r = await cli(["session", "create", "-p", "x", ...required], f);
     expect(r.code).toBe(5);
     expect(r.stdout).toBe("");
     expect(r.stderr).toBe("error: 503 Service Unavailable: QUEUE_FULL: The session queue is full.");
@@ -147,7 +111,7 @@ describe("session create", () => {
       { code: "TIMEOUT_TOO_SMALL", message: "timeoutSeconds must be at least 1" },
     ]);
     const f = fakeFetch(() => ({ status: 400, body }));
-    const r = await cli(["session", "create", "-p", "x"], f);
+    const r = await cli(["session", "create", "-p", "x", ...required], f);
     expect(r.code).toBe(1);
     expect(r.stderr).toBe(
       [
@@ -156,23 +120,23 @@ describe("session create", () => {
         "  - TIMEOUT_TOO_SMALL: timeoutSeconds must be at least 1",
       ].join("\n"),
     );
-    const j = await cli(["session", "create", "-p", "x", "--json"], f);
+    const j = await cli(["session", "create", "-p", "x", ...required, "--json"], f);
     expect(JSON.parse(j.stderr)).toEqual(body);
   });
 
   test("a single problem is not repeated under the message", async () => {
     const body = errorBody("INVALID_REQUEST", "prompt is required", [{ code: "PROMPT_REQUIRED", message: "prompt is required" }]);
     const f = fakeFetch(() => ({ status: 400, body }));
-    const r = await cli(["session", "create", "-p", "x"], f);
+    const r = await cli(["session", "create", "-p", "x", ...required], f);
     expect(r.stderr).toBe("error: 400 Bad Request: INVALID_REQUEST: prompt is required");
   });
 
   test("401 with an empty body: status line, and an HTTP_401 envelope with --json", async () => {
     const f = fakeFetch(() => ({ status: 401 }));
-    const r = await cli(["session", "create", "-p", "x"], f);
+    const r = await cli(["session", "create", "-p", "x", ...required], f);
     expect(r.code).toBe(1);
     expect(r.stderr).toBe("error: 401 Unauthorized");
-    const j = await cli(["session", "create", "-p", "x", "--json"], f);
+    const j = await cli(["session", "create", "-p", "x", ...required, "--json"], f);
     expect(j.code).toBe(1);
     expect(JSON.parse(j.stderr)).toEqual({
       error: { code: "HTTP_401", message: "401 Unauthorized", details: { status: 401 } },
@@ -188,11 +152,8 @@ describe("session list", () => {
         "session", "list",
         "--status", "working",
         "--caller", "oribot",
-        "--tag", "team:infra",
-        "--tag", "env:",
         "--after", "2026-09-01",
         "--before", "2026-09-02T10:00:00+02:00",
-        "--text", "flaky",
         "--limit", "2",
         "--offset", "0",
       ],
@@ -205,10 +166,8 @@ describe("session list", () => {
     expect(req.body).toEqual({
       status: "working",
       caller: "oribot",
-      tags: { team: "infra", env: "" },
       createdAfter: "2026-09-01T00:00:00.000Z",
       createdBefore: "2026-09-02T08:00:00.000Z",
-      text: "flaky",
       limit: 2,
       offset: 0,
     });
@@ -217,7 +176,7 @@ describe("session list", () => {
       [
         `ID                                    STATUS     PROVIDER  CALLER  CREATED${" ".repeat(created.length - 7)}  PROMPT`,
         `${id}  working    claude    oribot  ${created}  fix the flaky test`,
-        `0b1c                                  completed  claude            ${created}  second line`,
+        `0b1c                                  completed  claude    ci      ${created}  second line`,
         "",
         "Showing 1–2 of 5 sessions · next: --offset 2",
       ].join("\n"),
@@ -277,29 +236,30 @@ describe("session get", () => {
 });
 
 describe("session kill", () => {
-  test("POSTs {reason} to /kill", async () => {
-    const killed = { ...session, status: "killed", killReason: "stuck", killSource: "user" };
+  test("POSTs {caller, reason} to /kill; prints the killer", async () => {
+    const killed = { ...session, status: "killed", killReason: "stuck", killSource: "user", killCaller: "ci" };
     const f = fakeFetch(() => ({ body: killed }));
-    const r = await cli(["session", "kill", id, "--reason", "stuck"], f);
+    const r = await cli(["session", "kill", id, "--caller", "ci", "--reason", "stuck"], f);
     expect(r.code).toBe(0);
     const req = f.requests[0]!;
     expect(req.method).toBe("POST");
     expect(req.url).toBe(`${url}/api/sessions/${id}/kill`);
-    expect(req.body).toEqual({ reason: "stuck" });
+    expect(req.body).toEqual({ caller: "ci", reason: "stuck" });
     expect(r.stdout.split("\n")[0]).toBe(`Killed session ${id}.`);
     expect(r.stdout).toContain("killSource      user");
+    expect(r.stdout).toContain("killCaller      ci");
   });
 
-  test("without --reason it still sends a JSON body, {}", async () => {
+  test("without --reason it sends just the caller", async () => {
     const f = fakeFetch(() => ({ body: { ...session, status: "killed" } }));
-    await cli(["session", "kill", id], f);
-    expect(f.requests[0]!.body).toEqual({});
+    await cli(["session", "kill", id, "--caller", "ci"], f);
+    expect(f.requests[0]!.body).toEqual({ caller: "ci" });
     expect(f.requests[0]!.headers.get("content-type")).toContain("application/json");
   });
 
   test("409 (already ended) exits 4", async () => {
     const f = fakeFetch(() => ({ status: 409, body: errorBody("SESSION_ALREADY_ENDED", "The session has already ended.") }));
-    const r = await cli(["session", "kill", id], f);
+    const r = await cli(["session", "kill", id, "--caller", "ci"], f);
     expect(r.code).toBe(4);
     expect(r.stderr).toBe("error: 409 Conflict: SESSION_ALREADY_ENDED: The session has already ended.");
   });
@@ -326,20 +286,24 @@ describe("session delete", () => {
 
 describe("session usage errors exit 2 without a request", () => {
   const cases: Array<[string, string[], string]> = [
-    ["missing prompt", ["session", "create"], "missing required option --prompt"],
-    ["empty prompt", ["session", "create", "-p", ""], "--prompt must not be empty"],
-    ["tag without a colon", ["session", "create", "-p", "x", "--tag", "team"], "--tag must be key:value, got 'team'"],
-    ["tag with an empty key", ["session", "list", "--tag", ":x"], "--tag must be key:value"],
-    ["duplicate tag", ["session", "create", "-p", "x", "--tag", "a:1", "--tag", "a:2"], "--tag 'a' is given more than once"],
-    ["env without =", ["session", "create", "-p", "x", "--env", "A"], "--env must be KEY=VALUE, got 'A'"],
-    ["secret-env without =", ["session", "create", "-p", "x", "--secret-env", "=v"], "--secret-env must be KEY=VALUE"],
-    ["zero timeout", ["session", "create", "-p", "x", "--timeout-seconds", "0"], "--timeout-seconds must be a positive integer"],
-    ["both messaging flags", ["session", "create", "-p", "x", "--messaging", "--no-messaging"], "mutually exclusive"],
-    ["unknown status", ["session", "list", "--status", "running"], "--status must be one of queued, working, waiting, completed, killed, failed"],
+    ["missing prompt", ["session", "create", ...required], "missing required option --prompt (-p)"],
+    ["empty prompt", ["session", "create", "-p", "", ...required], "--prompt must not be empty"],
+    ["missing provider", ["session", "create", "-p", "x", "--model", "m", "--caller", "c"], "missing required option --provider"],
+    ["empty provider", ["session", "create", "-p", "x", ...required, "--provider="], "--provider must not be empty"],
+    ["missing model", ["session", "create", "-p", "x", "--provider", "p", "--caller", "c"], "missing required option --model"],
+    ["empty model", ["session", "create", "-p", "x", ...required, "--model="], "--model must not be empty"],
+    ["missing caller", ["session", "create", "-p", "x", "--provider", "p", "--model", "m"], "missing required option --caller"],
+    ["empty caller", ["session", "create", "-p", "x", ...required, "--caller="], "--caller must not be empty"],
+    ["zero timeout", ["session", "create", "-p", "x", ...required, "--timeout-seconds", "0"], "--timeout-seconds must be a positive integer"],
+    ["removed option", ["session", "create", "-p", "x", ...required, "--tag", "a:1"], "--tag"],
+    ["unknown status", ["session", "list", "--status", "running"], "--status must be one of queued, working, completed, killed, failed"],
     ["limit above 100", ["session", "list", "--limit", "101"], "--limit must be an integer from 1 to 100"],
     ["negative offset", ["session", "list", "--offset", "-1"], "--offset"],
     ["bad date", ["session", "list", "--after", "yesterday"], "--after must be a date or date-time"],
-    ["missing id", ["session", "kill"], "missing argument <id>"],
+    ["missing id", ["session", "kill", "--caller", "ci"], "missing argument <id>"],
+    ["kill without caller", ["session", "kill", id], "missing required option --caller"],
+    ["kill with empty caller", ["session", "kill", id, "--caller="], "--caller must not be empty"],
+    ["list --text is gone", ["session", "list", "--text", "x"], "--text"],
     ["option of another command", ["session", "get", id, "--limit", "2"], "--limit"],
   ];
   for (const [name, argv, message] of cases) {

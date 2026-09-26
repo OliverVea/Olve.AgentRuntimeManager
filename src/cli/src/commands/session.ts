@@ -11,8 +11,7 @@ import {
   type SessionStatus,
 } from "@arm/client";
 import { send, unwrap } from "../api";
-import { UsageError } from "../errors";
-import { commaList, dateTime, flag, integer, oneOf, pairs, text } from "../options";
+import { dateTime, integer, oneOf, requiredText, text } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandGroup, OptionValues } from "../registry";
 
@@ -20,7 +19,6 @@ import type { CommandGroup, OptionValues } from "../registry";
 const statusSet: Record<SessionStatus, true> = {
   queued: true,
   working: true,
-  waiting: true,
   completed: true,
   killed: true,
   failed: true,
@@ -28,15 +26,6 @@ const statusSet: Record<SessionStatus, true> = {
 export const sessionStatuses = Object.keys(statusSet) as SessionStatus[];
 
 const idArg = { name: "id", description: "Session ID (a UUID)" };
-
-function joinPairs(map: Record<string, unknown> | undefined, separator: string): string | undefined {
-  const entries = Object.entries(map ?? {});
-  return entries.length ? entries.map(([k, v]) => `${k}${separator}${String(v)}`).join(", ") : undefined;
-}
-
-function joinList(items: readonly string[] | undefined): string | undefined {
-  return items?.length ? items.join(", ") : undefined;
-}
 
 /** Key/value lines for a session; unset and empty fields are left out. */
 export function formatSession(s: Session): string {
@@ -46,17 +35,8 @@ export function formatSession(s: Session): string {
     ["prompt", s.prompt],
     ["provider", s.provider],
     ["model", s.model],
-    ["effort", s.effort],
-    ["systemPrompt", s.systemPrompt],
     ["caller", s.caller],
-    ["tags", joinPairs(s.tags, ":")],
-    ["env", joinPairs(s.env, "=")],
     ["timeoutSeconds", s.timeoutSeconds],
-    ["approvalPolicy", s.approvalPolicy],
-    ["tools", joinList(s.tools)],
-    ["skills", joinList(s.skills)],
-    ["messaging", s.messaging],
-    ["headless", s.headless],
     ["createdAt", s.createdAt],
     ["startedAt", s.startedAt],
     ["endedAt", s.endedAt],
@@ -66,6 +46,7 @@ export function formatSession(s: Session): string {
     ["error", s.error],
     ["killReason", s.killReason],
     ["killSource", s.killSource],
+    ["killCaller", s.killCaller],
   ];
   return formatKeyValue(entries.filter(([, v]) => v !== undefined && v !== null && v !== ""));
 }
@@ -94,28 +75,12 @@ export function formatSessionPage(page: SessionPage): string {
 }
 
 function createBody(options: OptionValues): CreateSession {
-  const prompt = options.prompt;
-  if (prompt === undefined) throw new UsageError("missing required option --prompt (-p)");
-  if (prompt === "") throw new UsageError("--prompt must not be empty");
-  if (options.messaging === true && options["no-messaging"] === true) {
-    throw new UsageError("--messaging and --no-messaging are mutually exclusive");
-  }
   const body: CreateSession = {
-    prompt: String(prompt),
-    provider: text(options, "provider"),
-    model: text(options, "model"),
-    effort: text(options, "effort"),
-    systemPrompt: text(options, "system-prompt"),
-    caller: text(options, "caller"),
-    tags: pairs(options, "tag", ":"),
-    env: pairs(options, "env", "="),
-    secretEnv: pairs(options, "secret-env", "="),
+    prompt: requiredText(options, "prompt", "p"),
+    provider: requiredText(options, "provider"),
+    model: requiredText(options, "model"),
+    caller: requiredText(options, "caller"),
     timeoutSeconds: integer(options, "timeout-seconds", { min: 1 }),
-    approvalPolicy: text(options, "policy"),
-    tools: commaList(options, "tools"),
-    skills: commaList(options, "skills"),
-    messaging: options.messaging === true ? true : options["no-messaging"] === true ? false : undefined,
-    headless: flag(options, "headless"),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
@@ -125,10 +90,8 @@ function searchBody(options: OptionValues): SessionSearch {
   const body: SessionSearch = {
     status: oneOf(options, "status", sessionStatuses),
     caller: text(options, "caller"),
-    tags: pairs(options, "tag", ":"),
     createdAfter: dateTime(options, "after"),
     createdBefore: dateTime(options, "before"),
-    text: text(options, "text"),
     limit: integer(options, "limit", { min: 1, max: 100 }),
     offset: integer(options, "offset", { min: 0 }),
   };
@@ -145,30 +108,14 @@ export const sessionGroup: CommandGroup = {
       args: [],
       options: {
         prompt: { type: "string", short: "p", description: "What the agent should do (required)", valueName: "TEXT" },
-        provider: { type: "string", description: "Provider that runs the agent (default: the server's)", valueName: "X" },
-        model: { type: "string", description: "Model", valueName: "X" },
-        effort: { type: "string", description: "Effort level", valueName: "X" },
-        "system-prompt": { type: "string", description: "An additional system prompt", valueName: "TEXT" },
-        caller: { type: "string", description: "Who started the session (e.g. oribot); searchable", valueName: "X" },
-        tag: { type: "string", multiple: true, description: "A tag", valueName: "K:V" },
+        provider: { type: "string", description: "Provider that runs the agent, e.g. fake (required)", valueName: "X" },
+        model: { type: "string", description: "Model, in the provider's own naming (required)", valueName: "X" },
+        caller: { type: "string", description: "Who started the session (e.g. oribot); searchable (required)", valueName: "X" },
         "timeout-seconds": {
           type: "string",
-          description: "Kill the session after this long (default: the server's)",
+          description: "Kill the session this long after it starts (default: the server's)",
           valueName: "N",
         },
-        headless: { type: "boolean", description: "Auto-deny anything the policy doesn't allow (CI, scripting)" },
-        messaging: { type: "boolean", description: "Enable the messages endpoint (the default)" },
-        "no-messaging": { type: "boolean", description: "Disable the messages endpoint" },
-        env: { type: "string", multiple: true, description: "An environment variable for the agent", valueName: "K=V" },
-        "secret-env": {
-          type: "string",
-          multiple: true,
-          description: "A secret env var, only for approved_bash commands; never returned",
-          valueName: "K=V",
-        },
-        policy: { type: "string", description: "Approval policy", valueName: "X" },
-        tools: { type: "string", description: "Tools, comma-separated", valueName: "T1,T2" },
-        skills: { type: "string", description: "Skills, comma-separated", valueName: "S1,S2" },
         "idempotency-key": {
           type: "string",
           description: "Repeating a key within 24h returns the original session instead of creating another",
@@ -196,10 +143,8 @@ export const sessionGroup: CommandGroup = {
       options: {
         status: { type: "string", description: `Only this status: ${sessionStatuses.join(", ")}`, valueName: "X" },
         caller: { type: "string", description: "Only sessions started by this caller", valueName: "X" },
-        tag: { type: "string", multiple: true, description: "Only sessions with this tag", valueName: "K:V" },
         after: { type: "string", description: "Created after this date or date-time", valueName: "DATE" },
         before: { type: "string", description: "Created before this date or date-time", valueName: "DATE" },
-        text: { type: "string", description: "Prompt contains this (case-insensitive)", valueName: "X" },
         limit: { type: "string", description: "Page size, 1–100 (default 20)", valueName: "N" },
         offset: { type: "string", description: "Skip this many matches (default 0)", valueName: "N" },
       },
@@ -220,15 +165,17 @@ export const sessionGroup: CommandGroup = {
     },
     {
       name: "kill",
-      summary: "Kill a queued, working or waiting session (one that already ended is a 409, exit 4)",
+      summary: "Kill a queued or working session (one that already ended is a 409, exit 4)",
       args: [idArg],
       options: {
+        caller: { type: "string", description: "Who is killing the session (required)", valueName: "X" },
         reason: { type: "string", description: "Why (recorded on the session and its event)", valueName: "TEXT" },
       },
       async run({ args, options, client }) {
+        const caller = requiredText(options, "caller");
         const reason = text(options, "reason");
         const session = await unwrap(
-          sessionsKill({ client, path: { id: args.id! }, body: reason ? { reason } : {} }),
+          sessionsKill({ client, path: { id: args.id! }, body: reason ? { caller, reason } : { caller } }),
           client,
         );
         return { json: session, pretty: `Killed session ${session.id}.\n\n${formatSession(session)}` };

@@ -9,13 +9,9 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
     status: "working",
     prompt: `prompt of ${id}`,
     provider: "claude",
-    tags: {},
-    env: {},
+    model: "opus",
+    caller: "tester",
     timeoutSeconds: 600,
-    tools: [],
-    skills: [],
-    messaging: true,
-    headless: false,
     createdAt: "2026-09-26T10:00:00Z",
     ...overrides,
   };
@@ -111,6 +107,7 @@ describe("<session-list>", () => {
     expect(root.querySelector(".id")?.textContent).toBe("aaaaaaaa");
     expect(root.querySelector(".caller")?.textContent).toBe("oribot");
     expect(root.querySelector(".provider")?.textContent).toBe("claude");
+    expect(root.querySelector(".model")?.textContent).toBe("opus");
     expect(root.querySelector(".prompt")?.textContent).toHaveLength(120); // truncated
     expect(root.querySelector(".queue")?.textContent).toBe("#2 in queue");
     expect(root.querySelector(".count")?.textContent).toBe("2 sessions");
@@ -145,6 +142,24 @@ describe("<session-list>", () => {
     api.push({ type: "session.failed", at, sessionId: "s2", previous: "working", error: "boom" });
     await vi.waitFor(() => expect(statuses(el)).toEqual(["s2:failed", "s1:completed"]));
     expect(el.shadowRoot!.querySelector(".count")?.textContent).toBe("2 sessions");
+  });
+
+  it("records who killed a session", async () => {
+    const api = fakeApi({ sessions: [session("s1")] });
+    const el = await mount(api.client);
+    await vi.waitFor(() => expect(api.calls.some((c) => c.path === "/api/events")).toBe(true));
+
+    api.push({
+      type: "session.killed",
+      at: "2026-09-26T10:01:00Z",
+      sessionId: "s1",
+      previous: "working",
+      source: "user",
+      reason: "stop",
+      caller: "oliver",
+    });
+    await vi.waitFor(() => expect(statuses(el)).toEqual(["s1:killed"]));
+    expect(el.shadowRoot!.querySelector(".killed-by")?.textContent).toBe("killed by oliver");
   });
 
   it("shows a sign-in prompt and calls nothing while signed out", async () => {

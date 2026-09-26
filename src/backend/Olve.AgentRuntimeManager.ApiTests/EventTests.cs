@@ -39,7 +39,7 @@ public class EventTests(ApiTarget target)
 
         var session = await client.CreateHangingSessionAsync();
         session = await client.WaitForSessionAsync(session.Id, s => s.Status == "working"); // a shared target may queue it first
-        (await client.KillSessionAsync(session.Id, "enough")).EnsureSuccessStatusCode();
+        (await client.KillSessionAsync(session.Id, "enough", caller: "killer")).EnsureSuccessStatusCode();
 
         var created = await events.NextAsync(About(session, "session.created"));
         var started = await events.NextAsync(About(session, "session.started"));
@@ -62,6 +62,7 @@ public class EventTests(ApiTarget target)
         await Assert.That(killed.Data.GetProperty("previous").GetString()).IsEqualTo("working");
         await Assert.That(killed.Data.GetProperty("reason").GetString()).IsEqualTo("enough");
         await Assert.That(killed.Data.GetProperty("source").GetString()).IsEqualTo("user");
+        await Assert.That(killed.Data.GetProperty("caller").GetString()).IsEqualTo("killer");
     }
 
     [Test]
@@ -71,7 +72,7 @@ public class EventTests(ApiTarget target)
         await using var events = await EventStream.OpenAsync(client, "?event=session.completed");
         await events.NextAsync(IsHeartbeat);
 
-        var session = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms fake:exit=2 fake:summary=all_done" });
+        var session = await client.CreateSessionAsync("fake:sleep=0ms fake:exit=2 fake:summary=all_done");
 
         var completed = await events.NextAsync(About(session, "session.completed"));
         await Assert.That(completed.Data.GetProperty("exitCode").GetInt32()).IsEqualTo(2);
@@ -143,11 +144,11 @@ public class EventTests(ApiTarget target)
         await using (var events = await EventStream.OpenAsync(client))
         {
             await events.NextAsync(IsHeartbeat);
-            seen = await client.CreateSessionAsync(new { prompt = "seen fake:sleep=0ms" });
+            seen = await client.CreateSessionAsync("seen fake:sleep=0ms");
             seenId = (await events.NextAsync(About(seen, "session.created"))).Id!;
         }
 
-        var missed = await client.CreateSessionAsync(new { prompt = "missed fake:sleep=0ms" });
+        var missed = await client.CreateSessionAsync("missed fake:sleep=0ms");
 
         // Replayed events come before the connect heartbeat.
         await using var resumed = await EventStream.OpenAsync(client, lastEventId: seenId);
@@ -162,7 +163,7 @@ public class EventTests(ApiTarget target)
     public async Task WithoutLastEventId_NothingIsReplayed()
     {
         var client = target.CreateAuthenticatedClient();
-        var earlier = await client.CreateSessionAsync(new { prompt = "before connecting fake:sleep=0ms" });
+        var earlier = await client.CreateSessionAsync("before connecting fake:sleep=0ms");
 
         await using var events = await EventStream.OpenAsync(client);
         var beforeHeartbeat = await events.UntilAsync(IsHeartbeat);

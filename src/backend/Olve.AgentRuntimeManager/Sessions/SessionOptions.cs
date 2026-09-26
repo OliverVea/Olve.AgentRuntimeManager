@@ -14,9 +14,6 @@ public sealed class SessionOptions
     /// <summary>Timeout of a session that doesn't set <c>timeoutSeconds</c> (SPEC <c>backgroundTimeout</c>).</summary>
     public int DefaultTimeoutSeconds { get; set; } = 600;
 
-    /// <summary>The provider of a session that doesn't name one.</summary>
-    public string DefaultProvider { get; set; } = "fake";
-
     /// <summary>How long an <c>Idempotency-Key</c> replays its original response (SPEC: 24 hours).</summary>
     public TimeSpan IdempotencyWindow { get; set; } = TimeSpan.FromHours(24);
 }

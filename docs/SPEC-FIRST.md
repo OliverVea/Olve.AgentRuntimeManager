@@ -5,7 +5,7 @@ parts of M4, M15). The milestone list itself is [`MILESTONES.md`](MILESTONES.md)
 Decision context and spike findings: [`OPEN-QUESTIONS.md` A8](OPEN-QUESTIONS.md#a8-api-definition--code-first-vs-spec-first).
 
 ```
-src/spec/main.tsp  (the contract; nothing else lives in src/spec/)
+src/spec/main.tsp  (the contract's entry point; imports one .tsp per area: errors, sessions, events, …)
   │  tsp compile
   ▼
 artifacts/spec/openapi.json  (OpenAPI 3.2, gitignored build artifact)
@@ -25,6 +25,10 @@ API tests (backend): ARM's behaviour over raw HTTP, in-process or against any ba
 - **Conformance is the generator's responsibility** (2026-09-26): that every operation is
   routed, responses match the spec's schemas and declared statuses are honoured is tested once,
   in the emitter's conformance suite. Services only test their own behaviour (API tests).
+- **The contract holds only what's built** (2026-09-26). [`SPEC.md`](SPEC.md) describes the
+  target; `src/spec/` gets a field, status or event in the milestone that makes it work, never
+  "stored but not applied yet". Contract changes are made one at a time and reviewed before
+  the implementation follows.
 - **Generated output never lives in source folders.** OpenAPI documents, clients and the
   generated backend C# go to the gitignored `artifacts/`.
 - **Each project's native build owns its link to `main.tsp`.** `npm run build` / `dotnet test`

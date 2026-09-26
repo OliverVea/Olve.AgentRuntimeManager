@@ -7,8 +7,6 @@ export type OptionSpec = {
   description: string;
   /** Placeholder shown in help for string options, e.g. `N` in `--limit N`. */
   valueName?: string;
-  /** A string option that may be given more than once (`--tag a:1 --tag b:2`); its value is a string[]. */
-  multiple?: boolean;
 };
 
 export type ArgSpec = {
@@ -16,7 +14,7 @@ export type ArgSpec = {
   description: string;
 };
 
-export type OptionValues = Record<string, string | boolean | string[] | undefined>;
+export type OptionValues = Record<string, string | boolean | undefined>;
 
 export type CommandContext = {
   /** Positional arguments by name (all required). */
@@ -110,7 +108,7 @@ export function allOptions(
         const existing = all[name];
         if (
           existing &&
-          (existing.type !== spec.type || existing.short !== spec.short || !!existing.multiple !== !!spec.multiple)
+          (existing.type !== spec.type || existing.short !== spec.short)
         ) {
           throw new Error(
             `Option --${name} (${group.name} ${command.name}) conflicts with another declaration`,
