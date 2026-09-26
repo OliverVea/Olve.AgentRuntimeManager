@@ -44,6 +44,19 @@ ARM_API_BASE_URL="$url" ARM_API_SIGNING_KEY="$key" ARM_API_ISSUER=api-test ARM_A
   dotnet test --project Olve.AgentRuntimeManager.ApiTests
 """
 
+[tasks."api:remote"]
+description = "API tests against a deployed server: set ARM_API_BASE_URL (tests needing a token skip unless ARM_API_SIGNING_KEY/ISSUER/AUDIENCE are set)"
+run = [
+  { task = "install" },
+  """
+#!/usr/bin/env bash
+set -euo pipefail
+: "${ARM_API_BASE_URL:?set ARM_API_BASE_URL to the server under test}"
+cd src/backend
+dotnet test --project Olve.AgentRuntimeManager.ApiTests
+""",
+]
+
 [tasks."frontend:check"]
 description = "Frontend lint, tests, production build"
 dir = "src/frontend"

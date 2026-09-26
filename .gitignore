@@ -484,3 +484,6 @@ $RECYCLE.BIN/
 
 # Local persistence snapshots (Storage:Mode=Persistent)
 data/
+
+# Local secret material for manual review (never commit)
+.secrets/

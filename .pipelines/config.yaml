@@ -50,23 +50,14 @@ processingSteps:
     configuration:
       image: alpine:latest
       scriptFile: scripts/deploy-beta.sh
+  # Beta confirmation: the API test suite against the live beta Service (in-cluster, no
+  # ingress dependency). Read/anonymous behaviour runs; token-dependent tests skip (beta
+  # validates Authentik tokens, not a test key). A failure stops prod.
+  - name: test-after-beta
+    configuration:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+      scriptFile: scripts/test-after-beta.sh
   - name: deploy
     configuration:
       image: alpine:latest
       scriptFile: scripts/deploy.sh
-
-# Failure handlers run as best-effort K8s Jobs when a job group fails. `aoe-triage` is a
-# built-in library handler that opens an Agent of Empires session to investigate the failure.
-# Omitting `steps:` makes it fire on ANY failure in this pipeline (build, test, or either deploy).
-# It reaches aoe via the in-cluster Service (below the Authentik ingress), so no token is needed.
-failureHandlers:
-  - handler: aoe-triage
-    env:
-      AOE_BASE_URL: http://agent-of-empires.apps.svc.cluster.local:8080
-      AOE_TOOL: claude
-      AOE_REPO_PATH: /home/oliver/projects/Olve.AgentRuntimeManager
-      AOE_PROMPT_TEMPLATE: >-
-        The Olve.AgentRuntimeManager CD pipeline '$PIPELINE_NAME' failed at step
-        '$PIPELINE_FAILED_STEP' ($PIPELINE_FAILED_STEP_KIND): $PIPELINE_FAILURE_REASON.
-        The failed job's logs are in S3 at key '$PIPELINE_LOG_KEY' (pipeline id $PIPELINE_ID).
-        Investigate the root cause and propose or apply a fix on a new branch.
