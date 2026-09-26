@@ -40,6 +40,19 @@ reason. Back a rule with a test where possible.
   in `src/frontend/mocks/` is approved first, the UI is then built to match it and approved in
   turn, and the mock is deleted. A mock may be kept as the approved target while it's built
   across milestones (e.g. the sessions screen, see MILESTONES "Web UI"). Style and layout reference: [`UI-REFERENCE.md`](UI-REFERENCE.md).
+- A change to an approved screen is mocked as a **specimen page**, not a redesign
+  (`mocks/provider-health.html` is the example):
+  - A blank page holding only the parts that change (the header, a card, the composer), copied
+    verbatim from the approved mock or the real UI: its CSS and markup unchanged, with the new
+    CSS appended in one block marked as new.
+  - One numbered section per situation, each with a title and a one-line note of what's new;
+    the first shows today's unchanged state to compare against. Show every state the change has
+    (e.g. each provider status, and a popover opened), with realistic data.
+  - The mock is the scope: the implementation adds exactly what it shows, nothing else. Changes
+    it needs that don't show (e.g. `position: relative` to anchor a popover) are named when it's
+    presented.
+  - It's checked by screenshot (headless Chrome, light and dark) before it's presented, and served
+    for review (`python3 -m http.server` in `src/frontend/mocks/`).
 
 ## Code
 
