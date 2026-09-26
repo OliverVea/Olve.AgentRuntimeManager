@@ -23,12 +23,15 @@ re-evaluated and scoped when it's picked up.
 - **Named agent configs**: persisted configs referenced by name at session creation instead of
   inline configuration.
 - **Streaming text**: `session.text` deltas for token-by-token rendering.
-- **Sleeping sessions**: a session that pauses and wakes up later, as the same session. The
-  agent (a `sleep` tool) or a user puts it to sleep until a time ("check the deploy in 20
-  minutes"), an event (CI finished, a reply arrived, a subagent ended) or a message. While
-  asleep it holds no slot and no process (status `sleeping`, with what it waits for and until
-  when); waking resumes its conversation, like revive but keeping the session. The UI shows
-  sleeping sessions with their wake condition, and they can be woken or killed early.
+- **Sleeping sessions**: a session that pauses and wakes up later, as the same session, instead
+  of dying. The motivating case: sessions waiting for an approval when you clock out sit for
+  hours, hit their timeout and die before you're back. Instead, a session that has waited long
+  enough (for an approval, a message, …) goes to sleep: it releases its slot and its process
+  (status `sleeping`, showing what it waits for), keeps its pending approval, and is woken when
+  you answer it or wake it by hand, resuming its conversation. Agents (a `sleep` tool) and users
+  can also put a session to sleep until a time ("check the deploy in 20 minutes") or an event
+  (CI finished, a subagent ended). Timeouts then count active time, not time asleep. The UI lists
+  sleeping sessions with their wake condition; they can be woken or killed.
 - **Subagents**: sessions an agent starts itself, linked to their parent (shown nested in the
   UI; killing a parent kills its running subagents). Needs a parent/child link on sessions and a
   way for an agent to start one; SPEC's `children` filter hints at it.
