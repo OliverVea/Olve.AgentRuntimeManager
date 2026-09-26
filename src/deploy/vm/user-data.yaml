@@ -1,0 +1,15 @@
+#cloud-config
+# First-boot setup for an ARM VM (rendered by vm-deploy.sh; @@PUBKEY@@ = the host's key).
+hostname: @@NAME@@
+users:
+  - name: arm
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - @@PUBKEY@@
+package_update: true
+packages: [libicu74, ca-certificates, curl]
+runcmd:
+  - [mkdir, -p, /opt/olve-arm/releases, /etc/olve-arm]
+  - [chown, -R, arm:arm, /opt/olve-arm]

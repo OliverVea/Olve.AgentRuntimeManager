@@ -1,56 +1,36 @@
 #!/bin/sh
-# Deploy to apps-beta and gate prod: import the built image into the homelab k3s
-# containerd, helm-upgrade the beta release with beta overrides, then verify the
-# beta rollout is healthy. A failure here stops the chain so prod never deploys.
-# The ssh/import/helm footguns live in olve-lib.sh (shared across all Olve.Pipelines apps).
+# Deploy to the beta VM and gate prod.
+# ARM runs in a libvirt VM on the homelab host (docs/OPEN-QUESTIONS.md A4). This step copies the
+# built image tarball + src/deploy/vm to the host and runs vm-deploy.sh there, which ensures the
+# VM exists (first run creates it), installs the release as a systemd service, and ensures the
+# host relay the Olve.Homelab route targets. Idempotent; a failure stops the chain.
 set -e
 
-# Fetch the shared helper library (see build.sh for the fetch rationale). Swap `main` to pin.
 mkdir -p /tmp
 wget --no-check-certificate -qO /tmp/olve-lib.sh \
   https://raw.githubusercontent.com/OliverVea/Olve.Pipelines/main/.pipelines/scripts/olve-lib.sh
 . /tmp/olve-lib.sh
-
-# curl is needed by the post-deploy health loop below; olve_ssh_host installs only the
-# ssh client, so add curl here (prod's deploy.sh does not need it).
-apk add --no-cache curl
+apk add --no-cache curl >/dev/null
 
 HOST=oliver@bulwark-m2
-RELEASE=olve-arm
-
 olve_ssh_host bulwark-m2
 
 INPUT_DIR=$(olve_bundle_input)
 VERSION=$(cat "$INPUT_DIR/version.txt")
+REMOTE=olve-arm-deploy-beta
 
-echo "Deploying $RELEASE:$VERSION to apps-beta"
+echo "Deploying olve-arm:$VERSION to the beta VM"
+ssh -o StrictHostKeyChecking=no "$HOST" "rm -rf $REMOTE && mkdir -p $REMOTE"
+scp -q -o StrictHostKeyChecking=no "$INPUT_DIR"/vm/* "$INPUT_DIR/image.tar" "$HOST:$REMOTE/"
+ssh -o StrictHostKeyChecking=no "$HOST" "cd $REMOTE && bash vm-deploy.sh beta $VERSION image.tar && cd && rm -rf $REMOTE"
 
-olve_image_import "$INPUT_DIR/image.tar" "$HOST"
-
-# Beta values are chart-relative (resolved from inside the copied chart dir by the helper).
-# slo.enabled=false: this chart defines an slo block defaulting to true, but the sloth
-# CRD is not installed cluster-wide — passed through here, not baked into the shared lib.
-olve_helm_deploy "$HOST" "$RELEASE" apps-beta "$INPUT_DIR/helm" "$VERSION" \
-  -f values-beta.yaml --set slo.enabled=false
-
-# Wait for the rollout, then verify reachability — if beta is unhealthy, fail so
-# prod does not deploy.
-echo "Waiting for beta rollout..."
-ssh -o StrictHostKeyChecking=no "$HOST" \
-  "kubectl -n apps-beta rollout status deploy/olve-arm --timeout=120s"
-
-# Probe the app over its private (Tailscale) host. The *-private.ovea.pro hosts resolve, via
-# external-dns, to the Tailscale IP of the in-cluster ingress — reachable on the tailnet without
-# the public Cloudflare edge. Run the probe from the homelab node (a tailnet member) over SSH so
-# it goes through Tailscale rather than the deploy job's pod network.
-echo "Verifying beta /health via the private (Tailscale) host..."
+echo "Verifying /health via the private (Tailscale) route..."
 for i in 1 2 3 4 5; do
-  if ssh -o StrictHostKeyChecking=no "$HOST" \
-       "curl -skf -o /dev/null https://olve-arm-beta.ovea.pro/health"; then
-    echo "Beta health OK"
+  if ssh -o StrictHostKeyChecking=no "$HOST" "curl -skf -o /dev/null https://olve-arm-beta.ovea.pro/health"; then
+    echo "beta health OK"
     exit 0
   fi
   sleep 5
 done
-echo "Beta health check failed" >&2
+echo "beta health check failed" >&2
 exit 1

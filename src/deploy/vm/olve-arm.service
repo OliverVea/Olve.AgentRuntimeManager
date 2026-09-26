@@ -1,0 +1,18 @@
+# ARM inside its VM. KillMode=process: a restart stops only the server process, so agent
+# processes it spawned keep running and the new server can re-attach (gentle restart, M5).
+[Unit]
+Description=Olve.AgentRuntimeManager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=arm
+WorkingDirectory=/opt/olve-arm/current
+EnvironmentFile=/etc/olve-arm/env
+ExecStart=/opt/olve-arm/current/Olve.AgentRuntimeManager
+Restart=on-failure
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

@@ -10,23 +10,21 @@
 # ordinary env vars ($GITHUB_TOKEN, $SSH_PRIVATE_KEY) — they are mounted into
 # every job.
 #
-# Beta deploys first and gates prod: if deploy-beta fails (build, rollout, or the
-# post-deploy health check), the deploy (prod) step never runs.
-#
-# Homelab conformance: the chart renders a ClusterIP Service only (no Ingress).
-# Public exposure is added to the Olve.Homelab edge chart, not here — see the
-# README "Deployment / GitOps" section.
+# Build → beta → beta confirmation → prod. ARM runs in libvirt VMs on the homelab host
+# (olve-arm-beta / olve-arm-prod, created on first deploy by src/deploy/vm/vm-deploy.sh), not in
+# k8s: agents must survive server restarts. Routing lives in Olve.Homelab (`hostEndpoint` →
+# the host relay → the VM). A failing step stops everything after it.
 apiVersion: "0.0"
 # `name` is GitOps config: reconcile applies it to the live pipeline.
 name: Olve.AgentRuntimeManager
-description: Build with Kaniko, deploy to the homelab (beta then prod) with Helm.
+description: Build with Kaniko, deploy into homelab VMs (beta, confirm, then prod).
 version: "1"
 
 secrets:
   - name: GITHUB_TOKEN
     description: GitHub read token used to fetch the repo tarball during build.
   - name: SSH_PRIVATE_KEY
-    description: SSH key for importing the image and running helm on the homelab host.
+    description: SSH key for deploying to the homelab host (VM provisioning + releases).
 
 # Production steps run in parallel and write to bundle/<step-name>/.
 productionSteps:
@@ -50,7 +48,7 @@ processingSteps:
     configuration:
       image: alpine:latest
       scriptFile: scripts/deploy-beta.sh
-  # Beta confirmation: the API test suite against the live beta Service (in-cluster, no
+  # Beta confirmation: the API test suite against the live beta VM via the host relay (no
   # ingress dependency). Read/anonymous behaviour runs; token-dependent tests skip (beta
   # validates Authentik tokens, not a test key). A failure stops prod.
   - name: test-after-beta

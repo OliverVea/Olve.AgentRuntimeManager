@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build the app image with Kaniko and stage the deploy artifacts (image tar, helm
-# chart, version) into /output so the deploy steps can pick them up from the bundle.
+# Build the app image with Kaniko and stage the deploy artifacts (image tar, the VM deploy
+# scripts from src/deploy/vm, version) into /output so the deploy steps can pick them up from the bundle.
 # The Kaniko/staging footguns live in olve-lib.sh (shared across all Olve.Pipelines apps).
 set -e
 
@@ -20,8 +20,8 @@ CTX=/kaniko/build-context
 
 olve_fetch_repo "$REPO" "$BRANCH" "$CTX"
 
-# Carry the helm chart and version forward as build artifacts before Kaniko runs.
-olve_stage_artifact "$CTX/src/deploy/helm" /output/helm
+# Carry the VM deploy scripts and version forward as build artifacts before Kaniko runs.
+olve_stage_artifact "$CTX/src/deploy/vm" /output/vm
 echo "$VERSION" > /output/version.txt
 
 olve_kaniko_build "$CTX" "olve-arm:$VERSION"

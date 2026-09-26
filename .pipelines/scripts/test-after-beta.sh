@@ -1,7 +1,7 @@
 #!/bin/sh
 # Beta confirmation (processing step between deploy-beta and deploy): run the API test suite
 # (src/backend/Olve.AgentRuntimeManager.ApiTests) in base-URL mode against the live beta
-# Service, reached in-cluster so it doesn't depend on the ingress. Uses the same `mise` entry
+# VM through the host relay (no ingress dependency). Uses the same `mise` entry
 # point as local runs (`mise run api:remote`). A failure fails this step, so prod never deploys.
 set -e
 
@@ -20,7 +20,7 @@ curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 mise trust --yes
 mise install
 
-export ARM_API_BASE_URL=http://olve-arm.apps-beta.svc.cluster.local
+export ARM_API_BASE_URL=http://100.100.117.17:18792   # host relay -> beta VM
 echo "Waiting for $ARM_API_BASE_URL/health..."
 for i in $(seq 30); do curl -fs "$ARM_API_BASE_URL/health" >/dev/null && break; sleep 2; done
 mise run api:remote
