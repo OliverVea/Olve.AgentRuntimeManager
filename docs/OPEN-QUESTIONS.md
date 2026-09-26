@@ -92,7 +92,11 @@ From an event-type review; general agreement, details open:
 
 ## C. Scaffold leftovers
 
-- **C1.** Authentik application slugs `olve-arm` / `olve-arm-spa` must be created when the app
-  is registered.
+- **C1. Registration checklist** (Olve.Homelab edge chart + Olve.Pipelines):
+  - Authentik application slugs `olve-arm` / `olve-arm-spa` must be created.
+  - Keep `/health` off the public route: the edge's `paths:` are prefix matches, so `/` would
+    include `/health`. List the public prefixes explicitly (`/api`, SPA assets/routes) or block
+    `/health` with a Traefik middleware.
+  - Bind the repo to an Olve.Pipelines pipeline (not bound as of 2026-09-26).
 - **C3. `Message` example — open:** keep as the M1–M2 test bed; remove when the first real ARM
   entity lands?
