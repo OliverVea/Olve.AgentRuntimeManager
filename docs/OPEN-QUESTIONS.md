@@ -45,9 +45,10 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   The Helm chart is no longer deployed.
 
 ### A5. Persistence
-- **Leaning (2026-08-14):** one EF Core persistence port + a notify port.
-  Local: SQLite + NDJSON files + in-process notify (self-contained is a hard requirement).
-  Prod: ARM-owned private Postgres + `LISTEN/NOTIFY`. CI exercises both engines.
+- **Leaning (2026-09-26):** one EF Core persistence port (`ISessionStore`), SQLite everywhere for
+  now, including prod (a file in each VM, `/var/lib/olve-arm/arm.db`). Later: an ARM-owned
+  private Postgres with `LISTEN/NOTIFY` (a notify port) for HA, and CI running both engines.
+  NDJSON files for transcripts are still open (M5b).
 
 ### A5b. Secret storage
 - **Leaning (2026-09-25):** `secretEnv` encrypted at rest; key from an env var (`ARM_SECRET_KEY`,
@@ -113,7 +114,7 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
     the provider's native steering; providers without it deliver at the end of the turn, or
     cancel and re-prompt.
   - *ARM dies mid-turn:* the agent CLI outlives the adapter, finishes its current turn
-    unsupervised (its ARM tool calls still arrive), then exits (~25s). Gentle restart (M5, A4)
+    unsupervised (its ARM tool calls still arrive), then exits (~25s). Gentle restart (M5a, A4)
     therefore needs a small **supervisor process per session** that owns the agent's stdio and
     that a restarted ARM reconnects to over a socket (the pattern AOE's `__acp-runner` uses), not
     adoption by PID.
@@ -146,7 +147,7 @@ From an event-type review; general agreement, details open:
 
 ## B. Spec TBDs — open
 
-- **B1. Storage layout** — resolve with A5.
+- **B1. Storage layout — resolved (2026-09-26):** SQLite at `ConnectionStrings:Arm` (A5).
 - **B2. Config location / filename** — for the host-process deployment (A4).
 - **B3. API versioning** — `/api/v1/…` prefix vs header; TypeSpec `@versioned` (M15).
 - **B4. `queryMethod` — dropped (2026-09-26):** searches are `POST …/search` only (A1).

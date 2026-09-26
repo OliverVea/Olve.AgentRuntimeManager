@@ -6,15 +6,18 @@ using Olve.AgentRuntimeManager.Sessions.Providers;
 namespace Olve.AgentRuntimeManager.Sessions;
 
 /// <summary>
-/// The session runtime: every session, a FIFO queue in front of <see cref="SessionOptions.TotalSlots"/>
-/// slots, the agents running in them, and a lifecycle event on the <see cref="EventBus"/> for every
-/// state change (moves follow <see cref="SessionLifecycle"/>).
+/// The session runtime: every session (in the <see cref="ISessionStore"/>), a FIFO queue in front
+/// of <see cref="SessionOptions.TotalSlots"/> slots, the agents running in them, and a lifecycle
+/// event on the <see cref="EventBus"/> for every state change (moves follow <see cref="SessionLifecycle"/>).
 /// </summary>
 /// <remarks>
 /// One lock guards all state, and events are published under it, so their order is the order of
 /// the changes. Agents are started under the lock too (<see cref="IAgentProvider.Start"/> must not
 /// block); their completion, kills after the lock is released, and timeouts come back through
-/// <see cref="Finish"/> and <see cref="Kill"/>. Sessions live in memory until M5 persists them.
+/// <see cref="Finish"/> and <see cref="Kill"/>. Every change is stored before memory changes and
+/// before its event is published, so an event never announces what isn't stored. Queued and
+/// working sessions are also kept in memory (with their queue positions, which aren't stored);
+/// ended ones are read from the store.
 /// </remarks>
 public sealed class SessionManager : IDisposable
 {
@@ -24,6 +27,9 @@ public sealed class SessionManager : IDisposable
     private readonly SessionOptions _options;
     private readonly IReadOnlyDictionary<string, IAgentProvider> _providers;
     private readonly ILogger<SessionManager> _logger;
+    private readonly ISessionStore _store;
+
+    /// <summary>The queued and working sessions.</summary>
     private readonly Dictionary<Guid, SessionRecord> _sessions = [];
     private readonly List<Guid> _queue = [];
     private readonly Dictionary<Guid, RunningAgent> _running = [];
@@ -33,13 +39,47 @@ public sealed class SessionManager : IDisposable
         TimeProvider time,
         IOptions<SessionOptions> options,
         IEnumerable<IAgentProvider> providers,
+        ISessionStore store,
         ILogger<SessionManager> logger)
     {
+        _store = store;
         _events = events;
         _time = time;
         _options = options.Value;
         _providers = providers.ToDictionary(p => p.Name, StringComparer.Ordinal);
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Picks up the sessions the previous server left: working ones lost their agent (until gentle
+    /// restart re-attaches them) and are killed, source <c>system</c>; queued ones queue again in
+    /// their order and start as slots allow. Call once, before serving requests.
+    /// </summary>
+    public void Recover()
+    {
+        lock (_gate)
+        {
+            foreach (var session in _store.Active())
+            {
+                if (session.Status == SessionStatus.Working)
+                {
+                    const string reason = "ARM restarted; the agent was lost.";
+                    var killed = EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
+                    _events.Publish(new SessionKilled
+                    {
+                        At = killed.EndedAt!.Value, SessionId = session.Id, Previous = session.Status, Reason = reason, Source = KillSource.System,
+                    });
+                    continue;
+                }
+
+                _sessions[session.Id] = session;
+                _queue.Add(session.Id);
+            }
+
+            RenumberQueueLocked();
+            _logger.LogInformation("Recovered {Queued} queued sessions", _queue.Count);
+            StartNextLocked();
+        }
     }
 
     /// <summary>The names of the registered providers.</summary>
@@ -76,13 +116,13 @@ public sealed class SessionManager : IDisposable
                 TimeoutSeconds = request.TimeoutSeconds,
                 CreatedAt = _time.GetUtcNow(),
             };
+            _store.Add(session);
             _sessions[session.Id] = session;
             _events.Publish(new SessionCreated { At = session.CreatedAt, SessionId = session.Id, Session = session.ToDto() });
 
             if (slotFree)
             {
-                StartLocked(session.Id);
-                return new CreateOutcome.Started(_sessions[session.Id]);
+                return new CreateOutcome.Started(StartLocked(session.Id));
             }
 
             _queue.Add(session.Id);
@@ -96,29 +136,24 @@ public sealed class SessionManager : IDisposable
     {
         lock (_gate)
         {
-            return _sessions.GetValueOrDefault(id);
+            if (_sessions.TryGetValue(id, out var active))
+            {
+                return active;
+            }
         }
+
+        return _store.Get(id);
     }
 
     /// <summary>Sessions matching every given filter, newest first, one page at a time.</summary>
     public SessionQueryResult Search(SessionSearch search, int limit, int offset)
     {
-        List<SessionRecord> all;
+        var page = _store.Search(search, limit, offset);
         lock (_gate)
         {
-            all = [.. _sessions.Values];
+            // Active sessions as memory has them: with their queue positions.
+            return page with { Items = [.. page.Items.Select(s => _sessions.GetValueOrDefault(s.Id) ?? s)] };
         }
-
-        var matches = all
-            .Where(s => search.Status is not { } statuses || statuses.Contains(s.Status))
-            .Where(s => search.Caller is not { } caller || s.Caller == caller)
-            .Where(s => search.CreatedAfter is not { } after || s.CreatedAt > after)
-            .Where(s => search.CreatedBefore is not { } before || s.CreatedAt < before)
-            .OrderByDescending(s => s.CreatedAt)
-            .ThenBy(s => s.Id)
-            .ToList();
-
-        return new SessionQueryResult([.. matches.Skip(offset).Take(limit)], matches.Count, limit, offset);
     }
 
     /// <summary>
@@ -134,12 +169,9 @@ public sealed class SessionManager : IDisposable
         {
             if (!_sessions.TryGetValue(id, out var session))
             {
-                return new KillOutcome.NotFound();
-            }
-
-            if (SessionLifecycle.IsTerminal(session.Status))
-            {
-                return new KillOutcome.AlreadyEnded(session);
+                return _store.Get(id) is { } ended
+                    ? new KillOutcome.AlreadyEnded(ended)
+                    : new KillOutcome.NotFound();
             }
 
             if (_queue.Remove(id))
@@ -164,12 +196,12 @@ public sealed class SessionManager : IDisposable
                 KillSource = source,
                 KillCaller = caller,
             };
-            _sessions[id] = stopped;
+            SaveLocked(stopped);
             _events.Publish(cancel
                 ? new SessionCancelled { At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller }
                 : new SessionKilled { At = now, SessionId = id, Previous = session.Status, Reason = reason, Source = source, Caller = caller });
             StartNextLocked();
-            outcome = new KillOutcome.Stopped(_sessions[id]);
+            outcome = new KillOutcome.Stopped(stopped);
         }
 
         run?.Kill();
@@ -181,22 +213,22 @@ public sealed class SessionManager : IDisposable
     {
         lock (_gate)
         {
-            if (!_sessions.TryGetValue(id, out var session))
+            if (_sessions.TryGetValue(id, out var active))
+            {
+                return new DeleteOutcome.NotEnded(active);
+            }
+
+            if (_store.Get(id) is null)
             {
                 return new DeleteOutcome.NotFound();
             }
 
-            if (!SessionLifecycle.IsTerminal(session.Status))
-            {
-                return new DeleteOutcome.NotEnded(session);
-            }
-
-            _sessions.Remove(id);
+            _store.Delete(id);
             return new DeleteOutcome.Deleted();
         }
     }
 
-    /// <summary>Stops the timeouts; the agents themselves are left running (gentle restart, M5).</summary>
+    /// <summary>Stops the timeouts; the agents themselves are left running (gentle restart, M5a).</summary>
     public void Dispose()
     {
         lock (_gate)
@@ -209,7 +241,7 @@ public sealed class SessionManager : IDisposable
     }
 
     /// <summary>Starts a queued session's agent in a free slot (or fails the session if it can't start).</summary>
-    private void StartLocked(Guid id)
+    private SessionRecord StartLocked(Guid id)
     {
         var session = _sessions[id];
         IAgentRun run;
@@ -220,19 +252,19 @@ public sealed class SessionManager : IDisposable
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Session {SessionId}: provider {Provider} could not start the agent", id, session.Provider);
-            EndLocked(session, SessionStatus.Failed, s => s with { Error = exception.Message });
-            _events.Publish(new SessionFailed { At = _sessions[id].EndedAt!.Value, SessionId = id, Previous = session.Status, Error = exception.Message });
-            return;
+            var failed = EndLocked(session, SessionStatus.Failed, s => s with { Error = exception.Message });
+            _events.Publish(new SessionFailed { At = failed.EndedAt!.Value, SessionId = id, Previous = session.Status, Error = exception.Message });
+            return failed;
         }
 
         var now = _time.GetUtcNow();
-        _sessions[id] = session with
+        var started = SaveLocked(session with
         {
             Status = SessionLifecycle.Move(session.Status, SessionStatus.Working),
             QueuePosition = null,
             StartedAt = now,
             ProviderSessionId = run.ProviderSessionId,
-        };
+        });
         // No timeout: no timer (the session runs until it ends or is killed).
         var timer = session.TimeoutSeconds is { } seconds
             ? _time.CreateTimer(
@@ -246,6 +278,7 @@ public sealed class SessionManager : IDisposable
 
         // Not awaited inline: the run may already be complete, and Finish takes the lock.
         _ = Task.Run(async () => Finish(id, run, await run.Completion));
+        return started;
     }
 
     /// <summary>An agent ended on its own: completes or fails its session and frees its slot.</summary>
@@ -265,24 +298,24 @@ public sealed class SessionManager : IDisposable
             switch (outcome)
             {
                 case AgentOutcome.Completed completed:
-                    EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode, Summary = completed.Summary });
+                    var done = EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode, Summary = completed.Summary });
                     _events.Publish(new SessionCompleted
                     {
-                        At = _sessions[id].EndedAt!.Value, SessionId = id, Previous = session.Status,
+                        At = done.EndedAt!.Value, SessionId = id, Previous = session.Status,
                         ExitCode = completed.ExitCode, Summary = completed.Summary,
                     });
                     break;
                 case AgentOutcome.Failed failed:
-                    EndLocked(session, SessionStatus.Failed, s => s with { Error = failed.Error });
-                    _events.Publish(new SessionFailed { At = _sessions[id].EndedAt!.Value, SessionId = id, Previous = session.Status, Error = failed.Error });
+                    var failedSession = EndLocked(session, SessionStatus.Failed, s => s with { Error = failed.Error });
+                    _events.Publish(new SessionFailed { At = failedSession.EndedAt!.Value, SessionId = id, Previous = session.Status, Error = failed.Error });
                     break;
                 default:
                     // Stopped from outside ARM.
                     const string reason = "The agent stopped.";
-                    EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
+                    var stopped = EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
                     _events.Publish(new SessionKilled
                     {
-                        At = _sessions[id].EndedAt!.Value, SessionId = id, Previous = session.Status, Reason = reason, Source = KillSource.System,
+                        At = stopped.EndedAt!.Value, SessionId = id, Previous = session.Status, Reason = reason, Source = KillSource.System,
                     });
                     break;
             }
@@ -291,13 +324,29 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    private void EndLocked(SessionRecord session, SessionStatus status, Func<SessionRecord, SessionRecord> details) =>
-        _sessions[session.Id] = details(session with
+    private SessionRecord EndLocked(SessionRecord session, SessionStatus status, Func<SessionRecord, SessionRecord> details) =>
+        SaveLocked(details(session with
         {
             Status = SessionLifecycle.Move(session.Status, status),
             QueuePosition = null,
             EndedAt = _time.GetUtcNow(),
-        });
+        }));
+
+    /// <summary>Stores a session's new state, then keeps it in memory while it's queued or working.</summary>
+    private SessionRecord SaveLocked(SessionRecord session)
+    {
+        _store.Update(session);
+        if (SessionLifecycle.IsTerminal(session.Status))
+        {
+            _sessions.Remove(session.Id);
+        }
+        else
+        {
+            _sessions[session.Id] = session;
+        }
+
+        return session;
+    }
 
     /// <summary>Fills free slots from the head of the queue.</summary>
     private void StartNextLocked()

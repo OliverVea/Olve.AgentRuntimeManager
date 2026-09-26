@@ -491,3 +491,8 @@ data/
 # UI reference screenshots of the system ARM is modelled on: they show internal names and URLs,
 # and this repo is public. Kept locally only; docs/UI-REFERENCE.md describes them in text.
 docs/mocks/
+
+# SQLite databases (local runs, tests): they hold real prompts
+*.db
+*.db-shm
+*.db-wal

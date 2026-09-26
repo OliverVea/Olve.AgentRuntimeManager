@@ -28,11 +28,16 @@ public class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Auth:SigningKey", Tokens.SigningKey);
         builder.UseSetting("Auth:Authority", Tokens.Issuer);
         builder.UseSetting("Auth:Audience", Tokens.Audience);
+        // A database of its own, next to the (empty) content root; a subclass may point elsewhere.
+        builder.UseSetting("ConnectionStrings:Arm", ConnectionString(_contentRoot));
         foreach (var (key, value) in Settings)
         {
             builder.UseSetting(key, value);
         }
     }
+
+    /// <summary>The SQLite database in <paramref name="folder"/>.</summary>
+    public static string ConnectionString(string folder) => $"Data Source={Path.Combine(folder, "arm.db")};Pooling=False";
 
     /// <summary>
     /// Extra configuration. By default enough slots that concurrently running tests never queue

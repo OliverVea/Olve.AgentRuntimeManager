@@ -71,8 +71,8 @@ The `/api` endpoints are generated from the contract (see [Client Generation](#c
 the app implements one generated `I…Handler` per operation and opts operations out of auth in
 `Program.cs`. Every error is the envelope `{ "error": { code, message, details } }`.
 
-Sessions (`Sessions/`) run in memory (persistence is M5): `SessionManager` keeps a FIFO queue in
-front of `Sessions:TotalSlots` slots, moves sessions through the state machine
+Sessions (`Sessions/`) are stored in SQLite (see [Persistence](#persistence)): `SessionManager`
+keeps a FIFO queue in front of `Sessions:TotalSlots` slots, moves sessions through the state machine
 (`SessionLifecycle`), kills them at their timeout, and publishes a lifecycle event per change.
 Agents run through the `IAgentProvider` seam; the only provider so far is `fake`, which runs no
 LLM and follows `fake:` directives in the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`,
@@ -200,6 +200,7 @@ Sources in priority order (highest wins):
 | `OpenTelemetry:Endpoint` | `https://otel.ovea.pro` | OTLP endpoint (null = disabled) |
 | `Storage:Mode` | `Ephemeral` | `Ephemeral` (in-memory) or `Persistent` (snapshot to disk) |
 | `Storage:Directory` | `data` | Directory for `Persistent` snapshots |
+| `ConnectionStrings:Arm` | _(a file in the user's local data folder)_ | The SQLite database, e.g. `Data Source=/var/lib/olve-arm/arm.db` |
 | `Events:HeartbeatInterval` | `00:00:30` | Heartbeat period of `GET /api/events` connections |
 | `Events:ReplayCapacity` | `1000` | Recent events kept for `Last-Event-ID` replay (and how far a connection may lag) |
 | `Sessions:TotalSlots` | `10` | Sessions that run at once; more are queued (202) |
@@ -209,15 +210,25 @@ Sources in priority order (highest wins):
 
 ### Persistence
 
-Sessions are in memory for now (M5 persists them). The `Stores/` module (an `EntityStore<T>`
-snapshot persister: `Storage:Mode=Persistent` loads on startup and saves a debounced
-whole-snapshot JSON to `Storage:Directory` via the BCL-only `FileSnapshotStore`) is not wired to
-anything since the `Message` example was removed; M5 decides whether sessions use it.
+Sessions live in SQLite through EF Core (`Persistence/`; OPEN-QUESTIONS A5): `ArmDbContext`, and
+`EfSessionStore` behind the `ISessionStore` port. `SessionManager` stores every change before it
+changes memory or publishes the event; it keeps queued and working sessions in memory too (queue
+positions aren't stored) and reads ended ones from the database.
 
-Everything sits behind the `ISnapshotStore` seam (`Stores/`), so the persistence ladder — in-memory →
-file → S3/MinIO → relational — is a one-line swap at registration without touching the store or
-handlers. The `Stores/` module is written at library quality for later promotion to
-`Olve.Utilities.Hosting`.
+- **Where:** `ConnectionStrings:Arm`. Unset, a local run uses `arm.db` in the user's local data
+  folder (`~/.local/share/olve-arm/` on Linux), never the repo. The VMs use
+  `/var/lib/olve-arm/arm.db` (systemd's `StateDirectory`, outside the release folders a deploy
+  replaces). The API tests give each in-process host a database of its own.
+- **Schema:** EF Core migrations in `Persistence/Migrations/`, applied at startup before the
+  server listens. They are generated code but committed: they're the schema's history, which
+  can't be regenerated. Add one after changing the model (from `src/backend/`):
+  `dotnet ef migrations add <Name> --project Olve.AgentRuntimeManager --output-dir Persistence/Migrations`
+  (`dotnet tool restore` first; `ArmDbContextDesignFactory` builds the context without the app).
+- **Restart:** the new server kills the sessions that were working (source `system`, "ARM
+  restarted; the agent was lost.") and queues the queued ones again in their order, until gentle
+  restart (M5a) re-attaches running agents.
+- Not stored yet: the event replay buffer (M6) and `Idempotency-Key`s (a retried create after a
+  restart creates a new session).
 
 ## Client Generation
 

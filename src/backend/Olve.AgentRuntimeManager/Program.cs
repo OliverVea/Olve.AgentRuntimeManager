@@ -2,6 +2,7 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Configuration;
 using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Health;
+using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.Utilities.AsyncOnStartup;
 
@@ -12,6 +13,7 @@ builder.ConfigureJson();
 builder.ConfigureAuthentication();
 builder.ConfigureTelemetry();
 builder.Services.AddEventServices(builder.Configuration);
+builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddSessionServices(builder.Configuration);
 builder.Services.AddSingleton<IAuthConfigGetHandler, GetAuthConfigHandler>();
 builder.Services.AddSingleton<IServerInfoApiGetHandler, GetServerInfoHandler>();
@@ -37,6 +39,14 @@ api.AuthConfigGet.AllowAnonymous();
 
 // SPA client-side routing: any unmatched non-API GET returns index.html so deep links work.
 app.MapFallbackToFile("index.html").AllowAnonymous();
+
+// Before listening: bring the database up to date, then pick up the sessions the last run left.
+// Not when `dotnet build` runs this entry point only to write the OpenAPI document.
+if (System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name != "GetDocument.Insider")
+{
+    await app.Services.MigrateDatabaseAsync();
+    app.Services.GetRequiredService<SessionManager>().Recover();
+}
 
 // Start the host, then run one-shot startup tasks (IAsyncOnStartup), then block until shutdown.
 await app.StartAsync();
