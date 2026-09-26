@@ -325,6 +325,4 @@ public sealed class SessionManager : IDisposable
             _sessions[_queue[i]] = _sessions[_queue[i]] with { QueuePosition = i + 1 };
         }
     }
-
-    private sealed record RunningAgent(IAgentRun Run, ITimer Timeout);
 }

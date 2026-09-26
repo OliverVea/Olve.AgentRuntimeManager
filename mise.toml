@@ -35,7 +35,7 @@ set -euo pipefail
 image="olve-arm:api-test"
 key="api-image-test-signing-key-that-is-long-enough"
 docker build -t "$image" ../..
-container=$(docker run -d -p 127.0.0.1::5000 -e Host=0.0.0.0 \
+container=$(docker run -d -p 127.0.0.1::5000 -e Host=0.0.0.0 -e Sessions__TotalSlots=1000 \
   -e Auth__SigningKey="$key" -e Auth__Authority=api-test -e Auth__Audience=api-test "$image")
 trap 'docker rm -f "$container" >/dev/null' EXIT
 url="http://$(docker port "$container" 5000/tcp | head -n1)"

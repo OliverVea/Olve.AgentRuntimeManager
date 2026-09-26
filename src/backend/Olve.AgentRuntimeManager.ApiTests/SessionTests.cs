@@ -13,6 +13,9 @@ public class SessionTests(ApiTarget target)
 {
     private static string UniqueCaller() => $"api-test-{Guid.NewGuid():N}";
 
+    /// <summary>Terminal: on a busy target a session may be queued before it works, so "not working" isn't enough.</summary>
+    private static bool Ended(SessionBody session) => session.Status is "completed" or "failed" or "killed";
+
     [Test]
     public async Task Create_WithAFreeSlot_Is201_AndResolvesDefaults()
     {
@@ -68,7 +71,7 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
         var session = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms fake:exit=3 fake:summary=all_done" });
 
-        var completed = await client.WaitForSessionAsync(session.Id, s => s.Status != "working");
+        var completed = await client.WaitForSessionAsync(session.Id, Ended);
 
         await Assert.That(completed.Status).IsEqualTo("completed");
         await Assert.That(completed.ExitCode).IsEqualTo(3);
@@ -82,7 +85,7 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
         var session = await client.CreateSessionAsync(new { prompt = "fake:sleep=0ms fake:fail=out_of_tokens" });
 
-        var failed = await client.WaitForSessionAsync(session.Id, s => s.Status != "working");
+        var failed = await client.WaitForSessionAsync(session.Id, Ended);
 
         await Assert.That(failed.Status).IsEqualTo("failed");
         await Assert.That(failed.Error).IsEqualTo("out of tokens");
@@ -94,7 +97,7 @@ public class SessionTests(ApiTarget target)
         var client = target.CreateAuthenticatedClient();
         var session = await client.CreateSessionAsync(new { prompt = "fake:hang", timeoutSeconds = 1 });
 
-        var killed = await client.WaitForSessionAsync(session.Id, s => s.Status != "working");
+        var killed = await client.WaitForSessionAsync(session.Id, Ended);
 
         await Assert.That(killed.Status).IsEqualTo("killed");
         await Assert.That(killed.KillSource).IsEqualTo("timeout");
