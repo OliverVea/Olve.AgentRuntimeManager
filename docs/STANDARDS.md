@@ -37,7 +37,8 @@ reason. Back a rule with a test where possible.
   defaults) where the CLI is exhaustive. Client changes land together: no client-only features.
 - Web UI changes are mock-first: a standalone HTML/CSS/JS mock (page, flow or widget, fake data)
   in `src/frontend/mocks/` is approved first, the UI is then built to match it and approved in
-  turn, and the mock is deleted. Style and layout reference: [`UI-REFERENCE.md`](UI-REFERENCE.md).
+  turn, and the mock is deleted. A mock may be kept as the approved target while it's built
+  across milestones (e.g. the sessions screen, see MILESTONES "Web UI"). Style and layout reference: [`UI-REFERENCE.md`](UI-REFERENCE.md).
 
 ## Code
 

@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOCK · ARM sessions</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f6f4; --card: #ffffff; --line: #e4e4e0; --text: #1d1d1b; --dim: #6b6b66; --faint: #9a9a94;
+    --field: #ffffff; --chip: #f1f1ed; --hover: #f1f1ed; --backdrop: rgba(0, 0, 0, .25);
+    --accent: #2563eb; --accent-fill: #2563eb; --on-accent: #ffffff;
+    --danger: #dc2626; --danger-fill: #dc2626; --danger-soft: #fee2e2;
+    --working: #15803d; --working-bg: #dcfce7; --queued: #52525b; --queued-bg: #f1f1f4;
+    --completed: #15803d; --completed-bg: #dcfce7; --killed: #b45309; --killed-bg: #fef3c7;
+    --failed: #dc2626; --failed-bg: #fee2e2;
+    --banner-bg: #fef3c7; --banner-fg: #92400e; --beta: #7c3aed; --beta-bg: #ede9fe;
+    --ctx-ok: #15803d; --ctx-ok-bg: #dcfce7; --ctx-warn: #a16207; --ctx-warn-bg: #fef9c3; --ctx-high: #b91c1c; --ctx-high-bg: #fee2e2;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --row: 22px;  /* one line in both card columns, so they line up */
+  }
+  /* Dark: set by the script from the system preference, or your override. */
+  :root.dark {
+    color-scheme: dark;
+    --bg: #131312; --card: #1c1c1a; --line: #33332f; --text: #ececea; --dim: #a1a19a; --faint: #75756f;
+    --field: #232321; --chip: #2a2a27; --hover: #2a2a27; --backdrop: rgba(0, 0, 0, .55);
+    --accent: #7aa7ff; --accent-fill: #3563d4; --on-accent: #ffffff;
+    --danger: #f87171; --danger-fill: #b83232; --danger-soft: #3a1818;
+    --working: #4ade80; --working-bg: #143020; --queued: #b4b4bc; --queued-bg: #2a2a2e;
+    --completed: #4ade80; --completed-bg: #143020; --killed: #fbbf24; --killed-bg: #372b0c;
+    --failed: #f87171; --failed-bg: #3a1818;
+    --banner-bg: #372b0c; --banner-fg: #fcd34d; --beta: #c4b5fd; --beta-bg: #2e2250;
+    --ctx-ok: #4ade80; --ctx-ok-bg: #143020; --ctx-warn: #facc15; --ctx-warn-bg: #3a320c; --ctx-high: #f87171; --ctx-high-bg: #3a1818;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  .mock-banner { background: var(--banner-bg); color: var(--banner-fg); font-size: 12px; padding: 4px 16px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .mock-banner button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
+  .mock-banner button.on { font-weight: 700; text-decoration: none; }
+
+  /* ---- header ---- */
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 24px; background: var(--card); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 750; font-size: 19px; letter-spacing: .02em; }
+  .env { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--beta); background: var(--beta-bg); border-radius: 4px; padding: 1px 7px; }
+  .version { color: var(--dim); font: 12px var(--mono); }
+  .spacer { flex: 1; }
+  .live { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--working); }
+  .dot.reconnecting { background: var(--killed); animation: pulse 1s infinite; }
+  .dot.down { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .user { color: var(--dim); font-size: 13px; }
+  .icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); }
+  .icon-btn:hover { background: var(--hover); color: var(--text); }
+
+  main { max-width: 1320px; margin: 0 auto; padding: 20px 24px 40px; }
+
+  /* ---- composer ---- */
+  .composer { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  /* One line to start; grows with the prompt. The resize grip only appears once it's multi-line. */
+  .composer textarea { display: block; width: 100%; min-height: 40px; max-height: 50vh; resize: none; overflow-y: hidden; border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; background: var(--field); line-height: 20px; }
+  .composer textarea.multiline { resize: vertical; overflow-y: auto; }
+  .composer textarea:focus, .field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .composer .row { display: flex; align-items: center; gap: 8px 16px; margin-top: 10px; flex-wrap: wrap; }
+  /* Labels sit left of their inputs here, to keep the composer short. */
+  .composer .field { flex-direction: row; align-items: center; gap: 7px; font-size: 13px; }
+  .field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
+  .field input, .field select { font-size: 13px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--field); color: var(--text); height: 32px; }
+  .field .num { width: 6.5em; font-family: var(--mono); }
+  .field .caller { width: 10em; }
+  .hint { color: var(--faint); font-size: 12px; }
+  .composer .settings { display: contents; }
+  /* Phones: the settings fold behind a light "Advanced" toggle. */
+  .advanced-toggle { display: none; border: 0; background: none; color: var(--faint); font-size: 13px; padding: 0; }
+  .advanced-toggle:hover { color: var(--dim); }
+  .primary { height: 32px; border: 0; border-radius: 6px; padding: 0 16px; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+  .primary:disabled { opacity: .45; cursor: default; }
+  .primary.danger { background: var(--danger-fill); }
+  .toast { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .toast:empty { display: none; }
+
+  /* ---- views ---- */
+  nav.views { display: flex; gap: 2px; margin: 22px 0 10px; border-bottom: 1px solid var(--line); }
+  nav.views button { border: 0; background: none; padding: 6px 12px; color: var(--dim); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+  nav.views button.on { color: var(--text); border-bottom-color: var(--text); font-weight: 650; }
+
+  /* ---- session cards: | details | log | icons | ---- */
+  .card { display: grid; grid-template-columns: minmax(250px, 30%) 1fr auto; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 9px; margin-bottom: 8px; }
+  .card { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+  .card:hover { border-color: var(--faint); box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card.working { border-left-color: var(--working); } .card.queued { border-left-color: var(--queued); }
+  body.today .card { grid-template-columns: 1fr auto; }
+  body.today .logcol { display: none; }
+  .details, .logcol { padding: 8px 14px; min-width: 0; }
+  .details { border-right: 1px solid var(--line); }
+  body.today .details { border-right: 0; }
+  .details > div { height: var(--row); line-height: var(--row); white-space: nowrap; overflow: hidden; }
+  .r1 { display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: 4px; padding: 0 7px; line-height: 18px; flex: none; }
+  .badge.working { background: var(--working-bg); color: var(--working); } .badge.queued { background: var(--queued-bg); color: var(--queued); }
+  .badge.completed { background: var(--completed-bg); color: var(--completed); } .badge.killed { background: var(--killed-bg); color: var(--killed); }
+  .badge.failed { background: var(--failed-bg); color: var(--failed); }
+  .dur, .when { font: inherit; font-variant-numeric: tabular-nums; color: var(--dim); flex: none; border: 0; background: none; padding: 0; cursor: pointer; }
+  .dur:hover, .when:hover { text-decoration: underline dotted; }
+  .r1 .sep { color: var(--faint); flex: none; margin: 0 -2px; }
+  .note { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .note.failed { color: var(--failed); }
+  .subs { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; color: var(--dim); font-size: 12px; padding: 0 2px; }
+  .subs:hover { color: var(--accent); }
+  .subs svg.i { width: 14px; height: 14px; }
+  .task { font-size: 14px; text-overflow: ellipsis; }
+  .info { font: 12px var(--mono); color: var(--dim); }
+  .info > span + span::before { content: "·"; margin: 0 6px; color: var(--faint); }
+  .r1.overflows, .info.overflows { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3em), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 3em), transparent); }
+  .info .id { cursor: copy; border-bottom: 1px dotted var(--faint); }
+  .info .id:hover { color: var(--accent); }
+
+  .logcol { position: relative; cursor: text; user-select: text; }
+  .log { font: 12.5px var(--mono); color: var(--dim); height: calc(3 * var(--row)); display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+  .log > div { line-height: var(--row); white-space: nowrap; overflow: hidden; flex: none; padding-left: 16px; position: relative; }
+  .log > div::before { position: absolute; left: 0; top: 0; width: 12px; text-align: center; }
+  .log .text { color: var(--text); } .log .text::before { content: "›"; color: var(--faint); }
+  .log .tool { color: var(--accent); }
+  .log .tool::before { content: ""; top: 5px; height: 12px; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E") center / contain no-repeat; }
+  .log a { color: var(--accent); }
+  .log .result::before { content: "↳"; color: var(--faint); }
+  .log .error { color: var(--failed); } .log .error::before { content: "!"; font-weight: 700; }
+  .log .quiet { color: var(--faint); font: italic 13px system-ui, sans-serif; padding-left: 0; }
+  .log .quiet::before { content: none; }
+  /* Unwrapped lines that don't fit fade at the right edge (.overflows is measured after render). */
+  .log > div.overflows { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 4em), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 4em), transparent); }
+  /* Wrap only changes how lines break; the box keeps its height and older lines leave at the top. */
+  .log.wrap > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .log.wrap > div.overflows { -webkit-mask-image: none; mask-image: none; }
+  .log.wrap.clipped:not(.open) { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1.2em); mask-image: linear-gradient(to bottom, transparent, #000 1.2em); }
+  /* Expand is what makes it grow. */
+  .log.open { height: auto; min-height: calc(3 * var(--row)); }
+  /* The card's icons, in a row at its top right: expand, wrap, stop (or delete). Every slot is
+     kept (hidden when it doesn't apply) so the icons line up from card to card. */
+  .icons { display: flex; align-items: center; gap: 1px; align-self: start; padding: 5px 6px 0 0; }
+  .icons button { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); padding: 0; }
+  .icons button:hover { background: var(--hover); color: var(--text); }
+  .icons button.on { color: var(--accent); }
+  .icons button.stop:hover { background: var(--danger-soft); color: var(--danger); }
+  .icons svg.i { width: 15px; height: 15px; }
+  .icons .off { visibility: hidden; }
+  /* Shown on hover (or keyboard focus), or when switched on; always on touch screens. */
+  .icons button { opacity: 0; transition: opacity .12s; }
+  .card:hover .icons button, .icons button:focus-visible, .icons button.on, .icons button.stop { opacity: 1; }
+  /* Stop (and delete) is always shown, in red. */
+  .icons button.stop { color: var(--danger); }
+  @media (hover: none) { .icons button { opacity: 1; } }
+  /* Context use, next to the duration: green < 15%, yellow < 30%, red from 30%. */
+  .ctx { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; flex: none; border: 0; background: none; padding: 0; cursor: pointer; }
+  .ctx:hover { text-decoration: underline dotted; }
+  .ctx.ok { color: var(--ctx-ok); } .ctx.warn { color: var(--ctx-warn); } .ctx.high { color: var(--ctx-high); }
+
+  /* Subagents: full cards under their parent, joined by a rail. */
+  .children { margin: -2px 0 8px 18px; padding-left: 14px; border-left: 2px solid var(--line); }
+  .more-kids { border: 0; background: none; color: var(--dim); font-size: 12px; padding: 0 0 8px; }
+  .more-kids:hover { color: var(--accent); }
+
+  .back { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .detail-card { margin-top: 12px; background: var(--card); border: 1px dashed var(--line); border-radius: 10px; padding: 28px; color: var(--dim); text-align: center; }
+  .detail-card strong { color: var(--text); }
+  .empty { color: var(--dim); text-align: center; padding: 34px; }
+  .footer-note { text-align: center; color: var(--dim); font-size: 13px; margin-top: 6px; }
+  .footer-note button { border: 0; background: none; color: var(--accent); padding: 0; }
+
+  /* ---- dialogs ---- */
+  dialog { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(460px, 92vw); background: var(--card); color: var(--text); }
+  dialog::backdrop { background: var(--backdrop); }
+  dialog h3 { margin: 0 0 6px; font-size: 17px; }
+  dialog p { color: var(--dim); margin: 0 0 10px; }
+  dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .ghost { height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 0 14px; background: transparent; }
+  .ghost:hover { background: var(--hover); }
+  section.opt { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; display: grid; gap: 10px; }
+  section.opt h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
+  section.opt .field input, section.opt .field select { width: 100%; }
+  label.check { display: flex; align-items: center; gap: 8px; }
+
+  @media (max-width: 720px) {
+    header { padding: 8px 12px; gap: 8px; } .user, .version { display: none; }
+    main { padding: 12px; }
+    .card, body.today .card { grid-template-columns: 1fr auto; }
+    .details { border-right: 0; grid-column: 1; grid-row: 1; }
+    .icons { grid-column: 2; grid-row: 1; }
+    .logcol { grid-column: 1 / -1; border-top: 1px solid var(--line); }
+    .field .caller { width: 8em; }
+    .advanced-toggle { display: inline; }
+    .hint { display: none; }
+    .composer .settings { display: none; order: 10; width: 100%; flex-direction: column; gap: 8px; }
+    .composer .settings.open { display: flex; }
+    .composer .settings .field { justify-content: space-between; }
+    .composer .settings .field select, .composer .settings .field input { flex: 1; max-width: 70%; width: auto; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
+  <symbol id="i-wrap" viewBox="0 0 24 24"><path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7"/><path d="m16 16-2 2 2 2"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+</svg>
+
+<div class="mock-banner">
+  <span>MOCK — fake data, nothing is sent anywhere.</span>
+  <span>Show: <button data-mode="target">target design</button> · <button data-mode="today">what today's API supports</button></span>
+  <span>Env: <button data-env="prod">prod</button> · <button data-env="beta">beta</button></span>
+  <span>Stream: <button data-stream="connected">connected</button> · <button data-stream="reconnecting">reconnecting</button> · <button data-stream="down">down</button></span>
+</div>
+
+<header>
+  <span class="brand">ARM</span>
+  <span id="env"></span>
+  <span class="spacer"></span>
+  <span class="live" id="live"></span>
+  <span class="user">oliver</span>
+  <button class="icon-btn" id="theme"><svg class="i"><use href="#i-moon"/></svg></button>
+  <button class="icon-btn" id="open-options" title="Options" aria-label="Options"><svg class="i"><use href="#i-cog"/></svg></button>
+  <button class="icon-btn" title="Log out" aria-label="Log out"><svg class="i"><use href="#i-logout"/></svg></button>
+</header>
+
+<main>
+  <form class="composer" id="composer">
+    <textarea id="prompt" rows="1" placeholder="What should the agent do?"></textarea>
+    <div class="row">
+      <button type="button" class="advanced-toggle" id="advanced" aria-expanded="false">Advanced ▾</button>
+      <div class="settings">
+        <label class="field">model <select id="c-model"></select></label>
+        <label class="field">caller <input id="c-caller" class="caller"></label>
+        <label class="field">timeout (s) <input id="c-timeout" class="num" inputmode="numeric" placeholder="none"></label>
+      </div>
+      <span class="spacer"></span>
+      <span class="hint">Ctrl+Enter</span>
+      <button class="primary" id="create" type="submit" disabled>Start session</button>
+    </div>
+    <div class="toast" id="toast"></div>
+  </form>
+
+  <nav class="views" id="views">
+    <button data-view="overview">Overview</button>
+    <button data-view="history">History</button>
+  </nav>
+  <div id="list"></div>
+  <section id="detail" hidden>
+    <a href="#" class="back">← All sessions</a>
+    <div class="detail-card" id="detail-body"></div>
+  </section>
+  <div class="footer-note" id="footer"></div>
+</main>
+
+<dialog id="kill-dialog">
+  <h3>Kill this session?</h3>
+  <p id="kill-what"></p>
+  <label class="field">reason (optional) <input id="kill-reason" placeholder="e.g. wrong prompt"></label>
+  <div class="buttons"><button class="ghost" id="kill-cancel">Cancel</button><button class="primary danger" id="kill-confirm">Kill</button></div>
+</dialog>
+
+<dialog id="delete-dialog">
+  <h3>Delete this session?</h3>
+  <p id="delete-what"></p>
+  <div class="buttons"><button class="ghost" id="delete-cancel">Cancel</button><button class="primary danger" id="delete-confirm">Delete</button></div>
+</dialog>
+
+<dialog id="options-dialog">
+  <h3>Options</h3>
+  <p>Saved in this browser, like <code>arm config</code> on a machine.</p>
+  <section class="opt">
+    <h4>New sessions</h4>
+    <label class="field">model <select id="o-model"></select></label>
+    <label class="field">caller <input id="o-caller"></label>
+    <label class="field">timeout (s) <input id="o-timeout" inputmode="numeric" placeholder="none"></label>
+  </section>
+  <section class="opt">
+    <h4>Display</h4>
+    <label class="field">theme
+      <select id="o-theme"><option value="">Follow the system</option><option value="light">Light</option><option value="dark">Dark</option></select>
+    </label>
+    <label class="check"><input type="checkbox" id="o-wrap"> Wrap log lines by default</label>
+    <label class="check"><input type="checkbox" id="o-expand"> Show whole logs by default</label>
+  </section>
+  <div class="buttons"><button class="ghost" id="options-cancel">Cancel</button><button class="primary" id="options-save">Save</button></div>
+</dialog>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  /** URLs in (already escaped) log text become links. */
+  const linkify = (html) => html.replace(/https?:\/\/[^\s<"]+/g, (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+  const icon = (name) => `<svg class="i"><use href="#i-${name}"/></svg>`;
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
+
+  // ---- mock switches (banner) ----------------------------------------------------------------
+  const params = new URLSearchParams(location.search);
+  let mode = params.get("mode") ?? "target";  // "today" hides what the API can't provide yet
+  let env = params.get("env") ?? "prod";
+  let stream = "connected";
+
+  // ---- what the backend would provide (GET /api/providers; display names fall back to ids) ----
+  const PROVIDERS = [
+    { name: "claude", displayName: "Claude Code", models: [{ id: "claude-opus-5-5", displayName: "Opus 5.5", contextWindow: 1000000 }, { id: "claude-sonnet-5", displayName: "Sonnet 5", contextWindow: 1000000 }, { id: "claude-haiku-4-5", contextWindow: 200000 }] },
+    { name: "fake", models: [{ id: "fake", displayName: "Instant", contextWindow: 1000000 }, { id: "fake-slow", contextWindow: 200000 }] },
+  ].map((p) => ({ ...p, displayName: p.displayName ?? p.name, models: p.models.map((m) => ({ ...m, displayName: m.displayName ?? m.id })) }));
+  const modelLabel = (provider, model) => {
+    const p = PROVIDERS.find((x) => x.name === provider); const m = p?.models.find((x) => x.id === model);
+    return p && m ? `${m.displayName} (${p.displayName})` : `${model} (${provider})`;
+  };
+  const modelOptions = (selected) => PROVIDERS.flatMap((p) => p.models.map((m) => {
+    const v = `${p.name}/${m.id}`; return `<option value="${v}"${v === selected ? " selected" : ""}>${esc(m.displayName)} (${esc(p.displayName)})</option>`;
+  })).join("");
+  const contextWindow = (provider, model) => PROVIDERS.find((p) => p.name === provider)?.models.find((m) => m.id === model)?.contextWindow ?? 200000;
+  const tokens = (n) => n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${n}`;
+  const splitModel = (v) => { const [provider, ...rest] = v.split("/"); return { provider, model: rest.join("/") }; };
+
+  // ---- fake sessions ---------------------------------------------------------------------------
+  const now = Date.now();
+  const ago = (min) => new Date(now - min * 60000).toISOString();
+  const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.floor(Math.random() * 16); return (c === "x" ? r : (r & 3) | 8).toString(16); });
+  const S = (o) => ({ id: uuid(), provider: "fake", model: "fake", caller: "oliver", timeoutSeconds: 600, ...o });
+  const root = S({ status: "working", prompt: "Fix the flaky EventTests on CI and open a PR", contextPct: 34, createdAt: ago(3), startedAt: ago(3),
+    log: [["text", "Looking at the last 20 CI runs for EventTests."], ["tool", "approved_bash → gh run list --workflow ci --limit 20"], ["result", "20 runs · 3 failed in EventTests.LastEventId_ReplaysWhatWasMissed"],
+      ["tool", "start_subagent → Find which EventTests runs failed and why"], ["result", '{"id":"4b1e…","status":"working"}'], ["tool", "start_subagent → Check whether other test classes have the same heartbeat race"], ["result", '{"id":"9c07…","status":"working"}'],
+      ["tool", "start_subagent → Draft the PR description for the replay fix"], ["result", '{"id":"e3d2…","status":"working"}'], ["tool", 'wait_for_subagent → ["4b1e…","9c07…","e3d2…"]'], ["text", "Failing run: https://github.com/OliverVea/Olve.AgentRuntimeManager/actions/runs/1182"]] });
+  let sessions = [
+    root,
+    S({ parentId: root.id, status: "completed", prompt: "Find which EventTests runs failed and why", contextPct: 9, createdAt: ago(2.5), startedAt: ago(2.5), endedAt: ago(1.5), exitCode: 0, summary: "3 failures, all the replay race.",
+      log: [["tool", "approved_bash → gh run view 1182 --log-failed"], ["result", "EventTests.LastEventId_ReplaysWhatWasMissed: no event before the heartbeat"], ["text", "All 3 failures are the same race."]] }),
+    S({ parentId: root.id, key: "sub-wrapped", status: "working", prompt: "Check whether other test classes have the same heartbeat race", contextPct: 13.9, createdAt: ago(1.2), startedAt: ago(1.2),
+      log: [["tool", 'approved_bash → grep -rn "NextAsync(IsHeartbeat)" src/backend'], ["result", "EventTests.cs:38, EventTests.cs:69, EventTests.cs:86, EventTests.cs:147"], ["text", "Four call sites; checking each for a publish before the heartbeat."]] }),
+    S({ parentId: root.id, status: "working", prompt: "Draft the PR description for the replay fix", contextPct: 6, createdAt: ago(1), startedAt: ago(1),
+      log: [["tool", "approved_file_read → src/backend/Olve.AgentRuntimeManager.ApiTests/EventTests.cs"], ["text", "Writing the description…"]] }),
+    S({ key: "deploys", status: "working", prompt: "Summarise yesterday's deploy logs for beta", contextPct: 22, caller: "oribot", model: "claude-sonnet-5", provider: "claude", timeoutSeconds: 7200, createdAt: ago(92), startedAt: ago(90),
+      log: [["tool", "skill_load → homelab-deploys"], ["result", "loaded (3.1 KB)"], ["tool", "approved_bash → pl job list --pipeline ec5fe7ef-11cc-4971-8d33-147dd34647bf --since 24h --json | jq '.[] | {step, status, created}'"],
+        ["result", "14 jobs · all done · build-and-package 3m 12s, check 6m 40s, deploy-beta 41s, test-after-beta 1m 55s, deploy 44s"], ["text", "No failures yesterday; the slowest step is check (mise run ci), which runs the emitter conformance suite, the backend tests, and the frontend and CLI builds."]] }),
+    S({ status: "queued", queuePosition: 1, prompt: "Review the M5 persistence plan and list risks", provider: "claude", model: "claude-opus-5-5", timeoutSeconds: 1800, createdAt: ago(1) }),
+    S({ status: "completed", prompt: "Hello, world", contextPct: 2, createdAt: ago(42), startedAt: ago(42), endedAt: ago(41), exitCode: 0, summary: "Said hello.", log: [["text", "Hello! What would you like to work on?"], ["text", "Said hello."]] }),
+    S({ status: "killed", prompt: "Rewrite the CLI in Rust", contextPct: 12, createdAt: ago(90), startedAt: ago(90), endedAt: ago(85), killSource: "user", killCaller: "oliver", killReason: "changed my mind",
+      log: [["text", "Planning the port: 14 modules, starting with the API client."], ["tool", "approved_bash → cargo new arm-rs"], ["result", "Created binary (application) `arm-rs` package"], ["text", "Mapping the Hey API types onto serde structs…"]] }),
+    S({ status: "failed", prompt: "Import the Slack history into ARM", contextPct: 97, caller: "oribot", createdAt: ago(200), startedAt: ago(200), endedAt: ago(199), error: "out of tokens",
+      log: [["tool", "approved_bash → slack-export --channel arm --all"], ["result", "exported 18,204 messages (41 MB)"], ["text", "Reading the export to group messages into sessions…"], ["error", "out of tokens"]] }),
+    S({ key: "timeout", status: "killed", prompt: "Run the whole test suite 100 times", contextPct: 8, caller: "ci", timeoutSeconds: 60, createdAt: ago(300), startedAt: ago(300), endedAt: ago(299), killSource: "timeout", killReason: "Timed out after 60s.",
+      log: [["tool", "approved_bash → for i in $(seq 100); do dotnet test; done"], ["result", "run 1/100: 182 passed"], ["result", "run 2/100: 182 passed"], ["result", "run 3/100: 182 passed"], ["result", "run 4/100: 182 passed"]] }),
+  ];
+  const byKey = (k) => sessions.find((s) => s.key === k)?.id;
+
+  // ---- preferences (this browser) --------------------------------------------------------------
+  let defaults = { provider: "fake", model: "fake", caller: "oliver", timeoutSeconds: null };
+  let display = { wrap: false, expand: false };
+  let themeOverride = store.get("arm-theme");  // null = follow the system
+  let timesAs = store.get("arm-times") ?? "relative";  // "relative" or "absolute"; click a time to switch
+  let contextAs = store.get("arm-context") ?? "percent";  // "percent" or "tokens"; click a context value to switch
+
+  // ---- view state ------------------------------------------------------------------------------
+  let view = "overview";
+  // Examples, so the toggles are visible without clicking: two cards wrapped, two expanded.
+  const wrapped = new Set([byKey("deploys"), byKey("sub-wrapped")]);
+  const expanded = new Set([byKey("sub-wrapped"), byKey("timeout")]);
+  const collapsedKids = new Set();
+  const showEndedKids = new Set();
+  const SLOTS = 3;
+
+  const ended = (s) => ["completed", "killed", "failed"].includes(s.status);
+  const short = (s) => s.id.slice(0, 8);
+  const since = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  const fmt = (sec) => { if (sec < 60) return `${sec}s`; const m = Math.floor(sec / 60); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`; };
+  const rel = (iso) => { const m = Math.round(since(iso) / 60); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`; };
+  /** A clock time: "08:31" today, "Sep 25 08:31" on other days. */
+  const clock = (iso) => {
+    const d = new Date(iso), today = new Date();
+    const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    return d.toDateString() === today.toDateString() ? hm : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${hm}`;
+  };
+  /** The time after the status: running time (or since when), or how long an ended session ran. */
+  const timeOf = (s) => ended(s) || timesAs === "relative" ? durationOf(s) : `since ${clock(s.startedAt ?? s.createdAt)}`;
+  const durationOf = (s) => ended(s) ? fmt(Math.round((Date.parse(s.endedAt) - Date.parse(s.startedAt ?? s.createdAt)) / 1000)) : fmt(since(s.startedAt ?? s.createdAt));
+  const renumber = () => sessions.filter((s) => s.status === "queued").sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).forEach((s, i) => (s.queuePosition = i + 1));
+
+  const timeTitle = (s) => [
+    `created ${clock(s.createdAt)}`, s.startedAt ? `started ${clock(s.startedAt)}` : "", s.endedAt ? `ended ${clock(s.endedAt)}` : "",
+  ].filter(Boolean).join(" · ") + `. Click to show ${timesAs === "relative" ? "clock times" : "relative times"}.`;
+
+  // ---- render ----------------------------------------------------------------------------------
+  function render() {
+    document.body.classList.toggle("today", mode === "today");
+    $$("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+    $$("[data-env]").forEach((b) => b.classList.toggle("on", b.dataset.env === env));
+    $$("[data-stream]").forEach((b) => b.classList.toggle("on", b.dataset.stream === stream));
+    // Only beta shows that it's beta, with its build version.
+    $("#env").innerHTML = env === "beta" ? `<span class="env">BETA</span> <span class="version">2026.9.26.8</span>` : "";
+
+    const working = sessions.filter((s) => s.status === "working" && (mode === "target" || !s.parentId)).length;  // subagents count when they exist
+    const queued = sessions.filter((s) => s.status === "queued").length;
+    const streamText = { connected: `${working} working · ${queued} queued`, reconnecting: "reconnecting…", down: "offline — retrying" }[stream];
+    $("#live").innerHTML = `<span class="dot ${stream}"></span>${streamText}`;
+    $("#live").title = { connected: "Live: updates arrive as they happen", reconnecting: "The live connection dropped; reconnecting", down: "No live connection; the list may be out of date" }[stream];
+
+    $$("[data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === view));
+    // Today's API has no subagents, so their sessions don't exist there.
+    const roots = sessions.filter((s) => !s.parentId);
+    const shown = view === "overview"
+      // Overview grows bottom-up: oldest at the top, newest at the bottom. History: newest first.
+      ? roots.filter((s) => !ended(s)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      : roots.filter(ended).sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt));
+    $("#list").innerHTML = shown.length ? shown.map((s) => card(s) + children(s)).join("")
+      : `<div class="empty">${view === "overview" ? "Nothing running. Start a session above." : "No ended sessions yet."}</div>`;
+    $("#footer").innerHTML = view === "history" && shown.length ? `Showing the newest ${shown.length} · <button>load older</button>` : "";
+    markOverflow();
+  }
+
+  function card(s) {
+    let note = "";
+    // Only the short part of the outcome fits here; the summary, kill reason or error is in the
+    // log (and in the tooltip).
+    if (s.status === "completed") note = `<span class="note" title="${esc(s.summary ?? "")}">exit ${s.exitCode}</span>`;
+    if (s.status === "killed") note = `<span class="note" title="${esc(s.killReason ?? "")}">by ${s.killSource === "user" ? esc(s.killCaller) : s.killSource}</span>`;
+    const kids = mode === "target" ? sessions.filter((k) => k.parentId === s.id) : [];
+    const subs = kids.length
+      ? `<button class="subs" data-kids="${s.id}" title="Show or hide its subagents">${icon(collapsedKids.has(s.id) ? "right" : "down")}${kids.length} subagent${kids.length === 1 ? "" : "s"}</button>` : "";
+    const info = [
+      `<span class="id" data-copy="${s.id}" title="Copy the full id (${s.id})">${short(s)}</span>`,
+      `<span title="${esc(s.provider)}/${esc(s.model)}">${esc(modelLabel(s.provider, s.model))}</span>`,
+      `<span>${esc(s.caller)}</span>`,
+      ended(s) ? `<button class="when" data-times title="${esc(timeTitle(s))}">ended ${timesAs === "relative" ? rel(s.endedAt) : clock(s.endedAt)}</button>` : "",
+    ].join("");
+
+    const outcome = s.status === "completed" && s.summary ? ["text", s.summary]
+      : s.status === "killed" ? ["error", s.killSource === "user" ? `killed by ${s.killCaller}${s.killReason ? `: ${s.killReason}` : ""}` : `killed: ${s.killReason ?? s.killSource}`]
+      : s.status === "failed" ? ["error", s.error] : null;
+    const logged = s.log ?? [];
+    const all = outcome && !logged.some(([, t]) => t === outcome[1]) ? [...logged, outcome] : logged;
+    const open = expanded.has(s.id), wrap = wrapped.has(s.id);
+    const lines = open ? all : all.slice(wrap ? -8 : -3);
+    const log = lines.length
+      ? lines.map(([kind, text]) => `<div class="${kind}" title="${esc(text)}">${linkify(esc(text))}</div>`).join("")
+      : `<div class="quiet">${s.status === "queued" ? "waiting for a slot…" : "no output yet"}</div>`;
+    const today = mode === "today";
+    const win = contextWindow(s.provider, s.model);
+    const used = Math.round((s.contextPct ?? 0) / 100 * win);
+    const ctxText = contextAs === "tokens" ? `${tokens(used)}/${tokens(win)}` : `${Math.round(s.contextPct)}%`;
+    const ctx = s.contextPct == null || today ? ""
+      : `<button class="ctx ${s.contextPct < 15 ? "ok" : s.contextPct < 30 ? "warn" : "high"}" data-ctx title="Context used: ${tokens(used)} of ${tokens(win)} tokens (${Math.round(s.contextPct)}%). Click to show ${contextAs === "tokens" ? "percentages" : "token counts"}.">${ctxText}</button>`;
+    const expandBtn = `<button class="${open ? "on" : ""}${today || all.length <= 3 ? " off" : ""}" data-expand="${s.id}" title="${open ? "Show the last 3 lines" : `Show the whole log (${all.length} lines)`}">${icon(open ? "collapse" : "expand")}</button>`;
+    const wrapBtn = `<button class="${wrap ? "on" : ""}${today || !all.length ? " off" : ""}" data-wrap="${s.id}" title="${wrap ? "Don't wrap long lines" : "Wrap long lines"}">${icon("wrap")}</button>`;
+    const stopBtn = ended(s)
+      ? `<button class="stop" data-delete="${s.id}" title="Delete session" aria-label="Delete session">${icon("trash")}</button>`
+      : `<button class="stop" data-kill="${s.id}" title="Kill session" aria-label="Kill session">${icon("x")}</button>`;
+
+    return `<div class="card ${s.status}" data-open="${s.id}" tabindex="0" role="link" aria-label="Open session ${short(s)}">
+      <div class="details">
+        <div class="r1">${[
+          `<span class="badge ${s.status}">${s.status}</span>`,
+          ctx,
+          `<button class="dur" data-dur="${s.id}" data-times title="${esc(timeTitle(s))}">${timeOf(s)}</button>`,
+          s.status === "queued" ? `<span class="note">#${s.queuePosition} in queue</span>` : "",
+          note,
+        ].filter(Boolean).join(`<span class="sep">·</span>`)}${subs}</div>
+        <div class="task" title="${esc(s.prompt)}">${esc(s.prompt)}</div>
+        <div class="info">${info}</div>
+      </div>
+      <div class="logcol"><div class="log${open ? " open" : ""}${wrap ? " wrap" : ""}">${log}</div></div>
+      <div class="icons">${expandBtn}${wrapBtn}${stopBtn}</div>
+    </div>`;
+  }
+
+  // Running subagents hang below their parent; ended ones fold behind a link.
+  function children(parent) {
+    if (mode !== "target" || collapsedKids.has(parent.id)) return "";
+    const kids = sessions.filter((s) => s.parentId === parent.id).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    if (!kids.length) return "";
+    const done = kids.filter(ended);
+    const list = showEndedKids.has(parent.id) ? kids : kids.filter((k) => !ended(k));
+    const more = done.length ? `<button class="more-kids" data-ended="${parent.id}">${showEndedKids.has(parent.id) ? "hide ended" : `+${done.length} ended`}</button>` : "";
+    return `<div class="children">${list.map(card).join("")}${more}</div>`;
+  }
+
+  // Fade lines that are wider than the box; fade the top of wrapped boxes that overflow.
+  function markOverflow() {
+    for (const line of $$(".log:not(.wrap) > div, .info, .r1")) line.classList.toggle("overflows", line.scrollWidth > line.clientWidth + 1);
+    for (const box of $$(".log.wrap:not(.open)")) {
+      const h = [...box.children].reduce((sum, l) => sum + l.getBoundingClientRect().height, 0);
+      box.classList.toggle("clipped", h > box.clientHeight + 1);
+    }
+  }
+  window.addEventListener("resize", markOverflow);
+
+  // Durations keep ticking.
+  setInterval(() => {
+    for (const el of $$("[data-dur]")) { const s = sessions.find((x) => x.id === el.dataset.dur); if (s && !ended(s)) el.textContent = timeOf(s); }
+  }, 1000);
+
+  // ---- the session page: #/sessions/<id> (its own mock comes with M5b) -----------------------------
+  function route() {
+    const m = location.hash.match(/^#\/sessions\/(.+)$/);
+    const s = m && sessions.find((x) => x.id === m[1]);
+    for (const el of [$("#composer"), $("#views"), $("#list"), $("#footer")]) el.hidden = !!s;
+    $("#detail").hidden = !s;
+    if (s) {
+      $("#detail-body").innerHTML = `<strong>${esc(s.prompt)}</strong><br>${short(s)} · ${esc(s.status)}<br><br>
+        The session page — details and the full log (M5b's transcript) — gets its own mock.`;
+      scrollTo(0, 0);
+    }
+  }
+  window.addEventListener("hashchange", route);
+
+  // ---- events (delegated) ------------------------------------------------------------------------
+  const flip = (set, key) => { set.has(key) ? set.delete(key) : set.add(key); render(); };
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("button, [data-copy], a");
+    if (!t) {
+      // A click anywhere else on a card opens that session's page.
+      // The log column isn't part of that: its text can be selected and its links followed.
+      const card = e.target.closest("[data-open]");
+      if (card && !e.target.closest(".logcol") && !getSelection().toString()) location.hash = `#/sessions/${card.dataset.open}`;
+      return;
+    }
+    const d = t.dataset;
+    if (d.mode) { mode = d.mode; render(); }
+    else if (d.env) { env = d.env; render(); }
+    else if (d.stream) { stream = d.stream; render(); }
+    else if (d.view) { view = d.view; render(); }
+    else if (d.expand) flip(expanded, d.expand);
+    else if (d.wrap) flip(wrapped, d.wrap);
+    else if (d.kids) flip(collapsedKids, d.kids);
+    else if (d.ended) flip(showEndedKids, d.ended);
+    else if (d.kill) askKill(d.kill);
+    else if (d.delete) askDelete(d.delete);
+    else if (d.copy) copy(d.copy);
+    else if ("times" in d) { timesAs = timesAs === "relative" ? "absolute" : "relative"; store.set("arm-times", timesAs); render(); }
+    else if ("ctx" in d) { contextAs = contextAs === "tokens" ? "percent" : "tokens"; store.set("arm-context", contextAs); render(); }
+  });
+
+  function copy(text) {
+    // navigator.clipboard needs HTTPS; the mock is served over HTTP, so fall back to execCommand.
+    const area = Object.assign(document.createElement("textarea"), { value: text });
+    document.body.append(area); area.select(); document.execCommand("copy"); area.remove();
+    toast(`Copied ${text}`);
+  }
+  let toastTimer;
+  function toast(text) { $("#toast").textContent = text; clearTimeout(toastTimer); toastTimer = setTimeout(() => ($("#toast").textContent = ""), 3000); }
+
+  // ---- create ------------------------------------------------------------------------------------
+  function fillComposer() {
+    $("#c-model").innerHTML = modelOptions(`${defaults.provider}/${defaults.model}`);
+    $("#c-caller").value = defaults.caller;
+    $("#c-timeout").value = defaults.timeoutSeconds ?? "";
+  }
+  function fitPrompt() {
+    const box = $("#prompt");
+    box.style.height = "auto";
+    box.style.height = `${box.scrollHeight + 2}px`;
+    box.classList.toggle("multiline", box.value.includes("\n") || box.scrollHeight > 42);
+  }
+  $("#advanced").addEventListener("click", () => {
+    const open = $(".composer .settings").classList.toggle("open");
+    $("#advanced").setAttribute("aria-expanded", String(open));
+    $("#advanced").textContent = open ? "Advanced ▴" : "Advanced ▾";
+  });
+  $("#prompt").addEventListener("input", () => { $("#create").disabled = $("#prompt").value.trim() === ""; fitPrompt(); });
+  $("#prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#composer").requestSubmit(); });
+  $("#composer").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const prompt = $("#prompt").value.trim();
+    if (!prompt) return;
+    const running = sessions.filter((s) => s.status === "working" && !s.parentId).length;
+    const s = S({ prompt, ...splitModel($("#c-model").value), caller: $("#c-caller").value.trim() || defaults.caller,
+      timeoutSeconds: Number($("#c-timeout").value) || null, createdAt: new Date().toISOString(), status: running < SLOTS ? "working" : "queued" });
+    if (s.status === "working") { s.startedAt = s.createdAt; s.log = [["text", "Reading the task…"]]; s.contextPct = 1; }
+    sessions.push(s);
+    if (display.wrap) wrapped.add(s.id);
+    if (display.expand) expanded.add(s.id);
+    renumber();
+    $("#prompt").value = ""; $("#create").disabled = true; fitPrompt(); fillComposer();
+    view = "overview";
+    toast(s.status === "working" ? `Started ${short(s)}.` : `Queued ${short(s)} at position ${s.queuePosition} (all ${SLOTS} slots busy).`);
+    render();
+  });
+
+  // ---- kill / delete ------------------------------------------------------------------------------
+  let target = null;
+  function askKill(sid) {
+    target = sessions.find((s) => s.id === sid);
+    $("#kill-what").textContent = `${short(target)} — “${target.prompt}”. Its agent stops now.`;
+    $("#kill-reason").value = ""; $("#kill-dialog").showModal();
+  }
+  $("#kill-cancel").onclick = () => $("#kill-dialog").close();
+  $("#kill-confirm").onclick = () => {
+    const at = new Date().toISOString();
+    for (const kid of sessions.filter((s) => s.parentId === target.id && !ended(s))) Object.assign(kid, { status: "killed", endedAt: at, killSource: "system", killReason: "Parent session was killed.", queuePosition: undefined });
+    const wasWorking = target.status === "working";
+    Object.assign(target, { status: "killed", endedAt: at, startedAt: target.startedAt ?? at, killSource: "user", killCaller: defaults.caller, killReason: $("#kill-reason").value || undefined, queuePosition: undefined });
+    if (wasWorking) { const next = sessions.filter((s) => s.status === "queued").sort((a, b) => a.queuePosition - b.queuePosition)[0]; if (next) Object.assign(next, { status: "working", startedAt: at, queuePosition: undefined, log: [["text", "Reading the task…"]] }); }
+    renumber(); $("#kill-dialog").close(); render();
+  };
+  function askDelete(sid) {
+    target = sessions.find((s) => s.id === sid);
+    $("#delete-what").textContent = `${short(target)} — “${target.prompt}”. It's removed from History and search for good.`;
+    $("#delete-dialog").showModal();
+  }
+  $("#delete-cancel").onclick = () => $("#delete-dialog").close();
+  $("#delete-confirm").onclick = () => { sessions = sessions.filter((s) => s !== target && s.parentId !== target.id); $("#delete-dialog").close(); render(); };
+
+  // ---- theme: the system's, unless you pick light or dark (remembered in this browser) ----------
+  const systemDark = matchMedia("(prefers-color-scheme: dark)");
+  const effectiveDark = () => themeOverride ? themeOverride === "dark" : systemDark.matches;
+  function applyTheme() {
+    document.documentElement.classList.toggle("dark", effectiveDark());
+    const dark = effectiveDark();
+    $("#theme").innerHTML = icon(dark ? "sun" : "moon");
+    $("#theme").title = dark ? "Switch to light" : "Switch to dark";
+  }
+  $("#theme").onclick = () => { themeOverride = effectiveDark() ? "light" : "dark"; store.set("arm-theme", themeOverride); applyTheme(); };
+  systemDark.addEventListener("change", applyTheme);
+
+  // ---- options -------------------------------------------------------------------------------------
+  $("#open-options").onclick = () => {
+    $("#o-model").innerHTML = modelOptions(`${defaults.provider}/${defaults.model}`);
+    $("#o-caller").value = defaults.caller; $("#o-timeout").value = defaults.timeoutSeconds ?? "";
+    $("#o-theme").value = themeOverride ?? ""; $("#o-wrap").checked = display.wrap; $("#o-expand").checked = display.expand;
+    $("#options-dialog").showModal();
+  };
+  $("#options-cancel").onclick = () => $("#options-dialog").close();
+  $("#options-save").onclick = () => {
+    defaults = { ...splitModel($("#o-model").value), caller: $("#o-caller").value.trim() || "oliver", timeoutSeconds: Number($("#o-timeout").value) || null };
+    display = { wrap: $("#o-wrap").checked, expand: $("#o-expand").checked };
+    for (const s of sessions) { display.wrap ? wrapped.add(s.id) : wrapped.delete(s.id); display.expand ? expanded.add(s.id) : expanded.delete(s.id); }
+    themeOverride = $("#o-theme").value || null; store.set("arm-theme", themeOverride);
+    applyTheme(); fillComposer(); $("#options-dialog").close(); render();
+  };
+
+  applyTheme();
+  fillComposer();
+  render();
+  route();
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.matches?.("[data-open]")) location.hash = `#/sessions/${e.target.dataset.open}`;
+  });
+  // Delete on a card (or anything inside it) opens its kill/delete dialog, which still asks first.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Delete" || document.querySelector("dialog[open]")) return;
+    if (e.target.matches?.("input, textarea, select")) return;
+    const card = e.target.closest?.("[data-open]");
+    if (!card) return;
+    e.preventDefault();
+    const session = sessions.find((x) => x.id === card.dataset.open);
+    if (session) (ended(session) ? askDelete : askKill)(session.id);
+  });
+  // The first Tab goes straight to the prompt. Shift+Tab from there walks back through the
+  // header (its last icons first), which the normal order already gives, since it comes before.
+  document.addEventListener("keydown", (e) => {
+    const nothingFocused = document.activeElement === document.body || document.activeElement == null;
+    if (e.key === "Tab" && !e.shiftKey && nothingFocused && !$("#composer").hidden) {
+      e.preventDefault();
+      $("#prompt").focus();
+    }
+  });
+</script>
+</body>
+</html>

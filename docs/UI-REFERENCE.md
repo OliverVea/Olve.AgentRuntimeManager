@@ -1,5 +1,9 @@
 # UI reference
 
+**The approved design is the mock [`src/frontend/mocks/sessions.html`](../src/frontend/mocks/sessions.html)**
+(sessions screen; which milestone builds which part: [`MILESTONES.md`](MILESTONES.md#web-ui)).
+This page is the background it came from.
+
 What the web UI should grow into, described from screenshots of the agent runtime ARM is
 modelled on. The screenshots stay local (`docs/mocks/`, gitignored: they show internal names and
 this repo is public); this is the shareable description. It's a direction, not a spec: each

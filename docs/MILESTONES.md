@@ -19,3 +19,23 @@ The `arm` CLI grows with every milestone.
 - [ ] M13 — **Codex provider** (re-evaluate the current CLI first)
 - [ ] M14 — **Retention**: 6-month retention, hot/cold tiers, compressed archive
 - [ ] M15 — **API versioning** (B3)
+
+## Web UI
+
+The approved target for the sessions screen is the mock
+[`src/frontend/mocks/sessions.html`](../src/frontend/mocks/sessions.html) (open it in a browser;
+its banner switches between the target design and what today's API supports). Each milestone
+builds its part of it in the web UI, alongside its API and CLI (STANDARDS, Clients); UI work
+stays mock-first, so parts the mock doesn't show get a mock of their own first. The mock is
+deleted once the whole screen is built and approved.
+
+| Mock feature | Milestone |
+|---|---|
+| Overview (queued/working, oldest first) and History (ended, newest first); composer (prompt, model, caller, timeout; Ctrl+Enter; "Advanced" on phones); kill ✕ with reason, delete (trash); card: status · duration, task, id · model · caller; copy id; click a time for clock times; Options (defaults for new sessions, theme, wrap/expand defaults); light/dark; Tab/Shift+Tab/Delete keys; clickable cards → the session page | **Next** (the web UI catch-up, before M5), on today's API plus: `GET /api/providers` (model dropdown with display names), no timeout by default, `cancelled` for queued sessions — contract changes, reviewed first |
+| Live updates: the Overview (and later the session page) follows the event stream — subscribe and fetch the snapshot in parallel, buffer, apply what the snapshot lacks (per-session `seq`) — and the live dot shows the stream's state | Next for the Overview (on today's `session.*` events); the `seq` dedupe with M5b/M6 |
+| BETA marker with the build version (beta only) | Next (needs the version from the server) |
+| Log column: last 3 lines, filling from the bottom; expand; wrap (the box keeps its height); fade at the edges; links; outcome as the last line | M5b |
+| Session page (details + the full transcript) | M5b — **needs its own mock first** |
+| Context use (% ↔ tokens/window, green < 15%, yellow < 30%, red from 30%) | M6 (context events), from real numbers with M9 |
+| Subagents nested under their parent (rail, fold, "+N ended") | Not planned yet (VISION "Subagents") |
+| Sleeping sessions | Not planned yet (VISION) |
