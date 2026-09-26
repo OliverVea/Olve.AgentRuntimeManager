@@ -37,6 +37,16 @@ re-evaluated and scoped when it's picked up.
   agent may start subagents only from pre-defined arguments (e.g. named agent configs or
   templates it's allowed to use), not arbitrary prompts, providers or models; likely with
   `start_subagent`/`wait_for_subagent` tools. To be designed on top of M5c.
+- **Inter-session communication and collaboration**: running sessions that know about each other
+  and work together, not only parent and child. Examples: agents on related tasks sending each
+  other messages, asking a peer a question and waiting for the answer, handing work over, or
+  sharing a board of claims and findings so two agents don't do the same work. **Open: where it
+  lives.** It may be a separate layer, service or tool rather than part of ARM. For example, a
+  collaboration service the agents reach through an MCP tool, where ARM provides only the
+  building blocks: session identity and agent tokens (who is speaking), delivering a message into
+  a running session (M11 messaging, steering), waking a sleeping session when something
+  arrives, and events other services can follow. Decide once messaging (M11) and subagents
+  exist; until then keep ARM's pieces general enough that such a layer can be built on them.
 
 ## Classifications
 

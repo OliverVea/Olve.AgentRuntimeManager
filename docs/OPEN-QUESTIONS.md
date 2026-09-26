@@ -79,17 +79,22 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
 - Details and spike findings: [`SPEC-FIRST.md`](SPEC-FIRST.md). Promote to the `olve-api`
   template after M4.
 
-### A10. Providers — ACP as transport, ARM owns the rest
-- **Leaning (2026-09-26):** build ARM. ARM talks to providers over **ACP** (Agent Client
-  Protocol) wherever an adapter is good enough. ACP is an implementation detail behind the
-  provider seam: nothing ACP-shaped (session ids, update types, permission options) goes into
-  `src/spec/`, so a provider can move to a direct integration, or ACP can be dropped, without an
-  API change.
-- **How a provider is wired:** ACP for lifecycle and the event stream (`session/new`, `prompt`,
-  `cancel`, `load`); ARM's tools served to the agent over MCP (HTTP) in `session/new`; the
-  agent's built-in tools and user-level config switched off. Per-provider differences (how to
-  lock down, whether steering and MCP exist) live in a small capability profile, not in separate
-  runners.
+### A10. Providers — direct where the CLI speaks well enough, ACP otherwise; ARM owns the rest
+- **Leaning (2026-09-26, revised the same day after a CLI spike):** build ARM. Each provider is
+  wired the cheapest way that gives the capabilities ARM needs: **Claude directly** through its
+  CLI's `stream-json` protocol, **pi directly** through its RPC mode, and **ACP** (Agent Client
+  Protocol) for providers where an adapter is the better route (Codex and opencode, still to be
+  proven end to end). Whatever the transport, it stays behind the provider seam: nothing
+  provider-shaped (session ids, update types, permission options) goes into `src/spec/`, so a
+  provider can move between direct and ACP without an API change.
+- **How a provider is wired:** lifecycle and the event stream over the provider's transport;
+  ARM's tools served to the agent over MCP (HTTP); the agent's built-in tools and user-level
+  config switched off. Per-provider differences (how to lock down, whether steering and MCP
+  exist) live in a small capability profile, not in separate runners.
+- **Why Claude goes direct:** the CLI (`claude -p --input-format stream-json --output-format
+  stream-json`) did everything the ACP adapter did in the spike, with no Node sidecar and no
+  adapter lagging the CLI's releases; the VMs need only the `claude` binary. (The Agent SDK is
+  the same protocol wrapped in TypeScript/Python, so it adds a sidecar for nothing ARM needs.)
 - **Why build rather than adopt (opencode serve, Rivet Sandbox Agent, …):** they cover the
   easy part (driving the CLIs). Near-full SPEC parity needs what they lack: queue and slots,
   policy-checked ARM-owned tools, `secretEnv`, roles and agent tokens, restart survival,
@@ -100,24 +105,47 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   moving (the ACP SDK ships HTTP/WebSocket/SSE server transports). Revisit now and then. The
   hedge: ARM exposes an ACP endpoint (VISION), so ARM would shrink toward it rather than be
   thrown away.
-- **Spike findings (2026-09-26, `claude-agent-acp` 0.81.2, `codex-acp` 1.13.1, `opencode` 1.18.32,
-  `pi-acp` 0.0.34; throwaway code in the gitignored `sandbox/acp-spike/`):**
-  - *Claude:* `_meta.claudeCode.options.tools: []` turns off the built-in tools, but the user's
-    own connectors and plugins still load. Isolation needs `settingSources: []`,
-    `strictMcpConfig: true` and `ENABLE_CLAUDEAI_MCP_SERVERS=false`; then the agent sees only
-    ARM's tools. `secretEnv` reached `approved_bash`, and the policy block worked. `session/load`
-    in a new adapter process keeps context. It runs on the Claude subscription; the adapter only
-    refuses that with `--hide-claude-auth`.
-  - *Messages mid-turn:* putting a user message in a tool result **does not work**. Claude treats
-    it as a possible prompt injection and ignores it, which is correct. The native
-    `_session/steering` extension works (injected mid-tool, obeyed). So `POST …/messages` uses
-    the provider's native steering; providers without it deliver at the end of the turn, or
-    cancel and re-prompt.
-  - *ARM dies mid-turn:* the agent CLI outlives the adapter, finishes its current turn
-    unsupervised (its ARM tool calls still arrive), then exits (~25s). Gentle restart (M5a, A4)
-    therefore needs a small **supervisor process per session** that owns the agent's stdio and
-    that a restarted ARM reconnects to over a socket (the pattern AOE's `__acp-runner` uses), not
-    adoption by PID.
+- **Gentle restart (M5a):** a small **supervisor per session**, a separate executable shipped in
+  the same release (internal: not part of the `arm` CLI or the API). It owns the agent's stdio,
+  appends the agent's output to a per-session log file, writes the exit code next to it when the
+  agent ends, and listens on a socket that a restarted ARM reconnects to (versioned protocol,
+  since supervisor and server can come from different releases). A reconnecting ARM rebuilds
+  the session from the log. If the supervisor itself is gone, ARM falls back to resuming the
+  provider session (`claude --resume <id>`). Compared with AOE's `__acp-runner`: it relays the
+  provider's own protocol rather than ACP, and the log on disk (not the runner's memory) is what
+  state is rebuilt from. Compared with detached agents adopted by PID after a restart: that has
+  no extra process, but can't deliver input (steering, approvals) to an adopted agent, and PID
+  adoption is fragile; its exit-code file, rebuild-from-log and hard/scheduled restart modes
+  are borrowed.
+- **CLI spike findings (2026-09-26, Claude Code 2.1.283; throwaway code in the gitignored
+  `sandbox/cli-spike/`):**
+  - *Isolation:* `--tools "" --setting-sources "" --strict-mcp-config --mcp-config <arm>
+    --disable-slash-commands`, with `ENABLE_CLAUDEAI_MCP_SERVERS=false` and
+    `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The agent then sees only ARM's tools: no user plugins,
+    skills, connectors, memory or `CLAUDE.md` (a canary in the working directory's `CLAUDE.md`
+    was not seen). Bundled agents and skills are still listed but unreachable without the Agent
+    and Skill tools. `--bare` is no use: it refuses the subscription login.
+  - *Tools and approvals:* `secretEnv` reached `approved_bash`, and the policy block worked.
+    With `--permission-prompt-tool stdio` each tool call that needs approval arrives on stdout as a
+    `can_use_tool` control request and ARM answers allow/deny on stdin; no approval MCP tool is
+    needed. (`--permission-prompts host` without the SDK's `initialize` handshake denied everything.)
+  - *Messages mid-turn:* a user message written to stdin while a tool runs is delivered right
+    after that tool returns, within the same turn. Sonnet obeyed it; Haiku refused it as an
+    injection, so steering is model-dependent. (Putting a message inside a tool result never
+    works, correctly: it reads as prompt injection.)
+  - *Interrupt:* an `interrupt` control request is acknowledged within a second, ends the turn
+    (`error_during_execution`), and the same process takes the next prompt.
+  - *Kill and resume:* SIGTERM exits 143; `--resume <id>` (same working directory) keeps the
+    session id, which ARM can choose up front with `--session-id`, and the context.
+  - *ARM dies mid-turn* (stdin closed, stdout dropped): the agent finishes its turn unsupervised
+    (its ARM tool calls still arrive), then exits (~10s). Same as over ACP, hence the supervisor.
+  - *A killed agent's tool call can arrive twice:* after SIGTERM during an ARM tool call the call
+    was made again. ARM's tools must not run a call twice.
+- **ACP spike findings (2026-09-26, `claude-agent-acp` 0.81.2, `codex-acp` 1.13.1, `opencode`
+  1.18.32, `pi-acp` 0.0.34; throwaway code in the gitignored `sandbox/acp-spike/`):**
+  - *Claude:* same isolation switches needed (`settingSources: []`, `strictMcpConfig: true`,
+    `ENABLE_CLAUDEAI_MCP_SERVERS=false`); tools, `secretEnv`, policy, `session/load` and the
+    native `_session/steering` all worked; ARM dying mid-turn behaved as above (~25s).
   - *Codex:* steering and HTTP MCP are advertised; ChatGPT login works. Lockdown via
     `CODEX_CONFIG` (feature flags) is incomplete: `apply_patch`, `functions.exec`,
     `collaboration.*` (subagents) and goal tools remained. A read-only sandbox is the backstop.
@@ -126,8 +154,7 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   - *pi:* `pi-acp` has no MCP and no steering. ARM's tools would reach pi as a pi extension
     (`--no-builtin-tools -e …`), steering through pi's own RPC mode, so pi is a direct
     integration rather than ACP.
-- **Open:** M9/M13 reshaped around this (ACP provider + Claude profile, then a second profile);
-  the Codex and opencode end-to-end runs.
+- **Open:** the Codex and opencode end-to-end runs (M13); whether Codex goes over ACP or direct.
 
 ---
 
