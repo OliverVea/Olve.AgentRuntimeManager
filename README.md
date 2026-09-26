@@ -156,8 +156,9 @@ The repo deploys via [**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipe
   `check` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI) and
   `claude-code` (the latest Claude Code release for the agents: manifest signature and checksum
   verified, lockdown flags checked, the binary staged in the bundle). A failure gates everything after.
-- **Processing steps (sequential):** `deploy-beta` → `test-after-beta` (the API test suite against
-  live beta) → `deploy` (prod).
+- **Processing steps (sequential):** `deploy-beta` (ends with one real Claude Code turn in the VM,
+  `src/deploy/vm/claude-check.sh`, to confirm login and lockdown) → `test-after-beta` (the API test
+  suite against live beta) → `deploy` (prod).
 - **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN_BETA`,
   `CLAUDE_CODE_OAUTH_TOKEN_PROD`); values live in the pipeline's k8s secret. The Claude Code
   tokens come from `claude setup-token` (valid one year; set with `pl secret set`); keep the beta
