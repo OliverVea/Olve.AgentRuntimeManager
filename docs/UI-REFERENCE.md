@@ -21,6 +21,19 @@ Clients). Every item below also needs its CLI counterpart.
   id, model, caller; right: context use, duration, how long ago, turns) and "View all" →
   history.
 
+### Nested flows (subagents)
+
+- A session that starts subagents shows them as full session cards **directly below it**,
+  indented, joined to it by one vertical rail on the left; the parent card has a
+  "▾ N subagents" toggle that folds them away.
+- The parent's log tail shows the fan-out: `start_subagent → <agent>` (its result carries the
+  child's id), repeated per child, then `wait_for_subagent → [ids]` while it waits.
+- A child card is a normal session card: status, agent, prompt, id, provider badge,
+  model · effort, caller, tags (with a `[+N]` overflow), its own log tail and counters.
+- Only running subagents are listed under an active parent; ended ones aren't shown there.
+- Log tails show tool calls as `⚙ tool → args` with the result on the next line (`↳ …`,
+  truncated), a live cursor on the newest line, and "▾ Expand (N lines)" to open the rest.
+
 ## Session detail (the log view: a core feature)
 
 - Back link to all sessions; status badge and agent name.
