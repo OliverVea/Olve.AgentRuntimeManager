@@ -70,6 +70,12 @@ re-evaluated and scoped when it's picked up.
 
 - **`arm skill update [--all]`**: re-pull skills from their recorded source.
 - **Skill registry protocol**: discover and install from public registries.
+- **`arm-handoff` skill**: hand in-flight work to a fresh ARM session instead of writing a
+  self-igniting letter to disk. The agent writes the same briefing (goal, current state, what to
+  verify first, gotchas, what not to do) and the skill starts a new session with it as the
+  prompt, linked to the one handing off (like `revive`, but with a fresh context). Nothing to
+  delete after reading, no risk of committing it, and the handoff shows up in the session log
+  and UI. Usable from inside ARM sessions and from a local agent via the `arm` CLI.
 
 ## Persistence
 
