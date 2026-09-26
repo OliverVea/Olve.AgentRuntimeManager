@@ -1,7 +1,8 @@
 #!/bin/sh
 # Production gate: runs `mise run ci` — the exact command a developer (or Claude) runs locally.
 # It pins the toolchain (node + dotnet from mise.toml), generates the contract artifacts
-# (TypeSpec → OpenAPI → TS client), then builds and tests backend (unit + contract tests),
+# (TypeSpec → OpenAPI → TS client), runs the emitter tests (snapshots + conformance suite),
+# then builds and tests backend (unit + in-process API tests),
 # frontend (lint, tests, build) and CLI (typecheck, tests, binary). Runs in PARALLEL with
 # build-and-package; a failure fails the production job group, which gates the processing
 # cascade (deploy never runs). Produces no deploy artifacts (no version.txt), so the deploy

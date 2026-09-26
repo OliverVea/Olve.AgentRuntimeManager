@@ -18,18 +18,31 @@ description = "TypeSpec → artifacts/spec/openapi.json + artifacts/generated/ba
 run = "npm run generate"
 
 [tasks."codegen:test"]
-description = "Snapshot tests of the C# backend emitter (src/codegen/typespec-arm-csharp)"
+description = "Emitter tests: snapshots + the tooling conformance suite (fixture → C# → HTTP vs OpenAPI; runs dotnet)"
 run = "npm run codegen:test"
 
 [tasks."backend:test"]
-description = "Backend build + unit and contract tests"
+description = "Backend build + unit and API tests (API tests in-process)"
 dir = "src/backend"
 run = ["dotnet build", "dotnet test"]
 
-[tasks."backend:integration"]
-description = "Integration tests against the real Docker image (needs Docker)"
+[tasks."api:image"]
+description = "API tests against the real Docker image: builds and starts it, runs the suite in base-URL mode (needs Docker)"
 dir = "src/backend"
-run = "dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false -p:RunContractTests=false"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+image="olve-arm:api-test"
+key="api-image-test-signing-key-that-is-long-enough"
+docker build -t "$image" ../..
+container=$(docker run -d -p 127.0.0.1::5000 -e Host=0.0.0.0 \
+  -e Auth__SigningKey="$key" -e Auth__Authority=api-test -e Auth__Audience=api-test "$image")
+trap 'docker rm -f "$container" >/dev/null' EXIT
+url="http://$(docker port "$container" 5000/tcp | head -n1)"
+for _ in $(seq 60); do curl -fs "$url/health" >/dev/null && break || sleep 1; done
+ARM_API_BASE_URL="$url" ARM_API_SIGNING_KEY="$key" ARM_API_ISSUER=api-test ARM_API_AUDIENCE=api-test \
+  dotnet test --project Olve.AgentRuntimeManager.ApiTests
+"""
 
 [tasks."frontend:check"]
 description = "Frontend lint, tests, production build"

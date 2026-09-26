@@ -26,8 +26,7 @@ src/
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
 │   ├── Olve.AgentRuntimeManager.UnitTests/     # Unit tests (TUnit + Rocks)
-│   ├── Olve.AgentRuntimeManager.ContractTests/ # Route-coverage + contract tests against src/spec/main.tsp
-│   ├── Olve.AgentRuntimeManager.IntegrationTests/  # Integration tests (TUnit + Testcontainers, raw HTTP)
+│   ├── Olve.AgentRuntimeManager.ApiTests/      # API behaviour tests over raw HTTP (in-process, or any server via ARM_API_BASE_URL)
 │   ├── tools/version.cs                        # CalVer versioning script
 │   ├── .config/dotnet-tools.json               # Local tools (dotnet-outdated)
 │   ├── global.json                             # SDK pin
@@ -35,7 +34,8 @@ src/
 │   └── Directory.Packages.props                # Central package version management
 ├── frontend/                                   # Vanilla Web Components + TS frontend (see src/frontend/README.md)
 ├── cli/                                        # `arm` CLI (TypeScript on the generated client; see src/cli/README.md)
-├── codegen/typespec-arm-csharp/                # Our TypeSpec emitter: contract → C# backend surface (+ snapshot tests)
+├── codegen/typespec-arm-csharp/                # Our TypeSpec emitter: contract → C# backend surface
+│   └── test/                                   # Snapshot tests + conformance/ (the generator's contract-conformance suite, .NET)
 ├── spec/main.tsp                               # API contract (TypeSpec) — see docs/SPEC-FIRST.md
 └── deploy/
     └── helm/                                   # Helm chart for Kubernetes (ClusterIP Service + SLO)
@@ -78,54 +78,43 @@ Run from `src/backend/` (the solution root):
 dotnet restore
 dotnet build
 
-# Unit + contract tests (default; the build needs Node for `npm run spec`, see below)
+# Unit + API tests (default; the build needs Node for `npm run spec`, see below)
 dotnet test
 
-# Integration tests only
-dotnet test -p:RunIntegrationTests=true -p:RunUnitTests=false -p:RunContractTests=false
-
-# All tests
-dotnet test -p:RunIntegrationTests=true
+# API tests only, against a running server instead of in-process (see below)
+ARM_API_BASE_URL=http://localhost:5000 dotnet test --project Olve.AgentRuntimeManager.ApiTests
 ```
 
 The API project's build runs `npm run spec` from the repo root (incremental: skipped while
 `artifacts/` is newer than the spec, `tspconfig.yaml` and the emitter) and compiles the generated
 `artifacts/generated/backend/*.g.cs`; `-p:SkipSpecGen=true` compiles already-generated files
-without Node (the Dockerfile does this). Contract tests host the API in-process
-(`WebApplicationFactory`) and check it against the contract, copying `artifacts/spec/openapi.json`
-next to the tests. A route-coverage test asserts every spec operation is mapped and every `/api`
-endpoint is in the spec; the contract tests exercise each operation's happy and error paths over raw
-HTTP and validate the status and body against the spec's schemas (objects closed, so undeclared
-fields fail).
+without Node (the Dockerfile does this).
 
-Integration tests run the real service via [Testcontainers](https://dotnet.testcontainers.org/): `AppFixture` builds the `Dockerfile` image, starts a container (waiting on `/health`), and exercises it over raw HTTP (no generated client, so the tests check the wire contract) — covering the published app end to end, including JSON serialization. The fixture lifecycle is managed via TUnit's `IAsyncInitializer` + `ClassDataSource` pattern.
+Testing is split by responsibility:
 
-To add a dependency (e.g. PostgreSQL):
-
-1. Add the Testcontainers module to `Directory.Packages.props` and the integration test project:
-   ```xml
-   <!-- Directory.Packages.props -->
-   <PackageVersion Include="Testcontainers.PostgreSql" Version="4.11.0" />
-
-   <!-- Integration test .csproj -->
-   <PackageReference Include="Testcontainers.PostgreSql" />
-   ```
-
-2. In `AppFixture.InitializeAsync`, start the dependency container and pass its connection string to the
-   app container as an environment variable (config keys map to `__`-delimited env vars):
-   ```csharp
-   private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().Build();
-
-   // in InitializeAsync, before building the app container:
-   await _pg.StartAsync();
-   // ...
-   .WithEnvironment("ConnectionStrings__Default", _pg.GetConnectionString())
-   ```
+- **Contract conformance is the generator's job**, tested once in the tooling, not per service:
+  `src/codegen/typespec-arm-csharp/test/conformance/` compiles a fixture spec's generated C# with
+  the runtime in `Olve.AgentRuntimeManager/Api/`, hosts it with trivial handlers, and checks over
+  HTTP that every spec operation is routed (and every `/api` endpoint is in the spec), every
+  response validates against the fixture's OpenAPI schema for its status (objects closed, so
+  undeclared fields fail), `ArmResults` honours the declared statuses, binding failures produce
+  the declared error body, and a missing handler stops startup. It runs in `npm run codegen:test`
+  / `mise run codegen:test`.
+- **API tests** (`Olve.AgentRuntimeManager.ApiTests`) are ordinary behaviour tests of ARM's
+  implementation over raw HTTP (no generated client): statuses, bodies and messages per
+  operation, auth (401 on writes, reads anonymous), the handler-registration check. One suite,
+  selectable target (`ApiTarget`):
+  - default: in-process (`WebApplicationFactory`) — what `dotnet test` and `mise run ci` run;
+  - base-URL mode: set `ARM_API_BASE_URL` to test any running server (a local `dotnet run`, the
+    Docker image, later live beta). Tests that mint a token need the server's auth settings in
+    `ARM_API_SIGNING_KEY`, `ARM_API_ISSUER` and `ARM_API_AUDIENCE` and are skipped without them;
+    tests that inspect the host (DI, configuration) run in-process only.
+  - `mise run api:image` builds the `Dockerfile` image, starts it with a test signing key, and
+    runs the suite against it in base-URL mode (needs Docker).
 
 Test execution is controlled by MSBuild properties:
 - `RunUnitTests=false` skips unit tests
-- `RunContractTests=false` skips contract tests (and the spec compile)
-- `RunIntegrationTests=true` enables integration tests (disabled by default)
+- `RunApiTests=false` skips API tests
 
 ## Running
 
@@ -229,7 +218,7 @@ The contract is `src/spec/main.tsp` (TypeSpec). Everything generated lives in th
 ```bash
 npm run spec       # src/spec/main.tsp → artifacts/spec/openapi.json + artifacts/generated/backend/*.g.cs
 npm run generate   # … then → artifacts/clients/ts (Hey API)
-npm run codegen:test   # snapshot tests of the C# emitter (UPDATE_SNAPSHOTS=1 to accept changes)
+npm run codegen:test   # emitter snapshot tests (UPDATE_SNAPSHOTS=1 to accept changes) + conformance suite (dotnet)
 ```
 
 The frontend and CLI import the client as `@arm/client` and regenerate it as part of their own
@@ -240,10 +229,12 @@ request record + `I…Handler : IHandler<Req, Res>` per operation, `MapArmApi()`
 `.WithValidation` (from `@maxLength` etc.) and declared statuses, a JSON source-gen context and
 `ArmApi.HandlerTypes`. Hand-written runtime pieces live in `Olve.AgentRuntimeManager/Api/`:
 `ArmResults` maps a handler's `Result` to a declared status (a problem tagged `http:404` → 404
-when the operation declares it, else 400, else 500), `ArmBindingFailures` answers binding
+when the operation declares it; else 400 if declared; else the first declared error; else 500),
+`ArmBindingFailures` answers binding
 failures with the contract's error body, and `UseArmApi()` refuses to start if a handler is
-unregistered. The API build compiles the spec itself. There is no C# client: the backend tests
-speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
+unregistered. The API build compiles the spec itself. The emitter's conformance suite proves the
+generated surface matches the spec (see [Build & Test](#build--test)). There is no C# client: the
+backend tests speak raw HTTP. See [`docs/SPEC-FIRST.md`](docs/SPEC-FIRST.md).
 
 Run everything the pipeline runs with `npx mise run ci` (mise pins node + dotnet; `npx mise
 tasks` lists the tasks).
@@ -321,7 +312,6 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
       - run: dotnet test --no-restore --no-build -c Release
-      - run: dotnet test --no-restore --no-build -c Release -p:RunIntegrationTests=true -p:RunUnitTests=false
 ```
 
 ### Example: Push to main workflow
@@ -352,7 +342,6 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
       - run: dotnet test --no-restore --no-build -c Release
-      - run: dotnet test --no-restore --no-build -c Release -p:RunIntegrationTests=true -p:RunUnitTests=false
 
   version:
     name: Compute version

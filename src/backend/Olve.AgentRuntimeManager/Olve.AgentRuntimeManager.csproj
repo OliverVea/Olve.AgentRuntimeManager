@@ -8,9 +8,9 @@
   <!--
     The API surface is generated from the TypeSpec contract (docs/SPEC-FIRST.md, M2):
     `npm run spec` compiles src/spec/main.tsp with our emitter (src/codegen/typespec-arm-csharp)
-    into artifacts/generated/backend/*.g.cs, plus artifacts/spec/openapi.json for the clients and
-    the contract tests. Incremental: skipped while the outputs are newer than the spec, the tsp
-    config and the emitter. -p:SkipSpecGen=true compiles already-generated files without Node
+    into artifacts/generated/backend/*.g.cs, plus artifacts/spec/openapi.json for the clients.
+    Incremental: skipped while the outputs are newer than the spec, the tsp config and the
+    emitter. -p:SkipSpecGen=true compiles already-generated files without Node
     (the Dockerfile's .NET stage, which copies them from its Node stage).
   -->
   <PropertyGroup>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    API tests: ARM's behaviour over raw HTTP, one suite with a selectable target (ApiTarget):
+    in-process via WebApplicationFactory by default, or any running server when ARM_API_BASE_URL
+    is set (`mise run api:image` runs them against the Docker image). Contract conformance is the
+    generator's job (src/codegen/typespec-arm-csharp/test/conformance), not re-tested here.
+    On by default; opt out with -p:RunApiTests=false.
+  -->
+  <PropertyGroup>
+    <IsTestProject Condition="'$(RunApiTests)' == 'false'">false</IsTestProject>
+    <IsTestingPlatformApplication Condition="'$(RunApiTests)' == 'false'">false</IsTestingPlatformApplication>
+    <OutputType Condition="'$(RunApiTests)' == 'false'">Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
+  </ItemGroup>
+
+</Project>

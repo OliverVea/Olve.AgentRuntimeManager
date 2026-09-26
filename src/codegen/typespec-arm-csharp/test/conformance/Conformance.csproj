@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Tooling conformance suite for the typespec-arm-csharp emitter: compiles the widgets fixture's
+    generated C# (../fixtures/widgets.tsp → artifacts/codegen/conformance/generated) together with
+    the hand-written runtime it targets (linked from the backend's Api/ folder, not copied), hosts
+    it in-process with trivial handlers, and checks it over HTTP against the fixture's OpenAPI
+    (artifacts/codegen/conformance/spec/openapi.json): every operation routed, every response
+    valid for its declared status, ArmResults' status rules, binding failures, the handler check.
+
+    Run with `dotnet run` (npm test in the emitter package does this). Not part of the backend
+    solution: services don't re-test the generator.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Arm.Conformance</RootNamespace>
+    <!-- Standalone app: no user secrets, no launch profiles. -->
+    <UserSecretsId></UserSecretsId>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../../../'))</RepoRoot>
+    <EmitterDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../'))</EmitterDir>
+    <FixtureOutDir>$(RepoRoot)artifacts/codegen/conformance/</FixtureOutDir>
+    <FixtureGeneratedDir>$(FixtureOutDir)generated/</FixtureGeneratedDir>
+    <FixtureOpenApi>$(FixtureOutDir)spec/openapi.json</FixtureOpenApi>
+    <BackendApiDir>$(RepoRoot)src/backend/Olve.AgentRuntimeManager/Api/</BackendApiDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The runtime the generated code relies on: ARM's own source, linked. -->
+    <Compile Include="$(BackendApiDir)*.cs" Link="Runtime/%(Filename)%(Extension)" />
+    <!-- The runtime lives in ARM's namespace, the fixture's generated code in Fixture.Api. -->
+    <Using Include="Olve.AgentRuntimeManager.Api" />
+    <Using Include="Fixture.Api" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FixtureInput Include="$(EmitterDir)src/**/*.js;$(EmitterDir)package.json;$(EmitterDir)test/fixtures/widgets.tsp;$(MSBuildThisFileDirectory)emit-fixture.js" />
+    <FixtureOutput Include="$(FixtureGeneratedDir)ArmApi.g.cs;$(FixtureGeneratedDir)ArmModels.g.cs;$(FixtureGeneratedDir)ArmJsonContext.g.cs;$(FixtureOpenApi)" />
+    <!-- Static include for IDEs; re-added after generation below for a clean checkout. -->
+    <Compile Include="$(FixtureGeneratedDir)*.g.cs" Link="Generated/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <Target Name="EmitFixture" BeforeTargets="BeforeBuild" Inputs="@(FixtureInput)" Outputs="@(FixtureOutput)">
+    <Exec Command="node emit-fixture.js" WorkingDirectory="$(MSBuildThisFileDirectory)" />
+    <Touch Files="@(FixtureOutput)" />
+  </Target>
+
+  <Target Name="IncludeFixture" AfterTargets="EmitFixture" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <Compile Remove="$(FixtureGeneratedDir)*.g.cs" />
+      <Compile Include="$(FixtureGeneratedDir)*.g.cs" />
+      <None Include="$(FixtureOpenApi)" Link="openapi.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Olve.MinimalApi" />
+    <PackageReference Include="Olve.Results" />
+    <PackageReference Include="Olve.Validation" />
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+</Project>

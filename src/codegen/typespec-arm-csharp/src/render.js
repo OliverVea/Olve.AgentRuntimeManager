@@ -117,24 +117,58 @@ export function renderApi(ir, namespace) {
   api += `    public static IReadOnlyList<Type> HandlerTypes { get; } =\n    [\n${ir.operations.map((o) => `        typeof(I${o.name}Handler),\n`).join("")}    ];\n\n`;
   api += "    /// <summary>Maps every contract operation onto its handler interface.</summary>\n";
   api += "    public static ArmEndpoints MapArmApi(this IEndpointRouteBuilder app) => new()\n    {\n";
-  api += ir.operations.map(renderEndpoint).join("");
+  api += ir.operations.map((o) => renderEndpoint(o, ir)).join("");
   api += "    };\n}\n";
   out.push(api);
+
+  const parsed = [...new Set(ir.operations.flatMap((o) => o.params.map((p) => stringEnumOf(p, ir)).filter(Boolean)))];
+  if (parsed.length) out.push(renderEnumParsers(parsed.map((name) => ir.enums.get(name))));
 
   return out.join("\n");
 }
 
-function renderEndpoint(o) {
+/** The string enum a parameter binds to, if any (minimal APIs would parse it by C# member name). */
+function stringEnumOf(p, ir) {
+  const e = ir.enums.get(p.type.replace(/\?$/, ""));
+  return e && !e.numeric ? e.name : undefined;
+}
+
+/** Parses string-enum parameters by their wire values; anything else is a binding failure. */
+function renderEnumParsers(enums) {
+  let s = "/// <summary>Parses string-enum parameters by their wire values (minimal APIs only know member names).</summary>\n";
+  s += "internal static class ArmParameters\n{\n";
+  s += enums
+    .map((e) => {
+      let m = `    public static ${e.name} Parse${e.name}(string value, string parameter) => value switch\n    {\n`;
+      for (const member of e.members) m += `        ${str(member.value)} => ${e.name}.${member.name},\n`;
+      m += '        _ => throw new BadHttpRequestException($"Failed to bind parameter \\"{parameter}\\" from \\"{value}\\"."),\n';
+      return `${m}    };\n`;
+    })
+    .join("\n");
+  return `${s}}\n`;
+}
+
+function renderEndpoint(o, ir) {
   const map = MAP_METHODS[o.verb]
     ? `app.${MAP_METHODS[o.verb]}(${str(o.path)}, `
     : `app.MapMethods(${str(o.path)}, [${str(o.verb.toUpperCase())}], `;
   const lambdaParams = [
     `[FromServices] I${o.name}Handler handler`,
-    ...o.params.map((p) => `[${FROM[p.kind]}(Name = ${str(p.wire)})] ${p.type} ${p.local}`),
+    ...o.params.map((p) => {
+      // String enums bind as strings and are parsed by wire value (see renderEnumParsers).
+      const type = stringEnumOf(p, ir) ? (p.type.endsWith("?") ? "string?" : "string") : p.type;
+      return `[${FROM[p.kind]}(Name = ${str(p.wire)})] ${type} ${p.local}`;
+    }),
     ...(o.body ? [`[FromBody] ${o.body.type} body`] : []),
     "CancellationToken ct",
   ];
-  const args = [...o.params.map((p) => p.local), ...(o.body ? ["body"] : [])].join(", ");
+  const arg = (p) => {
+    const e = stringEnumOf(p, ir);
+    if (!e) return p.local;
+    const parse = `ArmParameters.Parse${e}(${p.local}, ${str(p.wire)})`;
+    return p.type.endsWith("?") ? `${p.local} is null ? null : ${parse}` : parse;
+  };
+  const args = [...o.params.map(arg), ...(o.body ? ["body"] : [])].join(", ");
   const call = o.success.type ? "HandleAsync" : "RunAsync";
   const i = "        ";
   let s = `${i}${o.name} = ${map}async (\n`;

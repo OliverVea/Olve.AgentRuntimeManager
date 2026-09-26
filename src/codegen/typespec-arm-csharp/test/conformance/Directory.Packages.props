@@ -1,0 +1,4 @@
+<Project>
+  <!-- Package versions stay central in the backend's Directory.Packages.props. -->
+  <Import Project="$(MSBuildThisFileDirectory)../../../../backend/Directory.Packages.props" />
+</Project>

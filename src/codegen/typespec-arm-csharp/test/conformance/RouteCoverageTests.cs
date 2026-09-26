@@ -1,16 +1,12 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
-
-namespace Olve.AgentRuntimeManager.ContractTests;
+namespace Arm.Conformance;
 
 /// <summary>
-/// Every operation in the contract is mapped by the app, and every <c>/api</c> endpoint the app
-/// maps is in the contract (docs/STANDARDS.md: "every operation MUST be implemented, and every
-/// /api endpoint MUST be in the contract").
+/// <c>MapArmApi</c> routes every operation in the contract, and every <c>/api</c> endpoint it maps
+/// is in the contract (docs/STANDARDS.md: "every operation MUST be implemented, and every /api
+/// endpoint MUST be in the contract"): checked once here, for the generator, not per service.
 /// </summary>
-[ClassDataSource<ApiFactory>(Shared = SharedType.PerAssembly)]
-public class RouteCoverageTests(ApiFactory factory)
+[ClassDataSource<FixtureApp>(Shared = SharedType.PerAssembly)]
+public class RouteCoverageTests(FixtureApp fixture)
 {
     [Test]
     public async Task EverySpecOperation_IsMapped()
@@ -33,10 +29,10 @@ public class RouteCoverageTests(ApiFactory factory)
     }
 
     [Test]
-    [Arguments("/api/messages/{id}", "/api/messages/{}")]
-    [Arguments("/api/messages/{id:guid}", "/api/messages/{}")]
-    [Arguments("api/messages/{id?}/", "/api/messages/{}")]
-    [Arguments("/API/Messages", "/api/messages")]
+    [Arguments("/api/widgets/{id}", "/api/widgets/{}")]
+    [Arguments("/api/widgets/{id:guid}", "/api/widgets/{}")]
+    [Arguments("api/widgets/{id?}/", "/api/widgets/{}")]
+    [Arguments("/API/Widgets", "/api/widgets")]
     public async Task NormalizePath_IgnoresParameterNamesAndConstraints(string template, string expected) =>
         await Assert.That(OpenApiContract.NormalizePath(template)).IsEqualTo(expected);
 
@@ -45,7 +41,7 @@ public class RouteCoverageTests(ApiFactory factory)
 
     private HashSet<string> MappedApiRoutes()
     {
-        var dataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        var dataSource = fixture.Services.GetRequiredService<EndpointDataSource>();
         return
         [
             .. from endpoint in dataSource.Endpoints.OfType<RouteEndpoint>()

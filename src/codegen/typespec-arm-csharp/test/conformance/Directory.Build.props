@@ -1,0 +1,4 @@
+<Project>
+  <!-- One set of build defaults for all .NET code: reuse the backend's (net10.0, nullable, warnings as errors). -->
+  <Import Project="$(MSBuildThisFileDirectory)../../../../backend/Directory.Build.props" />
+</Project>

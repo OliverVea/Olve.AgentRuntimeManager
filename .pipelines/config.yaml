@@ -34,7 +34,7 @@ productionSteps:
     configuration:
       image: gcr.io/kaniko-project/executor:debug
       scriptFile: scripts/build.sh
-  # Runs `mise run ci` (backend unit + contract tests, frontend lint/test/build, CLI
+  # Runs `mise run ci` (emitter conformance, backend unit + API tests, frontend lint/test/build, CLI
   # typecheck/test/build) in parallel with the build. If it fails, the production job group
   # fails and the deploy cascade never starts. Produces no version.txt, so the deploy scripts
   # ignore its bundle dir.

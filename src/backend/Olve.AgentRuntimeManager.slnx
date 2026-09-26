@@ -4,7 +4,6 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="Olve.AgentRuntimeManager.UnitTests/Olve.AgentRuntimeManager.UnitTests.csproj" />
-    <Project Path="Olve.AgentRuntimeManager.ContractTests/Olve.AgentRuntimeManager.ContractTests.csproj" />
-    <Project Path="Olve.AgentRuntimeManager.IntegrationTests/Olve.AgentRuntimeManager.IntegrationTests.csproj" />
+    <Project Path="Olve.AgentRuntimeManager.ApiTests/Olve.AgentRuntimeManager.ApiTests.csproj" />
   </Folder>
 </Solution>

@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Json.Schema;
 
-namespace Olve.AgentRuntimeManager.ContractTests;
+namespace Arm.Conformance;
 
 /// <summary>One operation in the contract: an HTTP method on a path template.</summary>
 public sealed record SpecOperation(string Method, string Path, string OperationId, JsonObject Responses)
@@ -15,8 +15,9 @@ public sealed record SpecOperation(string Method, string Path, string OperationI
 }
 
 /// <summary>
-/// The compiled contract (<c>artifacts/spec/openapi.json</c>, copied next to the test assembly by
-/// the csproj), with helpers to look up operations and validate response bodies.
+/// The fixture's compiled contract (<c>artifacts/codegen/conformance/spec/openapi.json</c>, copied
+/// next to the test assembly by the csproj), with helpers to look up operations and validate
+/// response bodies against it.
 /// </summary>
 public static partial class OpenApiContract
 {
@@ -28,7 +29,7 @@ public static partial class OpenApiContract
         if (!File.Exists(path))
         {
             throw new FileNotFoundException(
-                "Compiled contract not found. It is produced by `npm run spec` from the repo root (the ContractTests build runs it).",
+                "Compiled fixture contract not found. The Conformance.csproj build produces it (emit-fixture.js).",
                 path);
         }
 

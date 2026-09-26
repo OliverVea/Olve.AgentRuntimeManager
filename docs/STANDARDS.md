@@ -10,7 +10,8 @@ reason. Back a rule with a test where possible.
 - Every error MUST use the `{ "error": { code, message, details } }` envelope; codes are
   `SCREAMING_SNAKE_CASE` and stable once published.
 - The contract (`src/spec/main.tsp`) is the source of truth: every operation MUST be implemented,
-  and every `/api` endpoint MUST be in the contract.
+  and every `/api` endpoint MUST be in the contract. The generated surface guarantees this (and
+  the declared statuses and schemas); the emitter's conformance suite tests it once for all services.
 - Timestamps MUST be UTC ISO-8601; IDs are opaque strings.
 - Secrets MUST NOT appear in responses, logs, events or traces.
 - `/health` is anonymous and says only up/down; diagnostics live behind auth (`GET /api/health`).
@@ -30,4 +31,4 @@ reason. Back a rule with a test where possible.
 - The backend runs on the JIT, published self-contained; Native AOT is not a goal. Source-generated
   JSON is still preferred where it's cheap.
 - Package versions are central (`Directory.Packages.props`); no `Version` attributes in csproj.
-- Tests use TUnit; contract/integration tests speak raw HTTP.
+- Tests use TUnit; API tests and the emitter's conformance suite speak raw HTTP.

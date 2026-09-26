@@ -3,11 +3,13 @@
 //   ArmModels.g.cs       records (request shapes split by visibility), enums, discriminated
 //                        unions, and IValidator<T>s for request bodies from @maxLength etc.
 //   ArmApi.g.cs          per operation: a request record + I…Handler : IHandler<Req, Res>;
-//                        ArmOperations (declared statuses), ArmApi.HandlerTypes, MapArmApi()
+//                        ArmOperations (declared statuses), ArmApi.HandlerTypes, MapArmApi(),
+//                        and ArmParameters (string-enum parameters parsed by wire value)
 //   ArmJsonContext.g.cs  System.Text.Json source-gen context for every DTO
 //
 // The generated code relies on two hand-written types in the same namespace, kept in the backend
 // source: ArmOperation (the operation table's row) and ArmResults (Result → declared status).
+// test/conformance compiles the output with that runtime and proves it matches the spec over HTTP.
 
 import { emitFile, resolvePath } from "@typespec/compiler";
 import { collect } from "./collect.js";

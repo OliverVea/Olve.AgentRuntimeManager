@@ -46,11 +46,24 @@ doing the expensive thing twice.
 
 ### One HTTP suite, two targets
 
-The integration suite (`AppFixture`) runs in **base-URL mode**, not by building an image:
-- **local dev** → point at `http://localhost:<port>` (a `dotnet run` instance)
-- **CI after-beta** → point at the in-cluster beta Service `http://olve-arm.apps-beta.svc.cluster.local`
+The API tests (`src/backend/Olve.AgentRuntimeManager.ApiTests`, target chosen by `ApiTarget`)
+are one suite of behaviour tests over raw HTTP (implemented 2026-09-26):
+- **default: in-process** (`WebApplicationFactory`) → the `test` gate (`dotnet test`, `mise run ci`)
+- **base-URL mode** (`ARM_API_BASE_URL`) → any running server:
+  - **local dev** → `http://localhost:<port>` (a `dotnet run` instance)
+  - **the real image** → `mise run api:image` builds the `Dockerfile` image, starts it with a test
+    signing key and runs the suite against it (manual; needs Docker)
+  - **CI after-beta** → the in-cluster beta Service `http://olve-arm.apps-beta.svc.cluster.local`
 
-The scaffold's image-building `AppFixture` path is dropped in favour of this. No Docker in CI.
+In base-URL mode the suite mints tokens only if given the target's auth settings
+(`ARM_API_SIGNING_KEY`, `ARM_API_ISSUER`, `ARM_API_AUDIENCE`); otherwise tests that need one are
+skipped with that reason. Tests that inspect the host (DI, configuration) run in-process only.
+The scaffold's Testcontainers `AppFixture` / IntegrationTests project is gone. No Docker in CI.
+
+Contract conformance (every operation routed, responses valid for their declared statuses) is
+**not** re-tested per service: it's the generator's responsibility, covered once by the
+emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`, run by
+`mise run codegen:test`; see [`SPEC-FIRST.md`](SPEC-FIRST.md) M2).
 
 ### `test-after-beta` specifics (from QuestionBank)
 
@@ -101,7 +114,8 @@ L4 nightly.
 - **`FakeProvider`** — deterministic scripted provider (L1; also used by `test-after-beta`).
 - **Record/replay LLM stub** — a mock endpoint speaking the provider SSE format, seeded from
   recorded transcripts (L2/L3).
-- **`AppFixture` base-URL mode** — the one HTTP suite pointed at localhost or the beta Service.
+- **`ApiTarget` base-URL mode** — the one HTTP suite pointed at localhost, the image or the beta
+  Service (done; `test-after-beta` still needs its auth, see Open).
 
 ## Open
 

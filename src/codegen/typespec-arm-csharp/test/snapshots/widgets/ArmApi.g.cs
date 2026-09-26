@@ -106,11 +106,11 @@ public static class ArmApi
             .Produces<IReadOnlyList<ResultProblem>>(404),
         WidgetsList = app.MapGet("/api/widgets", async (
                 [FromServices] IWidgetsListHandler handler,
-                [FromQuery(Name = "color")] Color? color,
+                [FromQuery(Name = "color")] string? color,
                 [FromQuery(Name = "limit")] int? limit,
                 [FromHeader(Name = "x-request-id")] string? requestId,
                 CancellationToken ct) =>
-                ArmResults.Map(await handler.HandleAsync(new WidgetsListRequest(color, limit, requestId), ct), ArmOperations.WidgetsList))
+                ArmResults.Map(await handler.HandleAsync(new WidgetsListRequest(color is null ? null : ArmParameters.ParseColor(color, "color"), limit, requestId), ct), ArmOperations.WidgetsList))
             .WithName("Widgets_list")
             .WithMetadata(ArmOperations.WidgetsList)
             .Produces<IReadOnlyList<Widget>>(200),
@@ -127,5 +127,16 @@ public static class ArmApi
             .Produces<Widget>(200)
             .Produces<IReadOnlyList<ResultProblem>>(400)
             .Produces<IReadOnlyList<ResultProblem>>(404),
+    };
+}
+
+/// <summary>Parses string-enum parameters by their wire values (minimal APIs only know member names).</summary>
+internal static class ArmParameters
+{
+    public static Color ParseColor(string value, string parameter) => value switch
+    {
+        "red" => Color.Red,
+        "green" => Color.Green,
+        _ => throw new BadHttpRequestException($"Failed to bind parameter \"{parameter}\" from \"{value}\"."),
     };
 }
