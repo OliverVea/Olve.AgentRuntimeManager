@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import pkg from "../package.json" with { type: "json" };
 import { createApiClient } from "./api";
 import { groups as defaultGroups } from "./commands";
+import { type ArmConfig, type ConfigKey, configDir, configKeys, loadConfig } from "./config";
 import { ApiError, ExitCode, NetworkError, UsageError } from "./errors";
 import { commandHelp, groupHelp, rootHelp } from "./help";
 import { formatJson } from "./output";
@@ -147,7 +148,20 @@ export async function run(
     return usage(new UsageError("--json and --pretty are mutually exclusive", hint));
   }
 
-  const url = (values.url as string | undefined) || io.env.ARM_URL || DEFAULT_URL;
+  const dir = configDir(io.env);
+  let saved: ArmConfig;
+  try {
+    saved = loadConfig(dir);
+  } catch (error) {
+    return usage(error as UsageError);
+  }
+  const settings = Object.fromEntries(
+    Object.entries(configKeys)
+      .map(([key, spec]) => [key, io.env[spec.env] || saved[key as ConfigKey]])
+      .filter(([, value]) => value),
+  ) as ArmConfig;
+
+  const url = (values.url as string | undefined) || settings.url || DEFAULT_URL;
   if (!isHttpUrl(url)) {
     return usage(new UsageError(`invalid URL '${url}' (expected http:// or https://)`, hint));
   }
@@ -165,6 +179,9 @@ export async function run(
       args,
       options,
       client,
+      settings,
+      configDir: dir,
+      user: io.env.USER || io.env.USERNAME || undefined,
       json: wantsJson,
       stdout: io.stdout,
       stderr: io.stderr,

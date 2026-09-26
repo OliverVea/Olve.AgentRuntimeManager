@@ -8,13 +8,19 @@ export function text(options: OptionValues, name: string): string | undefined {
   return typeof raw === "string" && raw !== "" ? raw : undefined;
 }
 
-/** A required, non-empty string option (`--prompt`, `--caller`, …). */
-export function requiredText(options: OptionValues, name: string, short?: string): string {
+/**
+ * A string option that falls back to a default (the user's settings, a built-in value):
+ * given, it must not be empty; with neither, it's a usage error that says how to set a default.
+ */
+export function textOrDefault(options: OptionValues, name: string, fallback: string | undefined): string {
   const raw = options[name];
-  if (raw === undefined) throw new UsageError(`missing required option --${name}${short ? ` (-${short})` : ""}`);
-  const value = String(raw);
-  if (value === "") throw new UsageError(`--${name} must not be empty`);
-  return value;
+  if (raw !== undefined) {
+    const value = String(raw);
+    if (value === "") throw new UsageError(`--${name} must not be empty`);
+    return value;
+  }
+  if (fallback) return fallback;
+  throw new UsageError(`missing --${name} (or set a default: arm config set ${name} <value>)`);
 }
 
 /** An integer option within `[min, max]`. */

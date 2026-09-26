@@ -9,14 +9,16 @@ single self-contained binary with `bun build --compile`.
 ```
 arm <group> <command> [arguments] [options]
 
-arm session create -p|--prompt TEXT --provider X --model X --caller X [--timeout-seconds N]
+arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY]
 arm session list [--status X] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
-arm session kill <id> --caller X [--reason TEXT]
+arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
+
+arm config [list] | arm config get <key> | arm config set <key> <value> | arm config unset <key>
 
 arm --help | arm <group> --help | arm <group> <command> --help
 arm --version
@@ -31,12 +33,29 @@ Global options (any position):
 | `--json` | | | Print the raw API JSON |
 | `--pretty` | | on | Human-readable: a table for lists, key/value for objects |
 
-Precedence is flag, then env, then default. A value starting with a dash needs the `=` form:
-`arm session create --prompt="-5 degrees"`. `--after`/`--before` take a date or date-time
-(`2026-09-01`, `2026-09-01T12:00:00Z`); a bare date is midnight UTC. A missing or empty required
-option (`--prompt`, `--provider`, `--model`, `--caller` on create; `--caller` on kill) and malformed
+Precedence is flag, then env, then `~/.arm/config.json` (see [Defaults](#defaults)), then the
+built-in default. A prompt starting with a dash goes after `--`:
+`arm session create --caller me -- "-5 degrees"`. `--after`/`--before` take a date or date-time
+(`2026-09-01`, `2026-09-01T12:00:00Z`); a bare date is midnight UTC. An empty option value, a
+missing or blank `<prompt>`, a `caller` found nowhere (flag, env, config, OS user) and malformed
 values (an unknown `--status`, `--limit` outside 1–100, …) are usage errors before any request is
 sent.
+
+## Defaults
+
+The API requires `provider`, `model` and `caller` on every create (and `caller` on every kill);
+the CLI fills them in so you don't have to type them. Each comes from, in order: the flag, the
+environment, your settings in `~/.arm/config.json`, then a built-in default:
+
+| Setting | Env | Built-in default |
+|---|---|---|
+| `url` | `ARM_URL` | `http://localhost:5000` |
+| `provider` | `ARM_PROVIDER` | `fake` (the only provider so far) |
+| `model` | `ARM_MODEL` | `fake` |
+| `caller` | `ARM_CALLER` | your OS user name (`$USER`) |
+
+`arm config set url https://arm-beta.ovea.pro` saves one; `arm config` lists them and where the
+file is. `ARM_HOME` moves the folder (default `~/.arm`).
 
 `arm session create` prints `Started session <id>.` when the session got a slot (201) and
 `Queued session <id> at position N.` when it is waiting for one (202); with `--json` it prints the

@@ -1,4 +1,5 @@
 import type { Client } from "@arm/client/client";
+import type { ArmConfig } from "./config";
 
 /** A command-line option, in the shape node:util parseArgs understands plus help metadata. */
 export type OptionSpec = {
@@ -23,6 +24,12 @@ export type CommandContext = {
   options: OptionValues;
   /** Generated Hey API client, configured with base URL, token and fetch. */
   client: Client;
+  /** The user's defaults: each setting's env variable (`ARM_MODEL`, …), else `~/.arm/config.json`. */
+  settings: ArmConfig;
+  /** The config folder (`~/.arm`), if there is one; `arm config` writes to it. */
+  configDir?: string;
+  /** The OS user name, if known (the last-resort default `caller`). */
+  user?: string;
   /** Output mode: `--json` (else `--pretty`). Only streaming commands, which print as they go, need it. */
   json: boolean;
   /** Writes one line to stdout, for commands that stream their output. */

@@ -11,9 +11,10 @@ import {
   type SessionStatus,
 } from "@arm/client";
 import { send, unwrap } from "../api";
-import { dateTime, integer, oneOf, requiredText, text } from "../options";
+import { UsageError } from "../errors";
+import { dateTime, integer, oneOf, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
-import type { CommandGroup, OptionValues } from "../registry";
+import type { CommandContext, CommandGroup, OptionValues } from "../registry";
 
 /** Every session status (typed, so a status added to the contract fails to compile here). */
 const statusSet: Record<SessionStatus, true> = {
@@ -74,12 +75,17 @@ export function formatSessionPage(page: SessionPage): string {
   return `${table}\n\n${footer}`;
 }
 
-function createBody(options: OptionValues): CreateSession {
+/** Built-in defaults while `fake` is the only provider; `arm config set provider|model …` overrides them. */
+export const DEFAULT_PROVIDER = "fake";
+export const DEFAULT_MODEL = "fake";
+
+function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandContext, "settings" | "user">): CreateSession {
+  if (prompt.trim() === "") throw new UsageError("<prompt> must not be empty");
   const body: CreateSession = {
-    prompt: requiredText(options, "prompt", "p"),
-    provider: requiredText(options, "provider"),
-    model: requiredText(options, "model"),
-    caller: requiredText(options, "caller"),
+    prompt,
+    provider: textOrDefault(options, "provider", ctx.settings.provider ?? DEFAULT_PROVIDER),
+    model: textOrDefault(options, "model", ctx.settings.model ?? DEFAULT_MODEL),
+    caller: textOrDefault(options, "caller", ctx.settings.caller ?? ctx.user),
     timeoutSeconds: integer(options, "timeout-seconds", { min: 1 }),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
@@ -105,12 +111,11 @@ export const sessionGroup: CommandGroup = {
     {
       name: "create",
       summary: "Create a session: it starts right away when a slot is free, else it is queued",
-      args: [],
+      args: [{ name: "prompt", description: "What the agent should do (quote it)" }],
       options: {
-        prompt: { type: "string", short: "p", description: "What the agent should do (required)", valueName: "TEXT" },
-        provider: { type: "string", description: "Provider that runs the agent, e.g. fake (required)", valueName: "X" },
-        model: { type: "string", description: "Model, in the provider's own naming (required)", valueName: "X" },
-        caller: { type: "string", description: "Who started the session (e.g. oribot); searchable (required)", valueName: "X" },
+        provider: { type: "string", description: "Provider that runs the agent (default: setting provider, else fake)", valueName: "X" },
+        model: { type: "string", description: "Model, in the provider's own naming (default: setting model, else fake)", valueName: "X" },
+        caller: { type: "string", description: "Who started the session; searchable (default: setting caller, else your user name)", valueName: "X" },
         "timeout-seconds": {
           type: "string",
           description: "Kill the session this long after it starts (default: the server's)",
@@ -122,8 +127,8 @@ export const sessionGroup: CommandGroup = {
           valueName: "KEY",
         },
       },
-      async run({ options, client }) {
-        const body = createBody(options);
+      async run({ args, options, client, settings, user }) {
+        const body = createBody(args.prompt!, options, { settings, user });
         const key = text(options, "idempotency-key");
         const { data: session, status } = await send(
           sessionsCreate({ client, body, ...(key ? { headers: { "Idempotency-Key": key } } : {}) }),
@@ -168,11 +173,11 @@ export const sessionGroup: CommandGroup = {
       summary: "Kill a queued or working session (one that already ended is a 409, exit 4)",
       args: [idArg],
       options: {
-        caller: { type: "string", description: "Who is killing the session (required)", valueName: "X" },
+        caller: { type: "string", description: "Who is killing the session (default: setting caller, else your user name)", valueName: "X" },
         reason: { type: "string", description: "Why (recorded on the session and its event)", valueName: "TEXT" },
       },
-      async run({ args, options, client }) {
-        const caller = requiredText(options, "caller");
+      async run({ args, options, client, settings, user }) {
+        const caller = textOrDefault(options, "caller", settings.caller ?? user);
         const reason = text(options, "reason");
         const session = await unwrap(
           sessionsKill({ client, path: { id: args.id! }, body: reason ? { caller, reason } : { caller } }),
