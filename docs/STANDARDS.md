@@ -35,6 +35,9 @@ reason. Back a rule with a test where possible.
   until the CLI has it.
 - The web UI SHOULD offer every feature too, and MAY simplify it (fewer options, friendlier
   defaults) where the CLI is exhaustive. Client changes land together: no client-only features.
+- Web UI changes are mock-first: a standalone HTML/CSS/JS mock (page, flow or widget, fake data)
+  in `src/frontend/mocks/` is approved first, the UI is then built to match it and approved in
+  turn, and the mock is deleted. Style and layout reference: [`UI-REFERENCE.md`](UI-REFERENCE.md).
 
 ## Code
 
