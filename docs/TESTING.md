@@ -21,7 +21,7 @@ Mirrors QuestionBank. Invoke the `ovea-olve-pipelines` skill before editing `.pi
 
 ```
 production (parallel — a red step blocks ALL processing → no deploy):
-  build-and-package     Kaniko → image.tar + helm chart + version.txt
+  build-and-package     Kaniko → image.tar + src/deploy/vm + version.txt
   test                  fast, no containers: build/typecheck + unit + in-process API tests
                         (WebApplicationFactory on SQLite + FakeProvider)
 
