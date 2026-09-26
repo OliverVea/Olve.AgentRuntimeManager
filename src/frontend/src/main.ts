@@ -329,7 +329,7 @@ $("#open-options").addEventListener("click", () => {
       const model = $<HTMLInputElement>("#o-model").value.trim();
       const timeout = parseTimeout($<HTMLInputElement>("#o-timeout").value);
       const problem = !parseModel(model)
-        ? "The model is provider/model, e.g. fake/fake."
+        ? "The model is provider/model, e.g. claude/sonnet."
         : !timeout.ok
           ? timeout.problem
           : "";

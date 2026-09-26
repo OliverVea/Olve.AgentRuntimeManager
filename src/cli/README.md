@@ -70,8 +70,8 @@ environment, your settings in `~/.arm/config.json`, then a built-in default:
 | Setting | Env | Built-in default |
 |---|---|---|
 | `url` | `ARM_URL` | `http://localhost:5000` |
-| `provider` | `ARM_PROVIDER` | `fake` (the only provider so far) |
-| `model` | `ARM_MODEL` | `fake` |
+| `provider` | `ARM_PROVIDER` | `claude` |
+| `model` | `ARM_MODEL` | `sonnet` |
 | `caller` | `ARM_CALLER` | your OS user name (`$USER`) |
 
 `arm config set url https://arm-beta.ovea.pro` saves one; `arm config` lists them and where the

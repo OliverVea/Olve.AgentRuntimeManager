@@ -75,9 +75,9 @@ export function formatSessionPage(page: SessionPage): string {
   return `${table}\n\n${footer}`;
 }
 
-/** Built-in defaults while `fake` is the only provider; `arm config set provider|model …` overrides them. */
-export const DEFAULT_PROVIDER = "fake";
-export const DEFAULT_MODEL = "fake";
+/** Built-in defaults until the server lists its providers (M4b); `arm config set provider|model …` overrides them. */
+export const DEFAULT_PROVIDER = "claude";
+export const DEFAULT_MODEL = "sonnet";
 
 function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandContext, "settings" | "user">): CreateSession {
   if (prompt.trim() === "") throw new UsageError("<prompt> must not be empty");
@@ -113,8 +113,8 @@ export const sessionGroup: CommandGroup = {
       summary: "Create a session: it starts right away when a slot is free, else it is queued",
       args: [{ name: "prompt", description: "What the agent should do (quote it)" }],
       options: {
-        provider: { type: "string", description: "Provider that runs the agent (default: setting provider, else fake)", valueName: "X" },
-        model: { type: "string", description: "Model, in the provider's own naming (default: setting model, else fake)", valueName: "X" },
+        provider: { type: "string", description: "Provider that runs the agent (default: setting provider, else claude)", valueName: "X" },
+        model: { type: "string", description: "Model, in the provider's own naming (default: setting model, else sonnet)", valueName: "X" },
         caller: { type: "string", description: "Who started the session; searchable (default: setting caller, else your user name)", valueName: "X" },
         "timeout-seconds": {
           type: "string",

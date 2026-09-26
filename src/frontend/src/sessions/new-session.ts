@@ -32,7 +32,7 @@ export function newSession(
   const prompt = fields.prompt.trim();
   if (!prompt) return { ok: false, problem: "Say what the agent should do." };
   const model = parseModel(fields.model);
-  if (!model) return { ok: false, problem: "The model is provider/model, e.g. fake/fake." };
+  if (!model) return { ok: false, problem: "The model is provider/model, e.g. claude/sonnet." };
   const timeout = parseTimeout(fields.timeout);
   if (!timeout.ok) return timeout;
   const caller = fields.caller.trim() || fallbackCaller;

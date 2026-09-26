@@ -26,7 +26,7 @@ export type Prefs = {
 const key = "arm-prefs";
 
 export const initialPrefs: Prefs = {
-  defaults: { model: "fake/fake", caller: "" },
+  defaults: { model: "claude/sonnet", caller: "" },
   times: "relative",
 };
 

@@ -76,7 +76,7 @@ describe("defaults: flag, then env, then config.json, then built-in", () => {
     const { r, req } = await create([], { USER: "oliver" });
     expect(r.code).toBe(0);
     expect(req!.url).toBe("http://localhost:5000/api/sessions");
-    expect(req!.body).toEqual({ prompt: "hi", provider: "fake", model: "fake", caller: "oliver" });
+    expect(req!.body).toEqual({ prompt: "hi", provider: "claude", model: "sonnet", caller: "oliver" });
   });
 
   test("config.json supplies url, provider, model and caller", async () => {
@@ -89,7 +89,7 @@ describe("defaults: flag, then env, then config.json, then built-in", () => {
   test("env beats config.json, and flags beat both", async () => {
     writeFileSync(join(home, "config.json"), JSON.stringify({ url, model: "from-file", caller: "file" }));
     const { req } = await create(["--caller", "flag"], { ARM_MODEL: "from-env", ARM_CALLER: "env" });
-    expect(req!.body).toEqual({ prompt: "hi", provider: "fake", model: "from-env", caller: "flag" });
+    expect(req!.body).toEqual({ prompt: "hi", provider: "claude", model: "from-env", caller: "flag" });
   });
 
   test("kill takes its caller from the same defaults", async () => {

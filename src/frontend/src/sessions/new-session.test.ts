@@ -19,8 +19,8 @@ describe("newSession", () => {
 
   it.each([
     [{ prompt: "  " }, "Say what the agent should do."],
-    [{ model: "fake" }, "The model is provider/model, e.g. fake/fake."],
-    [{ model: "/fake" }, "The model is provider/model, e.g. fake/fake."],
+    [{ model: "fake" }, "The model is provider/model, e.g. claude/sonnet."],
+    [{ model: "/fake" }, "The model is provider/model, e.g. claude/sonnet."],
     [{ timeout: "0" }, "The timeout must be a whole number of seconds (or empty for none)."],
     [{ timeout: "1.5" }, "The timeout must be a whole number of seconds (or empty for none)."],
   ])("rejects %o", (change, problem) => {
