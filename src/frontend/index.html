@@ -17,6 +17,7 @@
       <span class="brand">ARM</span>
       <span id="env"></span>
       <span class="spacer"></span>
+      <span id="provider-pills"></span>
       <span class="live" id="live" hidden></span>
       <span class="user" id="user"></span>
       <button type="button" class="icon-btn" id="theme"></button>
@@ -26,7 +27,9 @@
       <button type="button" class="icon-btn" id="logout" title="Log out" aria-label="Log out" hidden>
         <svg class="i" aria-hidden="true"><use href="#i-logout" /></svg>
       </button>
+      <div class="providers" id="providers" role="dialog" aria-label="Providers" hidden></div>
     </header>
+    <div id="provider-alerts"></div>
 
     <main>
       <div class="signin" id="signin" hidden>
@@ -45,6 +48,7 @@
               <label class="field">timeout (s) <input id="c-timeout" class="num" inputmode="numeric" placeholder="none" /></label>
             </div>
             <span class="spacer"></span>
+            <span class="will-queue" id="will-queue" hidden></span>
             <span class="hint">Ctrl+Enter</span>
             <button class="primary" id="create" type="submit" disabled>Start session</button>
           </div>

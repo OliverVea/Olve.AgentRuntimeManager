@@ -66,6 +66,13 @@ model Session {
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;
 
+  /**
+   * How many more times it may be started after its provider refuses it; then it fails. Waiting
+   * out a known usage-limit reset uses none, so `attempts + 1 + retriesLeft` is the last attempt
+   * as things stand (it grows with each such wait).
+   */
+  retriesLeft: int32;
+
   createdAt: utcDateTime;
 
   /** When the agent last started. Set once it started: when status is `working`, `completed` or `killed`, and `failed` or `queued` after starting. */

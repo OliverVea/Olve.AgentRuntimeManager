@@ -1,8 +1,11 @@
 import {
   type ArmEventData,
   eventsStream,
+  type ProviderHealth,
+  providersHealthList,
   type Session,
   type SessionStatus,
+  sessionsGet,
   sessionsSearch,
 } from "@arm/client";
 import type { Client } from "@arm/client/client";
@@ -15,6 +18,8 @@ export type StreamState = "connecting" | "connected" | "reconnecting" | "down";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 
 type SessionEvent = Extract<ArmEventData, { type: `session.${string}` }>;
+/** What the store follows: the sessions' events and the providers' health. */
+type StoreEvent = SessionEvent | Extract<ArmEventData, { type: "provider.health" }>;
 
 /** How many active sessions the Overview loads (the search maximum). */
 const ACTIVE_LIMIT = 100;
@@ -43,6 +48,8 @@ function rank(status: SessionStatus): number {
  * History (ended sessions, newest first) loads a page at a time on demand; sessions that end
  * while the page is open join it from their events.
  *
+ * Each snapshot also reads the providers' health, kept current from `provider.health` events.
+ *
  * Dispatches `change` after every update.
  */
 export class SessionStore extends EventTarget {
@@ -50,9 +57,10 @@ export class SessionStore extends EventTarget {
   readonly #reconnectDelayMs: number;
 
   #sessions = new Map<string, Session>();
+  #providers = new Map<string, ProviderHealth>();
   #run: AbortController | null = null;
   /** Events held back while a snapshot is loading. */
-  #buffer: SessionEvent[] | null = null;
+  #buffer: StoreEvent[] | null = null;
   #everConnected = false;
   /** Connected, but the server hasn't confirmed its subscription (the connect heartbeat) yet. */
   #awaitingHeartbeat = false;
@@ -94,6 +102,16 @@ export class SessionStore extends EventTarget {
     return this.#sessions.get(id);
   }
 
+  /** Every provider's health, by name. */
+  get providers(): ProviderHealth[] {
+    return [...this.#providers.values()].sort((a, b) => a.provider.localeCompare(b.provider));
+  }
+
+  /** A provider's health, if the server has told. */
+  provider(name: string): ProviderHealth | undefined {
+    return this.#providers.get(name);
+  }
+
   /** Start following the API (idempotent). */
   start(): void {
     if (this.#run) return;
@@ -112,6 +130,7 @@ export class SessionStore extends EventTarget {
     this.#awaitingHeartbeat = false;
     this.#snapshotAgain = false;
     this.#sessions = new Map();
+    this.#providers = new Map();
     this.stream = "connecting";
     this.overview = "idle";
     this.history = "idle";
@@ -163,7 +182,7 @@ export class SessionStore extends EventTarget {
 
   /** Apply one event (exposed for tests). */
   apply(event: ArmEventData): void {
-    if (!isSessionEvent(event)) return;
+    if (!isStoreEvent(event)) return;
     if (this.#buffer) {
       this.#buffer.push(event);
       return;
@@ -179,7 +198,7 @@ export class SessionStore extends EventTarget {
       try {
         const { stream } = await eventsStream({
           client: this.#client,
-          query: { event: ["session.*"] },
+          query: { event: ["session.*", "provider.*"] },
           signal: run.signal,
           fetch: this.#watchedFetch(run),
           onSseError: () => this.#failed(run),
@@ -243,14 +262,18 @@ export class SessionStore extends EventTarget {
     if (this.overview !== "ready") this.overview = "loading";
     this.#changed();
     try {
-      const page = await unwrap(
-        sessionsSearch({
-          client: this.#client,
-          body: { status: [...activeStatuses], limit: ACTIVE_LIMIT },
-          signal: run.signal,
-        }),
-      );
+      const [page, providers] = await Promise.all([
+        unwrap(
+          sessionsSearch({
+            client: this.#client,
+            body: { status: [...activeStatuses], limit: ACTIVE_LIMIT },
+            signal: run.signal,
+          }),
+        ),
+        unwrap(providersHealthList({ client: this.#client, signal: run.signal })),
+      ]);
       if (run !== this.#run) return;
+      this.#providers = new Map(providers.map((h) => [h.provider, h]));
       // The snapshot is the truth about what's active: a session it lacks ended (or was
       // deleted) while we weren't looking.
       const fresh = new Set(page.items.map((s) => s.id));
@@ -282,7 +305,11 @@ export class SessionStore extends EventTarget {
     this.#sessions.set(session.id, session);
   }
 
-  #apply(event: SessionEvent): void {
+  #apply(event: StoreEvent): void {
+    if (event.type === "provider.health") {
+      this.#providers.set(event.health.provider, event.health);
+      return;
+    }
     if (event.type === "session.created") {
       if (!this.#sessions.has(event.sessionId)) this.#sessions.set(event.sessionId, event.session);
       return;
@@ -297,6 +324,24 @@ export class SessionStore extends EventTarget {
       return; // stale: the session is already further along
     }
     this.#sessions.set(current.id, next);
+    if (isRetry(current, event)) void this.#refreshRetries(current.id);
+  }
+
+  /**
+   * A retry's event doesn't say whether it used up a retry (waiting out a usage limit doesn't):
+   * read the session's `retriesLeft`, and take only that, so nothing newer is overwritten.
+   */
+  async #refreshRetries(id: string): Promise<void> {
+    const run = this.#run;
+    try {
+      const fresh = await unwrap(sessionsGet({ client: this.#client, path: { id } }));
+      const current = this.#sessions.get(id);
+      if (run !== this.#run || !current) return;
+      this.#sessions.set(id, { ...current, retriesLeft: fresh.retriesLeft });
+      this.#changed();
+    } catch {
+      // Only the attempt count's total is stale until the next snapshot.
+    }
   }
 
   #changed(): void {
@@ -304,8 +349,8 @@ export class SessionStore extends EventTarget {
   }
 }
 
-function isSessionEvent(event: ArmEventData): event is SessionEvent {
-  return event.type.startsWith("session.");
+function isStoreEvent(event: ArmEventData): event is StoreEvent {
+  return event.type.startsWith("session.") || event.type === "provider.health";
 }
 
 /** A working session its provider refused, back in the queue (the only move back). */

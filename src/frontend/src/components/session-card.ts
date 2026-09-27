@@ -1,6 +1,7 @@
-import type { Session } from "@arm/client";
+import type { ProviderHealth, Session } from "@arm/client";
 import { escapeHtml } from "../base-element.js";
 import { clock, isEnded, modelLabel, relative, runningTime, shortId } from "../sessions/format.js";
+import { isPaused, waitingText } from "../sessions/provider-health.js";
 
 export type TimesAs = "relative" | "absolute";
 
@@ -28,6 +29,23 @@ function endedBy(session: Session): string {
     : (session.killSource ?? "");
 }
 
+/**
+ * A queued session its provider refused before: which attempt comes next, of how many as things
+ * stand (`attempt 2 of 3`; a wait for a usage-limit reset uses no retry, so the total can grow).
+ */
+function attempt(session: Session): string {
+  if (session.status !== "queued" || session.attempts < 1) return "";
+  const next = session.attempts + 1;
+  return `<span class="attempt">attempt ${next} of ${next + session.retriesLeft}</span>`;
+}
+
+/** What a queued session waits for when its provider is paused; the error is its tooltip. */
+function waiting(session: Session, health: ProviderHealth | undefined, now: number): string {
+  if (session.status !== "queued" || !isPaused(health)) return "";
+  const why = session.error ? `Last attempt: ${session.error}` : (health.reason ?? "");
+  return `<span class="note paused ${health.status}" title="${escapeHtml(why)}">${escapeHtml(waitingText(health, now))}</span>`;
+}
+
 /** The short outcome after the status; the full text is its tooltip. */
 function note(session: Session): string {
   switch (session.status) {
@@ -47,8 +65,16 @@ function note(session: Session): string {
   }
 }
 
-/** One session card: status · time · outcome, the task, then id · model · caller (· ended). */
-export function sessionCard(session: Session, times: TimesAs, now: number): string {
+/**
+ * One session card: status · time · outcome (and, queued, what it waits for), the task, then
+ * id · model · caller (· ended). `health` is its provider's.
+ */
+export function sessionCard(
+  session: Session,
+  times: TimesAs,
+  now: number,
+  health?: ProviderHealth,
+): string {
   const ended = isEnded(session);
   const title = escapeHtml(timeTitle(session, times, now));
   const id = escapeHtml(session.id);
@@ -56,6 +82,8 @@ export function sessionCard(session: Session, times: TimesAs, now: number): stri
     `<span class="badge ${session.status}">${session.status}</span>`,
     `<button class="dur" data-dur="${id}" data-times title="${title}">${timeOf(session, times, now)}</button>`,
     note(session),
+    attempt(session),
+    waiting(session, health, now),
   ].filter(Boolean);
   const info = [
     `<span class="id" data-copy="${id}" title="Copy the full id (${id})">${shortId(session)}</span>`,
@@ -104,6 +132,9 @@ export const cardStyles = `
   .r1 .sep { color: var(--faint); flex: none; margin: 0 -2px; }
   .note { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .note.failed { color: var(--failed); }
+  .note.paused { color: var(--warn); }
+  .note.paused.unauthorized { color: var(--danger); }
+  .attempt { color: var(--dim); font-size: 13px; flex: none; }
   .task { font-size: 14px; text-overflow: ellipsis; }
   .info { font: 12px var(--mono); color: var(--dim); }
   .info > span + span::before, .info > span + button::before { content: "·"; margin: 0 6px; color: var(--faint); }

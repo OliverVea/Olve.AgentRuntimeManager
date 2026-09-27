@@ -15,6 +15,7 @@ import { SessionList, type View } from "./components/session-list.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
 import { parseModel, shortId } from "./sessions/format.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
+import { isPaused, timesText, untilText, willQueueText } from "./sessions/provider-health.js";
 import { SessionStore, type StreamState } from "./sessions/session-store.js";
 
 // In dev, same-origin → Vite proxies /api to the backend (see vite.config.ts). In a build, set
@@ -85,6 +86,61 @@ function renderLive(): void {
 }
 store.addEventListener("change", renderLive);
 
+// --- provider health: a pill per paused provider, its popover, a banner when one needs a person --
+function renderProviders(): void {
+  const now = Date.now();
+  const paused = store.providers.filter(isPaused);
+  $("#provider-pills").innerHTML = paused
+    .map((h) => {
+      const until = untilText(h, now);
+      return `<button type="button" class="provider-pill ${h.status}" data-providers title="Providers" aria-haspopup="dialog">
+        <span class="dot"></span>${escapeHtml(`${h.provider} ${h.status}`)}${until ? ` <span class="until">${escapeHtml(until)}</span>` : ""}</button>`;
+    })
+    .join("");
+  $("#providers").innerHTML = store.providers
+    .map((h) => {
+      const details = isPaused(h)
+        ? `<span class="reason">${escapeHtml(h.reason ?? "")}</span><span class="times">${escapeHtml(timesText(h, now))}</span>`
+        : "";
+      return `<div class="prov"><span class="name">${escapeHtml(h.provider)}</span><span class="badge ${h.status}">${h.status}</span>${details}</div>`;
+    })
+    .join("");
+  if (!paused.length) closeProviders();
+  $("#provider-alerts").innerHTML = paused
+    .filter((h) => h.status === "unauthorized")
+    .map(
+      (
+        h,
+      ) => `<div class="alert"><b>${escapeHtml(h.provider)} sessions are on hold.</b><span>Its token was rejected: “${escapeHtml(h.reason ?? "")}”</span>
+        <span class="fix">Set a new one (claude setup-token, then the pipeline secret) and redeploy; queued sessions then start.</span></div>`,
+    )
+    .join("");
+  renderWillQueue();
+}
+store.addEventListener("change", renderProviders);
+
+function closeProviders(): void {
+  $("#providers").hidden = true;
+}
+document.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  if (target.closest("[data-providers]")) $("#providers").hidden = !$("#providers").hidden;
+  else if (!target.closest("#providers")) closeProviders();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeProviders();
+});
+
+/** The composer's hint when the typed model's provider is paused: the session will queue. */
+function renderWillQueue(): void {
+  const provider = parseModel($<HTMLInputElement>("#c-model").value)?.provider;
+  const health = provider ? store.provider(provider) : undefined;
+  const hint = $("#will-queue");
+  hint.hidden = !isPaused(health);
+  hint.textContent = isPaused(health) ? willQueueText(health, Date.now()) : "";
+}
+$("#c-model").addEventListener("input", renderWillQueue);
+
 /** Only beta says that it's beta, with its build version. */
 async function loadServerInfo(): Promise<void> {
   try {
@@ -121,6 +177,7 @@ function renderAuthState(): void {
   } else {
     store.stop();
     $("#env").innerHTML = "";
+    closeProviders();
   }
 }
 $("#login").addEventListener("click", () => void auth.login());
@@ -147,6 +204,7 @@ function fillComposer(): void {
   caller.value = prefs.defaults.caller;
   caller.placeholder = fallbackCaller();
   $<HTMLInputElement>("#c-timeout").value = prefs.defaults.timeoutSeconds?.toString() ?? "";
+  renderWillQueue();
 }
 
 function fitPrompt(): void {

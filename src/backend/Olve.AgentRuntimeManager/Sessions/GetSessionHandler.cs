@@ -7,6 +7,6 @@ public sealed class GetSessionHandler(SessionManager sessions) : ISessionsGetHan
 {
     public Task<SessionsGetResponse> HandleAsync(SessionsGetRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<SessionsGetResponse>(sessions.Get(request.Id) is { } session
-            ? session.ToDto()
+            ? session.ToDto(sessions.ProviderRetries)
             : new SessionsGetResponse.NotFound(SessionErrors.NotFound(request.Id)));
 }

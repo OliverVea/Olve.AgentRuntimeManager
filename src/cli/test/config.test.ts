@@ -14,6 +14,7 @@ const session = {
   caller: "me",
   timeoutSeconds: 600,
   attempts: 1,
+  retriesLeft: 2,
   createdAt: "2026-09-26T08:00:00Z",
 };
 

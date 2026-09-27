@@ -28,6 +28,7 @@ public class RetryTests(ShortBackoffFactory factory)
 
         var completed = await client.WaitForSessionAsync(session.Id, s => s.Status == "completed");
         await Assert.That(completed.Attempts).IsEqualTo(2);
+        await Assert.That(completed.RetriesLeft).IsEqualTo(1);
         await Assert.That(completed.Error).IsNull();
         var fake = await FakeHealth(client);
         await Assert.That(fake.Status).IsEqualTo("available");
@@ -42,6 +43,7 @@ public class RetryTests(ShortBackoffFactory factory)
 
         var failed = await client.WaitForSessionAsync(session.Id, s => s.Status == "failed");
         await Assert.That(failed.Attempts).IsEqualTo(3);
+        await Assert.That(failed.RetriesLeft).IsEqualTo(0);
         await Assert.That(failed.Error).IsEqualTo("Fake API unreachable.");
         var fake = await FakeHealth(client);
         await Assert.That(fake.Status).IsEqualTo("unreachable");

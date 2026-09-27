@@ -91,6 +91,9 @@ public sealed class SessionManager : IDisposable
         }
     }
 
+    /// <summary>How often a session its provider refused is retried (<see cref="SessionOptions.ProviderRetries"/>).</summary>
+    public int ProviderRetries => _options.ProviderRetries;
+
     /// <summary>The names of the registered providers.</summary>
     public IReadOnlyList<string> Providers => [.. _providers.Keys.Order(StringComparer.Ordinal)];
 
@@ -160,7 +163,7 @@ public sealed class SessionManager : IDisposable
             };
             _store.Add(session);
             _sessions[session.Id] = session;
-            _events.Publish(new SessionCreated { At = session.CreatedAt, SessionId = session.Id, Session = session.ToDto() });
+            _events.Publish(new SessionCreated { At = session.CreatedAt, SessionId = session.Id, Session = session.ToDto(_options.ProviderRetries) });
 
             if (startNow)
             {

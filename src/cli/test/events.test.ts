@@ -14,6 +14,7 @@ const session = {
   caller: "oribot",
   timeoutSeconds: 600,
   attempts: 1,
+  retriesLeft: 2,
   createdAt: at,
 };
 

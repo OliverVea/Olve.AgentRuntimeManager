@@ -40,6 +40,7 @@ export function formatSession(s: Session): string {
     ["caller", s.caller],
     ["timeoutSeconds", s.timeoutSeconds],
     ["attempts", s.attempts],
+    ["retriesLeft", s.retriesLeft],
     ["createdAt", s.createdAt],
     ["startedAt", s.startedAt],
     ["endedAt", s.endedAt],

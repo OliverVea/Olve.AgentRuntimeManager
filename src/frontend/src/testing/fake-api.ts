@@ -1,4 +1,4 @@
-import type { ArmEventData, Session, SessionSearch } from "@arm/client";
+import type { ArmEventData, ProviderHealth, Session, SessionSearch } from "@arm/client";
 import { vi } from "vitest";
 import { createApiClient } from "../api-client.js";
 
@@ -10,7 +10,9 @@ export function session(id: string, overrides: Partial<Session> = {}): Session {
     provider: "fake",
     model: "fake",
     caller: "tester",
-    attempts: 1,
+    // A session starts on its first attempt; a fresh queued one hasn't yet.
+    attempts: overrides.status === "queued" ? 0 : 1,
+    retriesLeft: 2,
     createdAt: "2026-09-26T10:00:00Z",
     ...overrides,
   };
@@ -24,8 +26,11 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `sessions` by status and pages them newest first. Each `GET /api/events` opens a stream that
  * stays open; `push` writes one SSE frame to the latest, `endStream` ends it like a redeploy.
  * `holdSearch` makes searches wait for `releaseSearch`, to deliver events before the snapshot.
+ * `providers` is what `GET /api/providers/health` answers (every provider available by default).
  */
-export function fakeApi(options: { sessions?: Session[]; search?: () => Response } = {}) {
+export function fakeApi(
+  options: { sessions?: Session[]; search?: () => Response; providers?: ProviderHealth[] } = {},
+) {
   const calls: Call[] = [];
   const sessions = options.sessions ?? [];
   const encoder = new TextEncoder();
@@ -58,6 +63,19 @@ export function fakeApi(options: { sessions?: Session[]; search?: () => Response
     if (request.method === "POST" && url.pathname === "/api/sessions/search") {
       if (held) await new Promise<void>((resolve) => held?.push(resolve));
       return searchResponse(body ?? {});
+    }
+    const byId = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (request.method === "GET" && byId) {
+      const found = sessions.find((s) => s.id === byId[1]);
+      return found ? Response.json(found) : new Response(null, { status: 404 });
+    }
+    if (request.method === "GET" && url.pathname === "/api/providers/health") {
+      return Response.json(
+        options.providers ?? [
+          { provider: "claude", status: "available" },
+          { provider: "fake", status: "available" },
+        ],
+      );
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       const stream = new ReadableStream<Uint8Array>({

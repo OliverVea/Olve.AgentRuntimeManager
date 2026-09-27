@@ -45,7 +45,7 @@ describe("SessionStore", () => {
     expect(store.active.map((s) => s.queuePosition)).toEqual([undefined, 1, 2]);
     expect(api.searches()[0]?.body).toEqual({ status: ["queued", "working"], limit: 100 });
     expect(decodeURIComponent(api.calls.find((c) => c.path === "/api/events")!.search)).toBe(
-      "?event=session.*",
+      "?event=session.*,provider.*",
     );
   });
 
@@ -133,12 +133,17 @@ describe("SessionStore", () => {
 
   it("takes a working session its provider refused back to the queue, then to work again", async () => {
     const api = fakeApi({ sessions: [session("s1")] });
+    // What the server says after the refusal: one retry used.
+    const refused = () => (api.sessions[0] = session("s1", { status: "queued", retriesLeft: 1 }));
     const store = start(api);
     await connected(api, store);
 
+    refused();
     api.push({ type: "session.queued", at, sessionId: "s1", position: 1, error: "API Error: 529" });
     await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:queued"]));
     expect(store.active[0]).toMatchObject({ queuePosition: 1, error: "API Error: 529" });
+    // The event doesn't say whether a retry was used up: the store reads it.
+    await vi.waitFor(() => expect(store.active[0]?.retriesLeft).toBe(1));
 
     api.push({
       type: "session.started",
@@ -150,6 +155,25 @@ describe("SessionStore", () => {
     await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:working"]));
     expect(store.active[0]).toMatchObject({ attempts: 2, providerSessionId: "p2" });
     expect(store.active[0]?.error).toBeUndefined();
+  });
+
+  it("reads the providers' health with the snapshot and follows its events", async () => {
+    const api = fakeApi({
+      providers: [
+        { provider: "claude", status: "unauthorized", reason: "Not logged in", since: at },
+        { provider: "fake", status: "available" },
+      ],
+    });
+    const store = start(api);
+    await connected(api, store);
+    expect(store.providers.map((h) => `${h.provider}:${h.status}`)).toEqual([
+      "claude:unauthorized",
+      "fake:available",
+    ]);
+    expect(api.calls.find((c) => c.path === "/api/events")?.search).toContain("provider.*");
+
+    api.push({ type: "provider.health", at, health: { provider: "claude", status: "available" } });
+    await vi.waitFor(() => expect(store.provider("claude")?.status).toBe("available"));
   });
 
   it("moves a session that ends to History, with its outcome", async () => {

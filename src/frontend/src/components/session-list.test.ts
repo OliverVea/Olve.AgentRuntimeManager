@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { clock } from "../sessions/format.js";
 import { SessionStore } from "../sessions/session-store.js";
 import { fakeApi, session } from "../testing/fake-api.js";
 import { SessionList } from "./session-list.js";
@@ -53,6 +54,40 @@ describe("<session-list>", () => {
     expect(el.shadowRoot!.querySelectorAll("[data-kill]")[1]?.getAttribute("title")).toBe(
       "Cancel session",
     );
+  });
+
+  it("says what a queued session waits for while its provider is paused, and which attempt is next", async () => {
+    const until = "2026-09-26T22:00:00Z";
+    const { el } = await mount(
+      fakeApi({
+        sessions: [
+          session("aaaaaaaa-0001", { status: "queued", provider: "claude", model: "sonnet" }),
+          session("bbbbbbbb-0002", {
+            status: "queued",
+            provider: "claude",
+            model: "haiku",
+            createdAt: "2026-09-26T10:01:00Z",
+            attempts: 1,
+            error: "API Error: 529 Overloaded",
+          }),
+          session("cccccccc-0003", { status: "queued", createdAt: "2026-09-26T10:02:00Z" }),
+        ],
+        providers: [
+          { provider: "claude", status: "limited", reason: "session limit", since: until, until },
+          { provider: "fake", status: "available" },
+        ],
+      }),
+    );
+
+    const hm = clock(until, Date.now());
+    expect(text(el, ".note.paused")).toEqual([
+      `waiting for claude: its usage limit resets at ${hm}`,
+      `waiting for claude: its usage limit resets at ${hm}`,
+    ]);
+    expect(el.shadowRoot!.querySelectorAll(".note.paused")[1]?.getAttribute("title")).toBe(
+      "Last attempt: API Error: 529 Overloaded",
+    );
+    expect(text(el, ".attempt")).toEqual(["attempt 2 of 4"]);
   });
 
   it("shows History with each outcome and a delete button", async () => {

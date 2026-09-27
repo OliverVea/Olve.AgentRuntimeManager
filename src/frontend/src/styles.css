@@ -30,6 +30,8 @@
   --failed-bg: #fee2e2;
   --beta: #7c3aed;
   --beta-bg: #ede9fe;
+  --warn: #b45309;
+  --warn-bg: #fef3c7;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --row: 22px;
 }
@@ -64,6 +66,8 @@
   --failed-bg: #3a1818;
   --beta: #c4b5fd;
   --beta-bg: #2e2250;
+  --warn: #fbbf24;
+  --warn-bg: #372b0c;
 }
 
 * {
@@ -106,6 +110,7 @@ svg.i {
 
 /* ---- header ---- */
 header {
+  position: relative; /* anchors the providers popover */
   display: flex;
   align-items: center;
   gap: 14px;
@@ -461,4 +466,127 @@ section.opt .field select {
     max-width: 70%;
     width: auto;
   }
+}
+
+/* ---- provider health (approved mock: mocks/provider-health.html) ---- */
+/* A pill per paused provider, before the live status. */
+#provider-pills {
+  display: contents;
+}
+.provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  border: 0;
+  border-radius: 13px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.provider-pill.limited,
+.provider-pill.unreachable {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.provider-pill.unauthorized {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.provider-pill .dot {
+  background: currentColor;
+}
+.provider-pill.unreachable .dot {
+  animation: pulse 1s infinite;
+}
+.provider-pill .until {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+/* Its popover: every provider. */
+.providers {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 24px;
+  z-index: 5;
+  width: min(440px, calc(100vw - 24px));
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  padding: 4px 0;
+}
+.providers[hidden] {
+  display: none;
+}
+.providers .prov {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  justify-items: start;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 8px 14px;
+}
+.providers .prov + .prov {
+  border-top: 1px solid var(--line);
+}
+.providers .name {
+  font: 13px var(--mono);
+}
+.providers .reason {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: 13px;
+}
+.providers .times {
+  grid-column: 2;
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.providers .badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0 7px;
+  line-height: 18px;
+}
+.badge.available {
+  background: var(--working-bg);
+  color: var(--working);
+}
+.badge.limited,
+.badge.unreachable {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.badge.unauthorized {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* A banner under the header, only for unauthorized (the state that needs a person). */
+.alert {
+  display: flex;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 8px 24px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.alert b {
+  font-weight: 650;
+}
+.alert .fix {
+  color: var(--text);
+  opacity: 0.8;
+}
+/* The composer's hint: the model's provider is paused. */
+.will-queue {
+  font-size: 13px;
+  color: var(--warn);
 }

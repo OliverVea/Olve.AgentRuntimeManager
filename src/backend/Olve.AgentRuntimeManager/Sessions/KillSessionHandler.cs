@@ -8,7 +8,7 @@ public sealed class KillSessionHandler(SessionManager sessions) : ISessionsKillH
     public Task<SessionsKillResponse> HandleAsync(SessionsKillRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<SessionsKillResponse>(sessions.Kill(request.Id, request.Body.Reason, KillSource.User, request.Body.Caller) switch
         {
-            KillOutcome.Stopped stopped => stopped.Session.ToDto(),
+            KillOutcome.Stopped stopped => stopped.Session.ToDto(sessions.ProviderRetries),
             KillOutcome.AlreadyEnded ended => new SessionsKillResponse.Conflict(SessionErrors.AlreadyEnded(ended.Session)),
             KillOutcome.NotFound => new SessionsKillResponse.NotFound(SessionErrors.NotFound(request.Id)),
             _ => throw new InvalidOperationException("Unhandled kill outcome."),

@@ -11,6 +11,7 @@ public sealed record SessionBody(
     string Caller,
     int? TimeoutSeconds,
     int Attempts,
+    int RetriesLeft,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? EndedAt,

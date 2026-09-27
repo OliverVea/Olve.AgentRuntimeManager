@@ -13,7 +13,7 @@ public sealed class SearchSessionsHandler(SessionManager sessions) : ISessionsSe
         var page = sessions.Search(request.Body, request.Body.Limit ?? DefaultLimit, request.Body.Offset ?? 0);
         return Task.FromResult<SessionsSearchResponse>(new SessionPage
         {
-            Items = [.. page.Items.Select(s => s.ToDto())],
+            Items = [.. page.Items.Select(s => s.ToDto(sessions.ProviderRetries))],
             Total = page.Total,
             Limit = page.Limit,
             Offset = page.Offset,

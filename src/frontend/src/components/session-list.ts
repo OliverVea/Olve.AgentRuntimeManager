@@ -80,7 +80,10 @@ export class SessionList extends BaseElement {
     const error = state === "error" ? `<div class="error">${escapeHtml(store.error)}</div>` : "";
 
     let body: string;
-    if (sessions.length) body = sessions.map((s) => sessionCard(s, this.#times, now)).join("");
+    if (sessions.length)
+      body = sessions
+        .map((s) => sessionCard(s, this.#times, now, store.provider(s.provider)))
+        .join("");
     else if (state === "loading" || state === "idle") body = `<div class="empty">Loading…</div>`;
     else if (overview) body = `<div class="empty">Nothing running. Start a session above.</div>`;
     else body = `<div class="empty">No ended sessions yet.</div>`;
