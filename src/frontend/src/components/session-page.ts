@@ -285,7 +285,7 @@ export class SessionPage extends BaseElement {
       row("started", times(s.startedAt)),
       row("ended", times(s.endedAt)),
       row("timeout", s.timeoutSeconds ? `${s.timeoutSeconds}s` : undefined),
-      row("attempts", `${s.attempts} (${s.retriesLeft} retries left)`),
+      row("runs", `${s.attempts} (${s.retriesLeft} retries left)`),
       row("env", env ? escapeHtml(env) : undefined, "mono"),
       row("uses env", s.useEnv?.length ? escapeHtml(s.useEnv.join(", ")) : undefined, "mono"),
       row(
