@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,9 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <summary>Environment the supervisor itself gets: only what a framework-dependent build needs to find .NET.</summary>
     private static readonly string[] SupervisorEnvironment = ["DOTNET_ROOT", "DOTNET_ROOT_X64"];
 
+    /// <summary>The configured agent user's account, looked up once (null: agents run as ARM's own user).</summary>
+    private readonly Lazy<AgentAccount?> _account = new(() => AgentAccount.Find(options.Value.User));
+
     /// <summary>
     /// Starts a supervisor running <paramref name="command"/> for a run, with <paramref name="input"/>
     /// as the agent's first input. Doesn't wait for it: the launch goes to its stdin (a small pipe
@@ -32,25 +36,31 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     {
         var settings = options.Value;
         var socketPath = SocketPath(sessionId);
+        var account = _account.Value;
+        if (account is not null)
+        {
+            // The supervisor writes the session's files and the agent its work: both as the agent user.
+            ShareWithAgent(folder);
+            ShareWithAgent(workingDirectory);
+        }
+
         var launch = new SupervisorLaunch
         {
             Version = SupervisorProtocol.Version,
             RunId = runId,
             Command = command,
             Arguments = arguments,
-            Environment = environment,
+            Environment = account is null ? environment : account.Identify(environment),
             WorkingDirectory = workingDirectory,
             Input = input,
             Folder = folder,
             SocketPath = socketPath,
+            ClientUid = Posix.GetEUid(),
         };
 
-        var info = new ProcessStartInfo(Command(settings))
-        {
-            WorkingDirectory = folder,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
+        var info = StartInfo(settings, account, [Command(settings)]);
+        info.WorkingDirectory = folder;
+        info.RedirectStandardInput = true;
         info.Environment.Clear();
         foreach (var name in SupervisorEnvironment)
         {
@@ -139,8 +149,85 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         }
 
         logger.LogWarning("Run {RunId}: killing its orphaned agent {Pid}", info.RunId, info.AgentPid);
+        // Ours (agents running as ARM's user, or a run from before they had their own).
         Posix.Kill(-info.SupervisorPid, Posix.SigKill);
         Posix.Kill(info.AgentPid, Posix.SigKill);
+        if (_account.Value is { } account)
+        {
+            // The agent user's: only that user can signal them, so the supervisor does it as that user.
+            KillAsAgentUser(account, info);
+        }
+    }
+
+    private void KillAsAgentUser(AgentAccount account, SupervisorInfo info)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, account,
+            [Command(settings), "kill", info.SupervisorPid.ToString(CultureInfo.InvariantCulture), info.AgentPid.ToString(CultureInfo.InvariantCulture)]);
+        start.RedirectStandardError = true;
+        try
+        {
+            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(settings.ConnectTimeout))
+            {
+                process.Kill();
+                logger.LogError("Run {RunId}: killing its orphaned agent as {User} timed out", info.RunId, account.Name);
+            }
+            else if (process.ExitCode != 0)
+            {
+                logger.LogError("Run {RunId}: killing its orphaned agent as {User} failed ({ExitCode}): {Error}",
+                    info.RunId, account.Name, process.ExitCode, error.Result.Trim());
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogError(exception, "Run {RunId}: could not kill its orphaned agent as {User}", info.RunId, account.Name);
+        }
+    }
+
+    /// <summary>
+    /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):
+    /// directly, or as the agent user through <c>sudo -n -u &lt;user&gt; --</c> (non-interactive:
+    /// a missing sudoers rule fails at once instead of waiting for a password).
+    /// </summary>
+    private static ProcessStartInfo StartInfo(SupervisorOptions settings, AgentAccount? account, IReadOnlyList<string> arguments)
+    {
+        var info = new ProcessStartInfo(account is null ? arguments[0] : settings.Sudo) { UseShellExecute = false };
+        if (account is not null)
+        {
+            foreach (var argument in (string[])["-n", "-u", account.Name, "--", arguments[0]])
+            {
+                info.ArgumentList.Add(argument);
+            }
+        }
+
+        foreach (var argument in arguments.Skip(1))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        return info;
+    }
+
+    /// <summary>
+    /// Lets the agent user's group (which ARM is in) write <paramref name="directory"/>, and what's
+    /// created in it inherit the group (setgid); the group itself comes from the work root's setgid.
+    /// </summary>
+    private static void ShareWithAgent(string directory)
+    {
+        // The agent can write the session's folder: a link it put there must not make ARM share its target.
+        if (new DirectoryInfo(directory).LinkTarget is not null)
+        {
+            throw new InvalidOperationException($"'{directory}' is a link, not the session's own folder.");
+        }
+
+        const UnixFileMode shared = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup;
+        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(directory) & shared) != shared)
+        {
+            File.SetUnixFileMode(directory, File.GetUnixFileMode(directory) | shared);
+        }
     }
 
     public string SocketPath(Guid sessionId) => Path.Combine(SocketRoot(options.Value), $"{sessionId}.sock");
