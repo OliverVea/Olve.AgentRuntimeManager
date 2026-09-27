@@ -130,7 +130,7 @@ public class ClaudeRecoveryTests
         var (arguments, prompt) = Invocation(launch);
         await Assert.That(arguments[Array.IndexOf(arguments, "--resume") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
         await Assert.That(arguments).DoesNotContain("--session-id");
-        await Assert.That(prompt).IsEqualTo(ClaudeStreamJson.UserMessage(ClaudeProvider.ResumePrompt));
+        await Assert.That(ClaudeProviderTests.Told(prompt)).IsEqualTo(ClaudeProvider.ResumePrompt);
         await Assert.That(SupervisorFiles.ReadExit(Folder(launch))!.RunId).IsEqualTo(Recovery(launch).ResumeRunId);
     }
 

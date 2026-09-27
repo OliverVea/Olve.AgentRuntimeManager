@@ -27,11 +27,21 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
     public string Name => ProviderName;
 
+    /// <summary>
+    /// Starts Claude Code with the prompt and the messages held for it, or, for a session that
+    /// continues (M11), resumes its Claude session with the messages as what it's told next.
+    /// </summary>
     public IAgentRun Start(AgentLaunch launch)
     {
-        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, ["--session-id", launch.ProviderSessionId.ToString()], launch.Prompt, launch.Env);
-        logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, run {RunId})", launch.SessionId, launch.Attempt, launch.RunId);
-        return new ClaudeRun(agent, launch.ProviderSessionId.ToString(), options.Value.ExitGrace);
+        var (session, providerSessionId) = launch.Resume is { } resume
+            ? (["--resume", resume], resume)
+            : (new[] { "--session-id", launch.ProviderSessionId.ToString() }, launch.ProviderSessionId.ToString());
+        var input = launch.Input.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env);
+        logger.LogInformation("Session {SessionId}: {Started} Claude Code (attempt {Attempt}, run {RunId}, {Messages} messages)",
+            launch.SessionId, launch.Resume is null ? "started" : "resumed", launch.Attempt, launch.RunId, launch.Messages?.Count ?? 0);
+        // The first is taken up before any turn can end: the run waits for the others.
+        return new ClaudeRun(agent, providerSessionId, options.Value.ExitGrace, input.Skip(1).Select(m => m.Id));
     }
 
     /// <summary>
@@ -64,7 +74,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
-        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], ResumePrompt, recovery.Env);
+        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env);
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
 
@@ -144,16 +154,18 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
     }
 
     /// <summary>
-    /// Starts the agent under a supervisor, in the session's folder, with <paramref name="prompt"/>
-    /// as its first message and the session's <paramref name="env"/> in its environment.
+    /// Starts the agent under a supervisor, in the session's folder, with <paramref name="input"/>
+    /// as its first messages (each with its uuid) and the session's <paramref name="env"/> in its environment.
     /// </summary>
-    private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session, string prompt, IReadOnlyDictionary<string, string>? env)
+    private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session,
+        IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env)
     {
         var settings = options.Value;
         var folder = Folder(settings, sessionId);
         var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
-            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env), [ClaudeStreamJson.UserMessage(prompt)]);
+            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env),
+            [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))]);
     }
 
     /// <summary>

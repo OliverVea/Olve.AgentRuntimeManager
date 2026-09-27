@@ -271,15 +271,12 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         }
     }
 
-    private async Task WriteInitialInputAsync()
-    {
-        foreach (var line in launch.Input)
-        {
-            await WriteInputAsync(line);
-        }
-    }
+    /// <summary>All of it before any of ARM's writes: a message sent just after the start mustn't come between its lines.</summary>
+    private Task WriteInitialInputAsync() => WriteInputAsync(launch.Input);
 
-    private async Task WriteInputAsync(string line)
+    private Task WriteInputAsync(string line) => WriteInputAsync([line]);
+
+    private async Task WriteInputAsync(IReadOnlyList<string> lines)
     {
         await _input.WaitAsync();
         try
@@ -289,7 +286,11 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
                 return;
             }
 
-            await _agent.StandardInput.WriteAsync(line + "\n");
+            foreach (var line in lines)
+            {
+                await _agent.StandardInput.WriteAsync(line + "\n");
+            }
+
             await _agent.StandardInput.FlushAsync();
         }
         catch (IOException)

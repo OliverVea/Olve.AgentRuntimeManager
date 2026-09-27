@@ -10,14 +10,41 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// </summary>
 public static class ClaudeStreamJson
 {
-    /// <summary>A user message, as one stdin line.</summary>
-    public static string UserMessage(string text) =>
-        new JsonObject
+    /// <summary>
+    /// A user message, as one stdin line. Its <paramref name="uuid"/> comes back on its replay
+    /// (<c>--replay-user-messages</c>) once the agent has taken it up: see <see cref="IsReplay"/>.
+    /// </summary>
+    public static string UserMessage(string text, Guid? uuid = null)
+    {
+        var message = new JsonObject
         {
             ["type"] = "user",
             ["message"] = new JsonObject { ["role"] = "user", ["content"] = text },
             ["parent_tool_use_id"] = null,
-        }.ToJsonString();
+        };
+        if (uuid is { } id)
+        {
+            message["uuid"] = id.ToString();
+        }
+
+        return message.ToJsonString();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> replays a user message the agent was given (<c>isReplay</c>): it
+    /// has taken it up, and a turn with it is under way. <paramref name="uuid"/>: the message's own, if it had one.
+    /// </summary>
+    public static bool IsReplay(JsonObject e, out Guid? uuid)
+    {
+        uuid = null;
+        if (Text(e["type"]) != "user" || e["isReplay"] is not JsonValue flag || !flag.TryGetValue<bool>(out var replay) || !replay)
+        {
+            return false;
+        }
+
+        uuid = Guid.TryParse(Text(e["uuid"]), out var id) ? id : null;
+        return true;
+    }
 
     /// <summary>One output line as an event object; null for anything else (or not JSON).</summary>
     public static JsonObject? Parse(string line)
@@ -36,11 +63,27 @@ public static class ClaudeStreamJson
     public static ClaudeResult? ParseResult(string line) => Parse(line) is { } e ? Result(e) : null;
 
     /// <summary>
-    /// Whether a run's output (its lines of <c>output.jsonl</c>) holds a successful turn: its work
-    /// is done, even if no exit was recorded.
+    /// Whether a run's output (its lines of <c>output.jsonl</c>) ends with a successful turn, with
+    /// no message taken up after it: its work is done, even if no exit was recorded.
     /// </summary>
-    public static bool TurnSucceeded(IEnumerable<string> lines) =>
-        lines.Select(ParseResult).FirstOrDefault(r => r is not null) is { IsError: false };
+    public static bool TurnSucceeded(IEnumerable<string> lines)
+    {
+        ClaudeResult? last = null;
+        foreach (var e in lines.Select(Parse).OfType<JsonObject>())
+        {
+            if (IsReplay(e, out _))
+            {
+                // A turn under way: not done until its own result.
+                last = null;
+            }
+            else if (Result(e) is { } result)
+            {
+                last = result;
+            }
+        }
+
+        return last is { IsError: false };
+    }
 
     /// <summary>The turn's result if <paramref name="e"/> is a <c>result</c> event, else null.</summary>
     public static ClaudeResult? Result(JsonObject e)

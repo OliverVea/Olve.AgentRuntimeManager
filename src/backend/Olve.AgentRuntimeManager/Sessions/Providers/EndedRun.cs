@@ -10,4 +10,6 @@ public sealed class EndedRun(string providerSessionId, AgentOutcome outcome) : I
     public void Kill()
     {
     }
+
+    public bool TrySend(string text) => false;
 }

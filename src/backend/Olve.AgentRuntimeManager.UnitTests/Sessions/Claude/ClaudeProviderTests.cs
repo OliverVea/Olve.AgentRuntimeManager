@@ -1,8 +1,10 @@
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 
@@ -39,7 +41,7 @@ public class ClaudeProviderTests
         await Provider().Start(launch).Completion;
 
         var sent = await File.ReadAllTextAsync(Path.Combine(Folder(launch), "work", "prompt.jsonl"));
-        await Assert.That(sent.Trim()).IsEqualTo(ClaudeStreamJson.UserMessage("Say READY"));
+        await Assert.That(Told(sent.Trim())).IsEqualTo("Say READY");
     }
 
     [Test]
@@ -238,6 +240,68 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task HeldMessages_FollowThePrompt_AndTheAgentRunsUntilItsLastTurn()
+    {
+        // The second turn takes longer than the grace an agent gets after its last turn.
+        var launch = Launch("stub:turns stub:slow") with { Messages = ["second"] };
+        var run = Provider(o => o.ExitGrace = TimeSpan.FromMilliseconds(200)).Start(launch);
+
+        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(Input(launch)).IsEquivalentTo(["stub:turns stub:slow", "second"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(Results(launch)).IsEqualTo(2);
+        await Assert.That(SupervisorFiles.ReadExit(Folder(launch))!.ExitCode).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Message_WhileWorking_IsDelivered_AndGetsItsOwnTurn()
+    {
+        var launch = Launch("stub:gate stub:turns");
+        var run = Provider().Start(launch);
+
+        var sent = run.TrySend("and another thing");
+        await File.WriteAllTextAsync(Path.Combine(Folder(launch), "work", "release"), "");
+        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await Assert.That(sent).IsTrue();
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(Input(launch)).IsEquivalentTo(["stub:gate stub:turns", "and another thing"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(Results(launch)).IsEqualTo(2);
+        await Assert.That(run.TrySend("too late")).IsFalse();
+    }
+
+    [Test]
+    public async Task Message_AfterTheLastTurn_IsRefused()
+    {
+        // Its turn ends, its input is closed, and it lingers: a message can't reach it any more.
+        var launch = Launch("stub:linger");
+        var run = Provider().Start(launch);
+        await Until(() => File.Exists(Path.Combine(Folder(launch), "work", "input-closed")));
+
+        await Assert.That(run.TrySend("late")).IsFalse();
+
+        run.Kill();
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Test]
+    public async Task Continuing_ResumesTheClaudeSession_WithTheMessagesAsItsInput()
+    {
+        var launch = Launch("the original prompt") with { Attempt = 2, Resume = "the-claude-session", Messages = ["stub:turns first", "second"] };
+
+        var run = Provider().Start(launch);
+        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(run.ProviderSessionId).IsEqualTo("the-claude-session");
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--resume") + 1]).IsEqualTo("the-claude-session");
+        await Assert.That(arguments).DoesNotContain("--session-id");
+        await Assert.That(Input(launch)).IsEquivalentTo(["stub:turns first", "second"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Check_LoggedIn_IsFine()
     {
         var config = Directory.CreateDirectory(Path.Combine(_root, "config")).FullName;
@@ -269,6 +333,10 @@ public class ClaudeProviderTests
         await Assert.That(() => Provider(o => o.Command = Path.Combine(_root, "no-such-claude")).Start(Launch("x")))
             .ThrowsException();
 
+    /// <summary>What a stdin line (a stream-json user message) told the agent.</summary>
+    internal static string? Told(string line) =>
+        JsonNode.Parse(line) is { } message && message["type"]?.GetValue<string>() == "user" ? message["message"]?["content"]?.GetValue<string>() : null;
+
     private ClaudeProvider Provider(Action<ClaudeProviderOptions>? configure = null)
     {
         var options = new ClaudeProviderOptions { Command = Stub, WorkRoot = _root };
@@ -287,6 +355,23 @@ public class ClaudeProviderTests
     }
 
     private string Folder(AgentLaunch launch) => Path.Combine(_root, launch.SessionId.ToString());
+
+    /// <summary>What the agent was told on its stdin, in order.</summary>
+    private string[] Input(AgentLaunch launch) =>
+        [.. File.ReadAllLines(Path.Combine(Folder(launch), "work", "input.jsonl")).Select(l => Told(l) ?? "")];
+
+    /// <summary>How many turns the agent ended (<c>result</c> events in its output).</summary>
+    private int Results(AgentLaunch launch) =>
+        File.ReadAllLines(Path.Combine(Folder(launch), "output.jsonl")).Count(l => ClaudeStreamJson.ParseResult(l) is not null);
+
+    private static async Task Until(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!condition())
+        {
+            await Task.Delay(20, timeout.Token);
+        }
+    }
 
     /// <summary>What the stub was started with: its arguments, and its environment.</summary>
     private async Task<(string[] Arguments, Dictionary<string, string> Environment)> Invocation(AgentLaunch launch)

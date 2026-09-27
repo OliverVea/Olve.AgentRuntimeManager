@@ -57,6 +57,11 @@ restart.
 **Decision: the supervisor keeps stdin open while ARM is away.** An agent that finishes its turn
 meanwhile just idles. The reconnecting ARM replays `output.jsonl` from the current run's
 offset, sees the `result`, closes input and applies the exit grace as usual.
+(Since M11 a run may have several turns, one per message: `ClaudeRun` closes stdin after a
+`result` once every message it gave the agent has been taken up, and takes the last `result`. A
+re-attached run doesn't know what the previous server sent, so it closes input after the first
+`result`; nothing already written is lost, as the agent works through its input before it exits,
+and each new turn's replayed message holds off the exit grace.)
 An agent waiting on an approval simply waits for the new ARM. The price: an idle agent holds its
 slot until ARM is back, which is seconds on a deploy.
 
@@ -102,7 +107,7 @@ In this order, with the I/O done outside `_gate`:
    continues on the live socket.
 2. **No supervisor, the current run's `exit.json` exists** → the agent ended while ARM was away: finish with the
    real outcome, through the same `Outcome()` (log + exit code + stderr tail).
-3. **No supervisor, no exit file, but the current run's log has a successful `result`** → the work is done:
+3. **No supervisor, no exit file, but the current run's log ends with a successful `result`** (no message taken up after it) → the work is done:
    complete (exit code 0, as for an agent stopped for lingering). Don't resume finished work.
 4. **Otherwise** → resume (below). Two agents on one Claude session must not happen.
 
