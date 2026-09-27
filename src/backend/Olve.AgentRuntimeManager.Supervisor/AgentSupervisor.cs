@@ -195,7 +195,6 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             }
 
             previous?.Dispose();
-            _log.Write($"run {launch.RunId}: ARM attached");
             connection.Start(_hello);
         }
     }
@@ -210,6 +209,8 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
                 return;
             }
 
+            // Here, not on accept: a restarted ARM probes the socket (connects, closes) before it attaches.
+            _log.Write($"run {launch.RunId}: ARM attached");
             var position = Math.Clamp(offset, _outputStart, _outputEnd);
             if (position < _outputEnd)
             {

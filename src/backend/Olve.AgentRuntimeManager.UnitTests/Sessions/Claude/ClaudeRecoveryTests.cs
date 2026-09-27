@@ -49,6 +49,21 @@ public class ClaudeRecoveryTests
     }
 
     [Test]
+    public async Task ServerRestart_TheSupervisorLogsOnlyRealAttaches()
+    {
+        var (before, launch) = await StartAsync("stub:gate");
+        await Until(() => Attaches(launch) == 1);
+        before.Dispose();
+
+        // Recovering probes the socket (IsListening) before it attaches: that's no attach.
+        var recovered = Server().Provider.Recover(Recovery(launch))!;
+        Release(launch);
+        await recovered.Run.Completion.WaitAsync(Guard);
+
+        await Assert.That(Attaches(launch)).IsEqualTo(2);
+    }
+
+    [Test]
     public async Task TurnEndedWhileAway_TheNewServerEndsTheAgent()
     {
         var (before, launch) = await StartAsync("stub:gate");
@@ -207,6 +222,12 @@ public class ClaudeRecoveryTests
     }
 
     private string Folder(AgentLaunch launch) => Path.Combine(_root, launch.SessionId.ToString());
+
+    private int Attaches(AgentLaunch launch)
+    {
+        var log = Path.Combine(Folder(launch), SupervisorFiles.Log);
+        return File.Exists(log) ? File.ReadAllLines(log).Count(l => l.EndsWith(": ARM attached", StringComparison.Ordinal)) : 0;
+    }
 
     private void Release(AgentLaunch launch) => File.WriteAllText(Path.Combine(Folder(launch), "work", "release"), "");
 
