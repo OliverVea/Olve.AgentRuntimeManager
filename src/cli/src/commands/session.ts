@@ -1,11 +1,13 @@
 import {
   sessionConversationGet,
+  sessionMessagesSend,
   sessionsCreate,
   sessionsDelete,
   sessionsGet,
   sessionsKill,
   sessionsSearch,
   type CreateSession,
+  type MessageDelivery,
   type Session,
   type SessionPage,
   type SessionSearch,
@@ -98,6 +100,16 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
+}
+
+/** What became of a message, in words (typed, so a delivery added to the contract fails to compile here). */
+function deliveryText(delivery: MessageDelivery, id: string): string {
+  const texts: Record<MessageDelivery, string> = {
+    delivered: `Delivered to session ${id}.`,
+    pending: `Held until session ${id} starts.`,
+    continued: `Continued session ${id}: queued.`,
+  };
+  return texts[delivery];
 }
 
 function searchBody(options: OptionValues): SessionSearch {
@@ -213,6 +225,21 @@ export const sessionGroup: CommandGroup = {
         // A queued session is cancelled, a working one killed; the status says which.
         const verb = session.status === "cancelled" ? "Cancelled" : "Killed";
         return { json: session, pretty: `${verb} session ${session.id}.\n\n${formatSession(session)}` };
+      },
+    },
+    {
+      name: "message",
+      summary: "Tell a session's agent something: now while it works, when it starts while queued, or continue an ended session with it",
+      args: [idArg, { name: "text", description: "What to tell the agent (quote it)" }],
+      options: {
+        caller: { type: "string", description: "Who sends it (default: setting caller, else your user name)", valueName: "X" },
+      },
+      async run({ args, options, client, settings, user }) {
+        const messageText = args.text!;
+        if (messageText.trim() === "") throw new UsageError("<text> must not be empty");
+        const caller = textOrDefault(options, "caller", settings.caller ?? user);
+        const sent = await unwrap(sessionMessagesSend({ client, path: { id: args.id! }, body: { text: messageText, caller } }), client);
+        return { json: sent, pretty: deliveryText(sent.delivery, args.id!) };
       },
     },
     {

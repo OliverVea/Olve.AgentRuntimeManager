@@ -278,6 +278,42 @@ describe("session kill", () => {
   });
 });
 
+describe("session message", () => {
+  test("POSTs {text, caller} to /messages", async () => {
+    const f = fakeFetch(() => ({ status: 202, body: { delivery: "delivered" } }));
+    const r = await cli(["session", "message", id, "also check the logs", "--caller", "ci"], f);
+    expect(r.code).toBe(0);
+    const req = f.requests[0]!;
+    expect(req.method).toBe("POST");
+    expect(req.url).toBe(`${url}/api/sessions/${id}/messages`);
+    expect(req.headers.get("content-type")).toContain("application/json");
+    expect(req.body).toEqual({ text: "also check the logs", caller: "ci" });
+  });
+
+  const deliveries: Array<[string, string]> = [
+    ["delivered", `Delivered to session ${id}.`],
+    ["pending", `Held until session ${id} starts.`],
+    ["continued", `Continued session ${id}: queued.`],
+  ];
+  for (const [delivery, printed] of deliveries) {
+    test(`${delivery}: prints what happened`, async () => {
+      const f = fakeFetch(() => ({ status: 202, body: { delivery } }));
+      const r = await cli(["session", "message", id, "go on", "--caller", "ci"], f);
+      expect(r.code).toBe(0);
+      expect(r.stdout.trim()).toBe(printed);
+      const j = await cli(["session", "message", id, "go on", "--caller", "ci", "--json"], f);
+      expect(JSON.parse(j.stdout)).toEqual({ delivery });
+    });
+  }
+
+  test("409 (never started) exits 4", async () => {
+    const f = fakeFetch(() => ({ status: 409, body: errorBody("SESSION_NEVER_STARTED", "It never started.") }));
+    const r = await cli(["session", "message", id, "hello?", "--caller", "ci"], f);
+    expect(r.code).toBe(4);
+    expect(r.stderr).toBe("error: 409 Conflict: SESSION_NEVER_STARTED: It never started.");
+  });
+});
+
 describe("session delete", () => {
   test("DELETEs the id; 204", async () => {
     const f = fakeFetch(() => ({ status: 204 }));
@@ -316,6 +352,9 @@ describe("session usage errors exit 2 without a request", () => {
     ["missing id", ["session", "kill", "--caller", "ci"], "missing argument <id>"],
     ["kill without caller", ["session", "kill", id], "missing --caller (or set a default: arm config set caller <value>)"],
     ["kill with empty caller", ["session", "kill", id, "--caller="], "--caller must not be empty"],
+    ["message without text", ["session", "message", id, "--caller", "ci"], "missing argument <text>"],
+    ["blank message", ["session", "message", id, "  ", "--caller", "ci"], "<text> must not be empty"],
+    ["message without caller", ["session", "message", id, "hi"], "missing --caller (or set a default: arm config set caller <value>)"],
     ["list --text is gone", ["session", "list", "--text", "x"], "--text"],
     ["option of another command", ["session", "get", id, "--limit", "2"], "--limit"],
   ];

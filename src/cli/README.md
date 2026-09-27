@@ -14,6 +14,7 @@ arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-s
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
+arm session message <id> <text> [--caller X]
 arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>
 
@@ -45,7 +46,7 @@ Precedence is flag, then env, then `~/.arm/config.json` (see [Defaults](#default
 built-in default. A prompt starting with a dash goes after `--`:
 `arm session create --caller me -- "-5 degrees"`. `--after`/`--before` take a date or date-time
 (`2026-09-01`, `2026-09-01T12:00:00Z`); a bare date is midnight UTC. An empty option value, a
-missing or blank `<prompt>`, a `caller` found nowhere (flag, env, config, OS user) and malformed
+missing or blank `<prompt>` (or message `<text>`), a `caller` found nowhere (flag, env, config, OS user) and malformed
 values (an unknown `--status`, `--limit` outside 1–100, …) are usage errors before any request is
 sent.
 
@@ -68,7 +69,7 @@ The server's OIDC client must allow both: a loopback redirect
 
 ## Defaults
 
-The API requires `provider`, `model` and `caller` on every create (and `caller` on every kill);
+The API requires `provider`, `model` and `caller` on every create (and `caller` on every kill and message);
 the CLI fills them in so you don't have to type them. Each comes from, in order: the flag, the
 environment, your settings in `~/.arm/config.json`, then a built-in default:
 
@@ -86,6 +87,17 @@ file is. `ARM_HOME` moves the folder (default `~/.arm`).
 `Queued session <id> at position N.` when it is waiting for one (202); with `--json` it prints the
 session either way (`status` and `queuePosition` tell them apart). `arm session list` pages newest
 first; its footer says which matches are shown and the `--offset` of the next page.
+
+## Messages
+
+`arm session message <id> "text"` tells a session's agent something and prints what became of it:
+`Delivered to session <id>.` while it works (the agent sees it after its current step),
+`Held until session <id> starts.` while it's queued (its agent gets it after the prompt), or
+`Continued session <id>: queued.` once it has ended: the session runs again, same id and
+conversation, its agent resuming where it left off with the message. With `--json` it prints
+`{ "delivery": "delivered" | "pending" | "continued" }`. A session that never started (cancelled
+while queued) can't continue: 409, exit 4. `arm session conversation <id>` shows the messages as
+prompts.
 
 ## Environment variables
 
@@ -118,7 +130,7 @@ seen in earlier `--json` output.
 | `1` | Any other API error (400, 401, 5xx other than 503, …), a network error, or an unexpected failure |
 | `2` | Usage error: unknown command or option, missing argument, malformed option value |
 | `3` | Not found (404), e.g. no such session |
-| `4` | Conflict (409): killing a session that already ended, deleting one that hasn't |
+| `4` | Conflict (409): killing a session that already ended, deleting one that hasn't, messaging one that never started |
 | `5` | Unavailable (503): the session queue is full, or the server is draining |
 
 Errors always go to **stderr**, so stdout only ever holds successful output. The API's error
