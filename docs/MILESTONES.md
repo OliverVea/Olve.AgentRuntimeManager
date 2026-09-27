@@ -41,7 +41,7 @@ deleted once the whole screen is built and approved.
 | Live updates: the Overview (and later the session page) follows the event stream — subscribe and fetch the snapshot in parallel, buffer, apply what the snapshot lacks (per-session `seq`) — and the live dot shows the stream's state | Done 2026-09-26 for the Overview (on today's `session.*` events, re-reading the snapshot once subscribed); the `seq` dedupe with M5b/M6 |
 | BETA marker with the build version (beta only) | Done 2026-09-26 (`GET /api/server-info`) |
 | Log column, for running sessions only (ended cards show just their outcome on the first line; 2026-09-26): last 3 lines, filling from the bottom; expand; wrap (the box keeps its height); fade at the edges; links; wrap/expand defaults in Options | M5b |
-| Session page (details + the full transcript) | M5b — **needs its own mock first** |
+| Session page (details + the full transcript) | Done 2026-09-27 (M5b), from its own mock, on today's API: the card, details, and the conversation as boxes (prompts, text, thinking folded, tool calls with a one-line preview, time taken, input as fields, the answer); re-reads every 3 s while running. Target-only parts wait for the `notice` kind (not yet agreed), display names (M4b) and live events (M6) |
 | Context use (% ↔ tokens/window, green < 15%, yellow < 30%, red from 30%) | M6 (context events), from real numbers with M9 |
 | Child sessions nested under their parent (rail, fold, "+N ended"); no parent field in the composer | M5c |
 | Sleeping sessions | Not planned yet (VISION) |

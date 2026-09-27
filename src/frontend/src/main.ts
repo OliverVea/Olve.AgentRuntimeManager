@@ -2,6 +2,7 @@ import "./styles.css";
 import {
   type Session,
   serverInfoApiGet,
+  sessionConversationGet,
   sessionsCreate,
   sessionsDelete,
   sessionsGet,
@@ -12,6 +13,7 @@ import { describeError, unwrap } from "./api-errors.js";
 import * as auth from "./auth/oidc.js";
 import { escapeHtml } from "./base-element.js";
 import { SessionList, type View } from "./components/session-list.js";
+import { SessionPage } from "./components/session-page.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
 import { parseModel, shortId } from "./sessions/format.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
@@ -42,6 +44,10 @@ customElements.define(SessionList.tagName, SessionList);
 const list = $<SessionList>("#list");
 list.store = store;
 list.times = prefs.times;
+customElements.define(SessionPage.tagName, SessionPage);
+const page = $<SessionPage>("#page");
+page.times = prefs.times;
+page.view = prefs.transcript;
 
 // --- theme: the system's, unless Options picks light or dark ------------------------------------
 const systemDark = matchMedia("(prefers-color-scheme: dark)");
@@ -287,10 +293,20 @@ list.addEventListener("open-session", (e) => {
 list.addEventListener("kill-session", (e) => askKill(idOf(e)));
 list.addEventListener("delete-session", (e) => askDelete(idOf(e)));
 list.addEventListener("copy-id", (e) => void copy(idOf(e)));
-list.addEventListener("toggle-times", () => {
+function toggleTimes(): void {
   prefs = { ...prefs, times: prefs.times === "relative" ? "absolute" : "relative" };
   savePrefs(prefs);
   list.times = prefs.times;
+  page.times = prefs.times;
+}
+list.addEventListener("toggle-times", toggleTimes);
+page.addEventListener("toggle-times", toggleTimes);
+page.addEventListener("kill-session", (e) => askKill(idOf(e)));
+page.addEventListener("delete-session", (e) => askDelete(idOf(e)));
+page.addEventListener("copy-id", (e) => void copy(idOf(e)));
+page.addEventListener("view-change", (e) => {
+  prefs = { ...prefs, transcript: (e as CustomEvent<Prefs["transcript"]>).detail };
+  savePrefs(prefs);
 });
 
 async function copy(text: string): Promise<void> {
@@ -352,6 +368,7 @@ function askKill(id: string): void {
       ? { caller: prefs.defaults.caller || fallbackCaller(), reason: reason.value.trim() }
       : { caller: prefs.defaults.caller || fallbackCaller() };
     store.upsert(await unwrap(sessionsKill({ client, path: { id }, body })));
+    if (pageId === id) void loadPage(id);
   });
   dialog.showModal();
 }
@@ -367,6 +384,7 @@ function askDelete(id: string): void {
   confirmWith(dialog, problem, async () => {
     await unwrap(sessionsDelete({ client, path: { id } }));
     store.remove(id);
+    if (pageId === id) location.hash = "#/";
   });
   dialog.showModal();
 }
@@ -414,25 +432,46 @@ $("#open-options").addEventListener("click", () => {
   dialog.showModal();
 });
 
-// --- the session page: #/sessions/<id> (its own mock comes with M5b) -----------------------------
+// --- the session page: #/sessions/<id> (M5b) ----------------------------------------------------
+/** How often a running session's page re-reads it (live updates come with M6). */
+const REFRESH_MS = 3000;
+let pageTimer: ReturnType<typeof setTimeout> | undefined;
+let pageId: string | undefined;
+
 async function route(): Promise<void> {
   const id = location.hash.match(/^#\/sessions\/(.+)$/)?.[1];
   for (const el of [$("#composer"), $("#views"), list]) el.hidden = !!id;
   $("#detail").hidden = !id;
+  clearTimeout(pageTimer);
+  if (id !== pageId) {
+    page.reset();
+    pageId = id;
+    scrollTo(0, 0);
+  }
   if (!id || !signedIn) return;
-  const body = $("#detail-body");
-  const show = (s: Session) => {
-    body.innerHTML = `<strong>${escapeHtml(s.prompt)}</strong><br>${shortId(s)} · ${escapeHtml(s.status)}<br><br>
-      The session page — details and the full log — comes with M5b.`;
-  };
   const known = store.get(id);
-  if (known) show(known);
-  else body.textContent = "Loading…";
-  scrollTo(0, 0);
+  if (known) page.session = known;
+  await loadPage(id);
+}
+
+/** Reads the session and its conversation, then again in a moment while it's still running. */
+async function loadPage(id: string): Promise<void> {
   try {
-    show(await unwrap(sessionsGet({ client, path: { id } })));
+    const [session, conversation] = await Promise.all([
+      unwrap(sessionsGet({ client, path: { id } })),
+      unwrap(sessionConversationGet({ client, path: { id } })),
+    ]);
+    if (pageId !== id) return;
+    store.upsert(session); // so Kill / Delete find it, as from a card
+    page.session = session;
+    page.conversation = conversation;
+    if (["queued", "working"].includes(session.status)) {
+      pageTimer = setTimeout(() => void loadPage(id), REFRESH_MS);
+    }
   } catch (error) {
-    if (!known) body.textContent = describeError(error);
+    if (pageId !== id) return;
+    if (!store.get(id)) page.problem = describeError(error);
+    else pageTimer = setTimeout(() => void loadPage(id), REFRESH_MS);
   }
 }
 window.addEventListener("hashchange", () => void route());

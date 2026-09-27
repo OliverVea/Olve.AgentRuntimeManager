@@ -13,7 +13,7 @@ export function timeOf(session: Session, times: TimesAs, now: number): string {
   return `since ${clock(session.startedAt ?? session.createdAt, now)}`;
 }
 
-function timeTitle(session: Session, times: TimesAs, now: number): string {
+export function timeTitle(session: Session, times: TimesAs, now: number): string {
   const parts = [
     `created ${clock(session.createdAt, now)}`,
     session.startedAt ? `started ${clock(session.startedAt, now)}` : "",
@@ -47,7 +47,7 @@ function waiting(session: Session, health: ProviderHealth | undefined, now: numb
 }
 
 /** The short outcome after the status; the full text is its tooltip. */
-function note(session: Session): string {
+export function note(session: Session): string {
   switch (session.status) {
     case "queued":
       return session.queuePosition !== undefined
