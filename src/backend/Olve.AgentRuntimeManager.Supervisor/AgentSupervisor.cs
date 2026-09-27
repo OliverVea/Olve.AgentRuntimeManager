@@ -69,18 +69,16 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             SupervisorPid = info.SupervisorPid, AgentPid = info.AgentPid, OutputStart = info.OutputStart, StderrStart = info.StderrStart,
         };
 
-        foreach (var line in launch.Input)
-        {
-            await WriteInputAsync(line);
-        }
-
         var stdoutPump = PumpOutputAsync(output);
         var stderrPump = PumpStderrAsync(stderr);
         using var stop = new CancellationTokenSource();
         using var listener = Listen();
         var accepting = AcceptAsync(listener, stop.Token);
+        // After the pumps and the socket: an agent that writes before it has read a large prompt
+        // must not block this (nor keep ARM from connecting).
+        var input = WriteInitialInputAsync();
 
-        await Task.WhenAll(stdoutPump, stderrPump);
+        await Task.WhenAll(stdoutPump, stderrPump, input);
         await _agent.WaitForExitAsync();
         var exitCode = _agent.ExitCode;
         WriteExit(exitCode, error: null);
@@ -269,6 +267,14 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         {
             await stderr.WriteAsync(Utf8.GetBytes(buffer, 0, read));
             await stderr.FlushAsync();
+        }
+    }
+
+    private async Task WriteInitialInputAsync()
+    {
+        foreach (var line in launch.Input)
+        {
+            await WriteInputAsync(line);
         }
     }
 

@@ -201,6 +201,23 @@ Open question for Oliver: should a resume be visible (a `session.resumed` event,
 - vs aoe's `__acp-runner`: it speaks the provider's own protocol, not ACP. State is rebuilt from
   the log on disk, not from the runner's memory. The runner exits as soon as its agent does.
 
+## Status (2026-09-27)
+
+Built (`Olve.AgentRuntimeManager.Supervisor`, `Sessions/Supervision/`, `ClaudeProvider.Recover`,
+`SessionManager.Recover`), with the restart tests above (`ClaudeRecoveryTests`,
+`SessionManagerTests.Restart_*`). Checked by hand: the AOT binary from the image keeps serving
+after its file is deleted, and a second client replays the run from its start. Still to check on
+beta: `KillMode=process` with the preserved `RuntimeDirectory`, a session spanning a deploy, and
+whether a running `claude` re-executes itself by path.
+
+Known limits:
+- Sessions working while the first release with supervisors deploys have no run id (their agent
+  was the old server's child) and are killed, as before.
+- A supervisor that dies while its server is up fails the session (`SupervisorLostException`);
+  only a restart resumes.
+- `Supervisors.Launch` writes the launch (with the prompt) to the new supervisor's stdin under the
+  runtime's lock: it waits only for the supervisor's startup read, even for a large prompt.
+
 ## Decided with Oliver (2026-09-27)
 
 1. A10's gentle-restart leaning holds as the base.
