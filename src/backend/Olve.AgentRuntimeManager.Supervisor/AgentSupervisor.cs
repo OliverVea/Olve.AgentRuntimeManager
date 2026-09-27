@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Text;
@@ -166,7 +167,9 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         File.Delete(launch.SocketPath);
         var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         listener.Bind(new UnixDomainSocketEndPoint(launch.SocketPath));
-        File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        // The group too: an agent running as its own user (docs/AGENT-USER.md) has ARM in its group.
+        // Who may talk on it is checked per connection (ClientUid).
+        File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
         listener.Listen(4);
         return listener;
     }
@@ -184,6 +187,13 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             catch (Exception exception) when (exception is OperationCanceledException or SocketException or ObjectDisposedException)
             {
                 return;
+            }
+
+            if (launch.ClientUid is { } allowed && OperatingSystem.IsLinux() && Posix.PeerUid(socket) is var peer && peer != allowed)
+            {
+                _log.Write($"run {launch.RunId}: refused a connection from user {peer?.ToString(CultureInfo.InvariantCulture) ?? "?"}");
+                socket.Dispose();
+                continue;
             }
 
             var connection = new ArmConnection(socket, this, _log);
