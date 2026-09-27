@@ -7,14 +7,22 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# ARM itself; its agents run as arm-agent (Supervisor__User, docs/AGENT-USER.md), which reaches
+# none of ARM's files: what ARM makes is not for others (UMask), except what it shares on purpose.
+# ARM starts them with sudo, so no NoNewPrivileges= (nor anything that implies it).
 User=arm
+UMask=0027
 WorkingDirectory=/opt/olve-arm/current
-# /var/lib/olve-arm, owned by arm: the database (ConnectionStrings__Arm in /etc/olve-arm/env).
+# /var/lib/olve-arm, owned by arm: the database (ConnectionStrings__Arm in /etc/olve-arm/env),
+# and sessions/, shared with arm-agent's group (vm-deploy.sh). Passable, not listable, by others.
 StateDirectory=olve-arm
+StateDirectoryMode=0711
 # /run/olve-arm, owned by arm: the supervisors' sockets (Supervisor__SocketRoot). Kept across
 # restarts (they outlive the server); /run itself is cleared on reboot, as are the supervisors.
 RuntimeDirectory=olve-arm
 RuntimeDirectoryPreserve=yes
+# The supervisors run as arm-agent, so their socket folder is its group's (setgid; as root, "+").
+ExecStartPre=+/usr/bin/install -d -o arm -g arm-agent -m 2770 /run/olve-arm/supervisors
 EnvironmentFile=/etc/olve-arm/env
 ExecStart=/opt/olve-arm/current/Olve.AgentRuntimeManager
 Restart=on-failure

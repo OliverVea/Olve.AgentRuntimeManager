@@ -14,9 +14,11 @@
 #    autostart (libvirt `default` NAT network)
 # 2. extract /app from the image tarball (the same self-contained publish the container ships)
 # 3. ensure that Claude Code version in the VM (/opt/olve-arm/claude/<version>, uploaded once)
-# 4. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
+# 4. ensure the agent user (arm-agent): agents run as their own unprivileged user, not as `arm`
+#    (docs/AGENT-USER.md); the first run also moves what agents had as `arm` over to it
+# 5. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
 #    Code (so a release rolls back with its own), point `current` at it, restart the service
-# 5. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
+# 6. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
 #    Pods can't open NEW connections into libvirt's NAT network, so the Olve.Homelab route
 #    targets this relay via `hostEndpoint` instead of the VM directly.
 set -euo pipefail
@@ -103,6 +105,12 @@ ensure_claude() {
   $SSH_VM "set -e
     mkdir -p $dir && install -m 0755 /tmp/claude $dir/claude && rm -f /tmp/claude
     $dir/claude --version"
+}
+
+ensure_agent_user() {
+  # Before the release: its service needs the user (and arm in its group) when it starts.
+  log "ensuring the agent user"
+  $SSH_VM "sudo bash -s" < "$HERE/agent-user.sh"
 }
 
 extract_app() {
@@ -211,6 +219,7 @@ EOF
 ensure_vm
 wait_for_vm
 ensure_claude
+ensure_agent_user
 extract_app
 write_env
 install_release
