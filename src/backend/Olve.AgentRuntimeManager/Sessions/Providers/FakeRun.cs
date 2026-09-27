@@ -5,32 +5,47 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
 /// <summary>
 /// One <see cref="FakeProvider"/> agent: waits out its <see cref="FakeScript"/>, or until killed,
-/// telling <c>conversation</c> what it was told, its <see cref="FakeTurn"/> and how its turn ended.
+/// telling <c>conversation</c> what it was told (and later messages, M11), each with its
+/// <see cref="FakeTurn"/>, and how its turn ended.
 /// </summary>
 internal sealed class FakeRun : IAgentRun
 {
     // Never disposed: Kill may come after the run ended, and a CTS without a timer holds nothing.
     private readonly CancellationTokenSource _kill = new();
+    private readonly Lock _gate = new();
+    private readonly TimeProvider _time;
+    private readonly Action<IEnumerable<ConversationEntryRecord>> _conversation;
+    private bool _ended;
 
-    public FakeRun(FakeScript script, int attempt, TimeProvider time, string prompt, Action<IEnumerable<ConversationEntryRecord>> conversation)
+    /// <param name="input">What it's told first, in order: the prompt and held messages.</param>
+    /// <param name="resume">The provider session it resumes (a continuing session), if any.</param>
+    public FakeRun(FakeScript script, int attempt, TimeProvider time, IReadOnlyList<string> input,
+        Action<IEnumerable<ConversationEntryRecord>> conversation, string? resume = null)
     {
+        _time = time;
+        _conversation = conversation;
+        ProviderSessionId = resume ?? $"fake-{Guid.NewGuid():N}";
         var now = time.GetUtcNow();
-        conversation([new ConversationEntryRecord(ConversationEntryKind.Prompt, Text: prompt, At: now)]);
         if (script.IsDownOn(attempt))
         {
             var refused = Refused(script, time);
-            conversation([TurnEnd(refused, time)!]);
+            conversation([.. input.Select(text => Told(text, now)), TurnEnd(refused, time)!]);
+            _ended = true;
             Completion = Task.FromResult(refused);
             return;
         }
 
-        conversation(FakeTurn.Parse(prompt, now));
+        conversation(input.SelectMany(text => (IEnumerable<ConversationEntryRecord>)[Told(text, now), .. FakeTurn.Parse(text, now)]));
         Completion = RunAsync(script, time).ContinueWith(
             run =>
             {
-                if (TurnEnd(run.Result, time) is { } end)
+                lock (_gate)
                 {
-                    conversation([end]);
+                    _ended = true;
+                    if (TurnEnd(run.Result, time) is { } end)
+                    {
+                        conversation([end]);
+                    }
                 }
 
                 return run.Result;
@@ -38,11 +53,29 @@ internal sealed class FakeRun : IAgentRun
             TaskScheduler.Default);
     }
 
-    public string ProviderSessionId { get; } = $"fake-{Guid.NewGuid():N}";
+    public string ProviderSessionId { get; }
 
     public Task<AgentOutcome> Completion { get; }
 
     public void Kill() => _kill.Cancel();
+
+    /// <summary>Shows the message in its conversation, with the steps its directives script; false once it has ended.</summary>
+    public bool TrySend(string text)
+    {
+        lock (_gate)
+        {
+            if (_ended || _kill.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            var now = _time.GetUtcNow();
+            _conversation([Told(text, now), .. FakeTurn.Parse(text, now)]);
+            return true;
+        }
+    }
+
+    private static ConversationEntryRecord Told(string text, DateTimeOffset at) => new(ConversationEntryKind.Prompt, Text: text, At: at);
 
     private async Task<AgentOutcome> RunAsync(FakeScript script, TimeProvider time)
     {

@@ -63,4 +63,42 @@ public class QueueTests(SmallQueueFactory factory)
         await Assert.That(killed.StartedAt).IsNull();
         (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();
     }
+
+    [Test]
+    public async Task MessagesToAQueuedSession_AreHeld_AndGivenToItsAgent_AfterThePrompt()
+    {
+        var client = Client();
+        var running = await client.CreateHangingSessionAsync();
+        var queued = await client.CreateHangingSessionAsync();
+
+        var first = await client.SentMessageAsync(queued.Id, "One. fake:say=First");
+        var second = await client.SentMessageAsync(queued.Id, "Two. fake:say=Second");
+        var before = (await client.GetFromJsonAsync<ConversationBody>($"/api/sessions/{queued.Id}/conversation", Wire.JsonOptions))!;
+        (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();
+        await client.WaitForSessionAsync(queued.Id, s => s.Status == "working");
+        var after = (await client.GetFromJsonAsync<ConversationBody>($"/api/sessions/{queued.Id}/conversation", Wire.JsonOptions))!;
+        (await client.KillSessionAsync(queued.Id)).EnsureSuccessStatusCode();
+
+        await Assert.That((first, second)).IsEqualTo(("pending", "pending"));
+        await Assert.That(before.Entries).IsEmpty();
+        await Assert.That(after.Entries.Select(e => (e.Kind, e.Text ?? ""))).IsEquivalentTo(
+            [("prompt", "Wait. fake:hang"), ("prompt", "One. fake:say=First"), ("text", "First"), ("prompt", "Two. fake:say=Second"), ("text", "Second")],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task MessageToASessionCancelledBeforeItStarted_Is409()
+    {
+        var client = Client();
+        var running = await client.CreateHangingSessionAsync();
+        var queued = await client.CreateHangingSessionAsync();
+        (await client.KillSessionAsync(queued.Id)).EnsureSuccessStatusCode();
+
+        using var response = await client.SendMessageAsync(queued.Id, "hello?");
+        (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+        await Assert.That((await response.ErrorAsync()).Code).IsEqualTo("SESSION_NEVER_STARTED");
+        await Assert.That((await client.GetSessionAsync(queued.Id)).Status).IsEqualTo("cancelled");
+    }
 }

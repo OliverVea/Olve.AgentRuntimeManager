@@ -5,9 +5,10 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// <summary>
 /// The session state machine: <c>queued → working → completed</c>; <c>queued → cancelled</c>
 /// (withdrawn before it started); <c>working → killed</c>; <c>queued|working → failed</c>;
-/// <c>working → queued</c> (the provider refused the agent, and the session has retries left).
-/// Terminal: completed, cancelled, killed, failed. (SPEC's <c>waiting</c>
-/// state arrives with approvals, M8.)
+/// <c>working → queued</c> (the provider refused the agent, and the session has retries left);
+/// <c>completed|failed|killed|cancelled → queued</c> (a message continues it, M11; only one that
+/// had started before). Ended (terminal): completed, cancelled, killed, failed. (SPEC's
+/// <c>waiting</c> state arrives with approvals, M8.)
 /// </summary>
 public static class SessionLifecycle
 {
@@ -15,13 +16,14 @@ public static class SessionLifecycle
     {
         [SessionStatus.Queued] = [SessionStatus.Working, SessionStatus.Cancelled, SessionStatus.Failed],
         [SessionStatus.Working] = [SessionStatus.Completed, SessionStatus.Killed, SessionStatus.Failed, SessionStatus.Queued],
-        [SessionStatus.Completed] = [],
-        [SessionStatus.Cancelled] = [],
-        [SessionStatus.Killed] = [],
-        [SessionStatus.Failed] = [],
+        [SessionStatus.Completed] = [SessionStatus.Queued],
+        [SessionStatus.Cancelled] = [SessionStatus.Queued],
+        [SessionStatus.Killed] = [SessionStatus.Queued],
+        [SessionStatus.Failed] = [SessionStatus.Queued],
     };
 
-    public static bool IsTerminal(SessionStatus status) => Next[status].Length == 0;
+    /// <summary>Whether the session has ended: neither queued nor working (a message may still continue it).</summary>
+    public static bool IsTerminal(SessionStatus status) => status is not (SessionStatus.Queued or SessionStatus.Working);
 
     public static bool CanMove(SessionStatus from, SessionStatus to) => Next[from].Contains(to);
 

@@ -30,6 +30,20 @@ public sealed record SessionRecord
     /// </summary>
     public IReadOnlyDictionary<string, string>? AgentEnv { get; init; }
 
+    /// <summary>
+    /// Messages held for its agent (M11), in the order they came: sent while it was queued, or
+    /// while its agent could no longer take them. Its next agent gets them when it starts, after
+    /// the prompt (or instead of it, when the session continues).
+    /// </summary>
+    public IReadOnlyList<string>? Messages { get; init; }
+
+    /// <summary>
+    /// When a message last continued it after it had ended (M11); null if it never has. From then
+    /// on its agent resumes its provider session (<see cref="ProviderSessionId"/>) rather than
+    /// starting over, and the queue orders it from this time rather than from its creation.
+    /// </summary>
+    public DateTimeOffset? ContinuedAt { get; init; }
+
     /// <summary>How often its agent was started.</summary>
     public int Attempts { get; init; }
 

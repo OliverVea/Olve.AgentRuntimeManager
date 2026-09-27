@@ -61,6 +61,7 @@ artifacts/                                      # Everything generated (gitignor
 | POST | `/api/sessions/search` | Yes (JWT) | Search sessions (filters in the body), newest first |
 | GET | `/api/sessions/{id}` | Yes (JWT) | Get a session |
 | POST | `/api/sessions/{id}/kill` | Yes (JWT) | Kill a queued or working session (`{ "caller": "…", "reason": "…" }`); 409 if it already ended |
+| POST | `/api/sessions/{id}/messages` | Yes (JWT) | Tell a session's agent something (`{ "text": "…", "caller": "…" }`); 202 with `delivery`: `delivered` (working), `pending` (queued), `continued` (ended: it runs again); 409 if it never started |
 | DELETE | `/api/sessions/{id}` | Yes (JWT) | Delete a session that has ended; 409 otherwise |
 | GET | `/api/events?event=<a,b>&exclude_event=<a,b>` | Yes (JWT) | Server-sent events: `session.created` / `.queued` / `.started` / `.completed` / `.failed` / `.killed` (…), heartbeats; `Last-Event-ID` replays missed events |
 | GET | `/openapi/v1.json` | No | OpenAPI spec |
@@ -81,7 +82,8 @@ the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`, `fake:
 spoken to in its `stream-json` protocol, with Claude Code's built-in tools and no permission
 prompts (the VM is the sandbox until ARM's own tools, M10), but locked down otherwise (none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
-variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers one prompt with one turn; its
+variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers its
+prompt and each message after it with a turn, and ends once its last turn is over; its
 output (the agent's answer included) is kept in `<WorkRoot>/<session id>/output.jsonl` until the
 conversation is in the API (M5b). It uses the machine's Claude Code login (or
 `CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
@@ -92,6 +94,22 @@ thinking, tool calls and results, each turn's end; a subagent's entries carry `p
 counts. Its provider reads it on request: `claude` from the session's `output.jsonl` (agents run with
 `--replay-user-messages`, so what they're told is in it too), `fake` from memory, scripted with
 `fake:say=…` and `fake:tool=…`.
+
+`POST /api/sessions/{id}/messages` (`arm session message <id> "…"`, M11) tells a session's agent
+something. While it works, the message goes straight to the agent, which sees it after its current
+step (`delivered`). While it's queued, the message is held with the session and its agent gets it
+when it starts, after the prompt (`pending`; several are delivered in order). Once it has ended
+(completed, failed, killed, or cancelled after it had started), the session continues with it
+(`continued`): back to the end of the queue (`session.queued` with `previous` the state it had
+ended in), same id and conversation, its previous outcome cleared, and when it starts, a new run
+(new timeout, fresh provider retries) in which the agent resumes its own context (`claude --resume
+<providerSessionId>`) and is told the held messages next. A message that races the end of the
+agent's turn (the agent can't take it any more) is held too and answered `continued`: the session
+continues with it once that agent has ended; a kill doesn't continue it, and messages held then
+go with its next continuation. A session that never started (no `providerSessionId`, e.g. cancelled
+while queued) has nothing to continue: 409 `SESSION_NEVER_STARTED`. Messages show in the
+conversation as `prompt` entries; the fake provider shows them itself (with the steps their
+`fake:say=`/`fake:tool=` directives script), and a continued fake session runs again.
 
 Agents get environment variables (`Variables/`): ones registered in ARM (`GET/PUT/DELETE
 /api/env/{name}`, `arm env`), the `default` ones for every agent and the others when a session
@@ -277,7 +295,8 @@ positions aren't stored) and reads ended ones from the database.
   what's left of their timeout); an agent that ended meanwhile ends its session with its real
   outcome; if the supervisor is gone too, the session is resumed (`claude --resume`). Sessions
   whose agent can't be recovered (the fake provider's) are killed (source `system`, "ARM
-  restarted; the agent was lost."). Queued ones queue again in their order.
+  restarted; the agent was lost."). Queued ones queue again in their order (a continued one from
+  when it continued). Held messages are stored with their session, so they survive a restart.
 - Not stored yet: the event replay buffer (M6) and `Idempotency-Key`s (a retried create after a
   restart creates a new session).
 

@@ -15,11 +15,16 @@ public sealed class FakeProvider(TimeProvider time, IOptions<FakeProviderOptions
 
     public string Name => ProviderName;
 
+    /// <summary>
+    /// Starts a fake agent following the directives in everything it's told first (the prompt and
+    /// held messages; a continuing session: its messages), keeping its provider session id when it resumes.
+    /// </summary>
     public IAgentRun Start(AgentLaunch launch)
     {
-        var script = FakeScript.Parse(launch.Prompt, options.Value.Delay);
+        var input = launch.Input;
+        var script = FakeScript.Parse(string.Join('\n', input), options.Value.Delay);
         var conversation = new Action<IEnumerable<ConversationEntryRecord>>(entries => _conversations.Add(launch.SessionId, entries));
-        return new FakeRun(script, launch.Attempt, time, launch.Prompt, conversation);
+        return new FakeRun(script, launch.Attempt, time, input, conversation, launch.Resume);
     }
 
     public IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId) => _conversations.Of(sessionId);

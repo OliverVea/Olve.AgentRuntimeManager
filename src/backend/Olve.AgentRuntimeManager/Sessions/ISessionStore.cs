@@ -16,7 +16,7 @@ public interface ISessionStore
 
     SessionRecord? Get(Guid id);
 
-    /// <summary>Queued and working sessions, oldest first.</summary>
+    /// <summary>Queued and working sessions, in the order they queued: oldest first, a continued one from when it continued.</summary>
     IReadOnlyList<SessionRecord> Active();
 
     /// <summary>Sessions matching every given filter, newest first, one page at a time.</summary>

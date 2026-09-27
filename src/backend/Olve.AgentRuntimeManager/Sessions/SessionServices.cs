@@ -8,7 +8,7 @@ using Olve.Utilities.AsyncOnStartup;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
-/// <summary>The session runtime, its providers and the <c>Sessions_*</c> and <c>ProvidersHealth_*</c> handlers.</summary>
+/// <summary>The session runtime, its providers and the <c>Sessions_*</c>, <c>SessionMessages_*</c> and <c>ProvidersHealth_*</c> handlers.</summary>
 public static class SessionServices
 {
     public static void AddSessionServices(this IServiceCollection services, IConfiguration configuration)
@@ -34,6 +34,7 @@ public static class SessionServices
         services.AddSingleton<ISessionsGetHandler, GetSessionHandler>();
         services.AddSingleton<ISessionsKillHandler, KillSessionHandler>();
         services.AddSingleton<ISessionsDeleteHandler, DeleteSessionHandler>();
+        services.AddSingleton<ISessionMessagesSendHandler, SendMessageHandler>();
         services.AddSingleton<IProvidersHealthListHandler, ListProviderHealthHandler>();
         services.AddSingleton<ISessionConversationGetHandler, GetConversationHandler>();
     }

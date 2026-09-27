@@ -23,5 +23,14 @@ public static class SessionErrors
     public static ArmError BlankPrompt() =>
         ArmError.Create(ArmErrors.InvalidRequest, "'prompt' cannot be blank.");
 
+    public static ArmError BlankMessage() =>
+        ArmError.Create(ArmErrors.InvalidRequest, "'text' cannot be blank.");
+
+    public static ArmError NeverStarted(SessionRecord session) =>
+        ArmError.Create("SESSION_NEVER_STARTED", $"Session {session.Id} was {Wire(session.Status)} before its agent ever started; there is no agent to continue.");
+
+    public static ArmError ProviderGone(SessionRecord session) =>
+        ArmError.Create("PROVIDER_GONE", $"Session {session.Id} ran on provider '{session.Provider}', which this server no longer has; it can't continue.");
+
     private static string Wire(SessionStatus status) => status.ToString().ToLowerInvariant();
 }

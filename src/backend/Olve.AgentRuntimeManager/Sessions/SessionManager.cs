@@ -26,6 +26,11 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// and the refused session goes back to the head of the queue, until it has used up
 /// <see cref="SessionOptions.ProviderRetries"/>. Provider health lives in memory only.
 /// </para>
+/// <para>
+/// Messages (M11, <see cref="Send"/>) go to a working session's agent at once; otherwise they're
+/// held on the stored session (so they survive a restart) until its next agent starts, and an
+/// ended session continues with them.
+/// </para>
 /// </remarks>
 public sealed class SessionManager : IDisposable
 {
@@ -292,6 +297,60 @@ public sealed class SessionManager : IDisposable
         return outcome;
     }
 
+    /// <summary>
+    /// Sends a message to a session's agent (M11). A working session's agent gets it now; a queued
+    /// session holds it until its agent starts (after the prompt). An ended session continues with
+    /// it: back to the end of the queue (<c>session.queued</c>, <c>previous</c> the state it had
+    /// ended in), its outcome cleared, its agent to resume its provider session in a new run. A
+    /// working session whose agent can't take it any more (its turn has just ended) holds it, and
+    /// continues with it once that agent has ended. <paramref name="caller"/> is who sent it.
+    /// </summary>
+    public MessageOutcome Send(Guid id, string text, string caller)
+    {
+        lock (_gate)
+        {
+            _logger.LogInformation("Session {SessionId}: message from {Caller}", id, caller);
+            if (_sessions.TryGetValue(id, out var session))
+            {
+                if (session.Status == SessionStatus.Queued)
+                {
+                    SaveLocked(Hold(session, text));
+                    return new MessageOutcome.Pending();
+                }
+
+                // Messages already held go first: a new one mustn't overtake them.
+                var running = _running[id];
+                if (session.Messages is not { Count: > 0 } && running.Run.TrySend(text))
+                {
+                    running.Given.Add(text);
+                    return new MessageOutcome.Delivered();
+                }
+
+                SaveLocked(Hold(session, text));
+                return new MessageOutcome.Held();
+            }
+
+            if (_store.Get(id) is not { } ended)
+            {
+                return new MessageOutcome.NotFound();
+            }
+
+            if (ended.ProviderSessionId is null)
+            {
+                return new MessageOutcome.NeverStarted(ended);
+            }
+
+            if (!_providers.ContainsKey(ended.Provider))
+            {
+                return new MessageOutcome.UnknownProvider(ended);
+            }
+
+            ContinueLocked(Hold(ended, text));
+            StartNextLocked();
+            return new MessageOutcome.Continued();
+        }
+    }
+
     /// <summary>Deletes a session that has ended.</summary>
     public DeleteOutcome Delete(Guid id)
     {
@@ -377,11 +436,15 @@ public sealed class SessionManager : IDisposable
         var attempt = session.Attempts + 1;
         // The session's own id first; a retry needs a new one (the provider may keep the old one's).
         var providerSessionId = attempt == 1 ? session.Id : Guid.NewGuid();
+        // A session that has continued resumes its provider session, on every attempt from then on.
+        var resume = session.ContinuedAt is not null ? session.ProviderSessionId : null;
+        var messages = session.Messages;
         var runId = Guid.NewGuid();
         IAgentRun run;
         try
         {
-            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv));
+            run = _providers[session.Provider].Start(new AgentLaunch(
+                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume));
         }
         catch (Exception exception)
         {
@@ -401,8 +464,10 @@ public sealed class SessionManager : IDisposable
             ProviderSessionId = run.ProviderSessionId,
             RunId = runId,
             Error = null,
+            // The agent has them now (a failed start keeps them held).
+            Messages = null,
         });
-        TrackLocked(id, run, session.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null);
+        TrackLocked(id, run, session.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, messages);
         _events.Publish(new SessionStarted { At = now, SessionId = id, Previous = session.Status, ProviderSessionId = run.ProviderSessionId });
         return started;
     }
@@ -410,8 +475,9 @@ public sealed class SessionManager : IDisposable
     /// <summary>
     /// A working session's agent in its slot: counted for its provider, killed after
     /// <paramref name="timeout"/> (none: runs until it ends or is killed), finished when it ends.
+    /// <paramref name="given"/>: the messages it got at its start.
     /// </summary>
-    private void TrackLocked(Guid id, IAgentRun run, TimeSpan? timeout)
+    private void TrackLocked(Guid id, IAgentRun run, TimeSpan? timeout, IReadOnlyList<string>? given = null)
     {
         var session = _sessions[id];
         var provider = _health[session.Provider];
@@ -423,7 +489,7 @@ public sealed class SessionManager : IDisposable
                 due,
                 Timeout.InfiniteTimeSpan)
             : null;
-        _running[id] = new RunningAgent(run, timer, provider.Generation);
+        _running[id] = new RunningAgent(run, timer, provider.Generation, [.. given ?? []]);
 
         // Not awaited inline: the run may already be complete, and Finish takes the lock.
         _ = Task.Run(async () => Finish(id, run, await run.Completion));
@@ -452,6 +518,7 @@ public sealed class SessionManager : IDisposable
                 RecoverLocked(provider);
             }
 
+            SessionRecord ended;
             switch (outcome)
             {
                 case AgentOutcome.Unavailable unavailable:
@@ -460,29 +527,37 @@ public sealed class SessionManager : IDisposable
                         PauseLocked(provider, unavailable);
                     }
 
-                    RetryOrFailLocked(session, unavailable);
-                    break;
+                    // The agent did nothing: what it was told goes back to the session, for its next try.
+                    RetryOrFailLocked(running.Given.Count > 0 ? session with { Messages = [.. running.Given, .. session.Messages ?? []] } : session, unavailable);
+                    StartNextLocked();
+                    return;
                 case AgentOutcome.Completed completed:
-                    var done = EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode });
+                    ended = EndLocked(session, SessionStatus.Completed, s => s with { ExitCode = completed.ExitCode });
                     _events.Publish(new SessionCompleted
                     {
-                        At = done.EndedAt!.Value, SessionId = id, Previous = session.Status,
+                        At = ended.EndedAt!.Value, SessionId = id, Previous = session.Status,
                         ExitCode = completed.ExitCode,
                     });
                     break;
                 case AgentOutcome.Failed failed:
-                    var failedSession = EndLocked(session, SessionStatus.Failed, s => s with { Error = failed.Error });
-                    _events.Publish(new SessionFailed { At = failedSession.EndedAt!.Value, SessionId = id, Previous = session.Status, Error = failed.Error });
+                    ended = EndLocked(session, SessionStatus.Failed, s => s with { Error = failed.Error });
+                    _events.Publish(new SessionFailed { At = ended.EndedAt!.Value, SessionId = id, Previous = session.Status, Error = failed.Error });
                     break;
                 default:
                     // Stopped from outside ARM.
                     const string reason = "The agent stopped.";
-                    var stopped = EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
+                    ended = EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
                     _events.Publish(new SessionKilled
                     {
-                        At = stopped.EndedAt!.Value, SessionId = id, Previous = session.Status, Reason = reason, Source = KillSource.System,
+                        At = ended.EndedAt!.Value, SessionId = id, Previous = session.Status, Reason = reason, Source = KillSource.System,
                     });
                     break;
+            }
+
+            // Messages its agent could no longer take: the session continues with them.
+            if (ended.Messages is { Count: > 0 })
+            {
+                ContinueLocked(ended);
             }
 
             StartNextLocked();
@@ -587,8 +662,37 @@ public sealed class SessionManager : IDisposable
         });
         _queue.Insert(0, session.Id);
         RenumberQueueLocked();
-        _events.Publish(new SessionQueued { At = _time.GetUtcNow(), SessionId = session.Id, Position = 1, Error = unavailable.Error });
+        _events.Publish(new SessionQueued { At = _time.GetUtcNow(), SessionId = session.Id, Position = 1, Error = unavailable.Error, Previous = session.Status });
     }
+
+    /// <summary>
+    /// An ended session continues (M11): back to the end of the queue, like a new one, with its
+    /// outcome cleared and a fresh provider-retry budget; it keeps its id, conversation and held
+    /// messages. The queue's cap doesn't apply: the session was let in once already.
+    /// </summary>
+    private void ContinueLocked(SessionRecord ended)
+    {
+        var now = _time.GetUtcNow();
+        SaveLocked(ended with
+        {
+            Status = SessionLifecycle.Move(ended.Status, SessionStatus.Queued),
+            ContinuedAt = now,
+            EndedAt = null,
+            ExitCode = null,
+            Error = null,
+            KillReason = null,
+            KillSource = null,
+            KillCaller = null,
+            FailedAttempts = 0,
+        });
+        _queue.Add(ended.Id);
+        RenumberQueueLocked();
+        _events.Publish(new SessionQueued { At = now, SessionId = ended.Id, Position = _queue.Count, Previous = ended.Status });
+    }
+
+    /// <summary>The session holding one more message for its agent.</summary>
+    private static SessionRecord Hold(SessionRecord session, string text) =>
+        session with { Messages = [.. session.Messages ?? [], text] };
 
     private SessionRecord EndLocked(SessionRecord session, SessionStatus status, Func<SessionRecord, SessionRecord> details) =>
         SaveLocked(details(session with

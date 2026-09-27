@@ -41,6 +41,22 @@ public static class Wire
     public static async Task<HttpResponseMessage> KillSessionAsync(this HttpClient client, Guid id, string? reason = null, string caller = "api-tests") =>
         await client.PostAsync($"/api/sessions/{id}/kill", JsonContent(new { caller, reason }));
 
+    /// <summary>POST /api/sessions/{id}/messages (M11).</summary>
+    public static async Task<HttpResponseMessage> SendMessageAsync(this HttpClient client, Guid id, string text, string caller = "api-tests") =>
+        await client.PostAsync($"/api/sessions/{id}/messages", JsonContent(new { text, caller }));
+
+    /// <summary>Sends a message, and fails unless it was accepted (202); what became of it.</summary>
+    public static async Task<string> SentMessageAsync(this HttpClient client, Guid id, string text)
+    {
+        using var response = await client.SendMessageAsync(id, text);
+        if (response.StatusCode != System.Net.HttpStatusCode.Accepted)
+        {
+            throw new InvalidOperationException($"Sending a message answered {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        }
+
+        return (await response.Content.ReadFromJsonAsync<SentMessageBody>(JsonOptions))!.Delivery;
+    }
+
     /// <summary>Polls the session until <paramref name="condition"/> holds (agents end asynchronously).</summary>
     public static async Task<SessionBody> WaitForSessionAsync(this HttpClient client, Guid id, Func<SessionBody, bool> condition)
     {

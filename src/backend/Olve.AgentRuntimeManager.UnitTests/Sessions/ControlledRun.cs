@@ -11,9 +11,15 @@ public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
 
     public bool WasKilled { get; private set; }
 
-    public string ProviderSessionId { get; } = $"controlled-{launch.SessionId:N}";
+    public string ProviderSessionId { get; } = launch.Resume ?? $"controlled-{launch.SessionId:N}";
 
     public Task<AgentOutcome> Completion => _outcome.Task;
+
+    /// <summary>Whether it takes messages (<see cref="TrySend"/>); a test turns it off to act out a turn that just ended.</summary>
+    public bool TakesMessages { get; set; } = true;
+
+    /// <summary>The messages it took while running.</summary>
+    public List<string> Sent { get; } = [];
 
     public void End(AgentOutcome outcome) => _outcome.TrySetResult(outcome);
 
@@ -21,5 +27,16 @@ public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
     {
         WasKilled = true;
         _outcome.TrySetResult(new AgentOutcome.Killed());
+    }
+
+    public bool TrySend(string text)
+    {
+        if (!TakesMessages || _outcome.Task.IsCompleted)
+        {
+            return false;
+        }
+
+        Sent.Add(text);
+        return true;
     }
 }

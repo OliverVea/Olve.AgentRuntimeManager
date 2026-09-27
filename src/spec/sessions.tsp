@@ -228,6 +228,12 @@ model SessionQueued {
 
   /** Set when the session went back to the queue after a failed attempt: that attempt's error. */
   error?: string;
+
+  /**
+   * The state it left, unless it was just created: `working` when it went back after a failed
+   * attempt, or the state it had ended in when a message continued it (M11).
+   */
+  previous?: SessionStatus;
 }
 
 /** A session's agent started. */

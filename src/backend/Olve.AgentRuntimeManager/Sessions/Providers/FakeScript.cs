@@ -5,7 +5,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
 /// <summary>
 /// What a <see cref="FakeProvider"/> agent does, read from <c>fake:</c> directives anywhere in its
-/// prompt (docs/TESTING.md: every per-push test path is LLM-free):
+/// prompt, or in the messages it's given when it starts (docs/TESTING.md: every per-push test path is LLM-free):
 /// <list type="bullet">
 ///   <item><c>fake:sleep=250ms</c> (or <c>2s</c>, <c>1m</c>): run this long, then complete.</item>
 ///   <item><c>fake:hang</c>: run until killed (or timed out).</item>

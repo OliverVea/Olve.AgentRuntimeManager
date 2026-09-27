@@ -38,7 +38,9 @@ public sealed class EfSessionStore(IDbContextFactory<ArmDbContext> contexts) : I
         using var db = contexts.CreateDbContext();
         return db.Sessions.AsNoTracking()
             .Where(s => s.Status == SessionStatus.Queued || s.Status == SessionStatus.Working)
-            .OrderBy(s => s.CreatedAt)
+            .AsEnumerable()
+            // A continued session queued again when it continued (M11), behind those already waiting.
+            .OrderBy(s => s.ContinuedAt ?? s.CreatedAt)
             .ToList();
     }
 

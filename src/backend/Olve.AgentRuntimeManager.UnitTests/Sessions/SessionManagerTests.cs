@@ -497,6 +497,222 @@ public class SessionManagerTests : IDisposable
         await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.NotFound>();
     }
 
+    [Test]
+    public async Task Send_ToAWorkingSession_DeliversItToTheAgent()
+    {
+        var working = Create();
+
+        var outcome = _sessions.Send(working.Id, "also this", "tests");
+
+        await Assert.That(outcome).IsTypeOf<MessageOutcome.Delivered>();
+        await Assert.That(_provider.RunOf(working.Id).Sent).IsEquivalentTo(["also this"]);
+        await Assert.That(_sessions.Get(working.Id)!.Messages).IsNull();
+    }
+
+    [Test]
+    public async Task Send_ToAQueuedSession_HoldsIt_UntilItsAgentStarts_AfterThePrompt_InOrder()
+    {
+        var first = Create();
+        Create();
+        var queued = Create("the prompt");
+
+        var outcomes = new[] { _sessions.Send(queued.Id, "one", "tests"), _sessions.Send(queued.Id, "two", "tests") };
+
+        await Assert.That(outcomes.All(o => o is MessageOutcome.Pending)).IsTrue();
+        await Assert.That(_sessions.Get(queued.Id)!.Messages).IsEquivalentTo(["one", "two"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+
+        _provider.RunOf(first.Id).End(new AgentOutcome.Completed(0));
+
+        var started = await Eventually(queued.Id, s => s.Status == SessionStatus.Working);
+        var launch = _provider.RunOf(queued.Id).Launch;
+        await Assert.That(launch.Input).IsEquivalentTo(["the prompt", "one", "two"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(launch.Resume).IsNull();
+        await Assert.That(started.Messages).IsNull();
+    }
+
+    [Test]
+    public async Task Send_ToAnEndedSession_ContinuesIt_ResumingItsAgent_InANewRun()
+    {
+        var session = Create();
+        var firstRun = _provider.RunOf(session.Id);
+        firstRun.End(new AgentOutcome.Completed(3));
+        var ended = await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        EventTypes(session.Id);
+        _time.Advance(TimeSpan.FromMinutes(5));
+
+        var outcome = _sessions.Send(session.Id, "one more thing", "tests");
+
+        await Assert.That(outcome).IsTypeOf<MessageOutcome.Continued>();
+        var continued = _sessions.Get(session.Id)!;
+        await Assert.That(continued.Status).IsEqualTo(SessionStatus.Working);
+        await Assert.That(continued.RunId).IsNotEqualTo(ended.RunId);
+        await Assert.That(continued.Attempts).IsEqualTo(2);
+        await Assert.That(continued.StartedAt).IsEqualTo(Start.AddMinutes(5));
+        await Assert.That(continued.EndedAt).IsNull();
+        await Assert.That(continued.ExitCode).IsNull();
+        await Assert.That(continued.ProviderSessionId).IsEqualTo(ended.ProviderSessionId);
+        var launch = _provider.Runs.Last().Launch;
+        await Assert.That(launch.Resume).IsEqualTo(ended.ProviderSessionId);
+        await Assert.That(launch.Input).IsEquivalentTo(["one more thing"]);
+        await Assert.That(EventTypes(session.Id)).IsEquivalentTo(["session.queued", "session.started"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Send_ToAnEndedSession_QueuesIt_AtTheEnd_WithTheStateItLeft()
+    {
+        var killed = Create();
+        _sessions.Kill(killed.Id, "enough", KillSource.User, "tests");
+        Create();
+        Create();
+        var waiting = Create();
+        while (_events.Live.TryRead(out _))
+        {
+        }
+
+        var outcome = _sessions.Send(killed.Id, "go on", "tests");
+
+        await Assert.That(outcome).IsTypeOf<MessageOutcome.Continued>();
+        var queued = _sessions.Get(killed.Id)!;
+        await Assert.That(queued.Status).IsEqualTo(SessionStatus.Queued);
+        await Assert.That(queued.QueuePosition).IsEqualTo(2);
+        await Assert.That(_sessions.Get(waiting.Id)!.QueuePosition).IsEqualTo(1);
+        // Its old outcome is gone.
+        await Assert.That(queued.EndedAt).IsNull();
+        await Assert.That(queued.KillReason).IsNull();
+        await Assert.That(queued.KillSource).IsNull();
+        await Assert.That(queued.KillCaller).IsNull();
+        await Assert.That(queued.Messages).IsEquivalentTo(["go on"]);
+        _events.Live.TryRead(out var stored);
+        var e = await Assert.That(stored!.Data).IsTypeOf<SessionQueued>();
+        await Assert.That(e!.Previous).IsEqualTo(SessionStatus.Killed);
+        await Assert.That(e.Position).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Send_ToASessionCancelledBeforeItStarted_IsNeverStarted()
+    {
+        Create();
+        Create();
+        var queued = Create();
+        _sessions.Kill(queued.Id, null, KillSource.User, "tests");
+
+        var outcome = _sessions.Send(queued.Id, "hello?", "tests");
+
+        await Assert.That(outcome).IsTypeOf<MessageOutcome.NeverStarted>();
+        await Assert.That(_sessions.Get(queued.Id)!.Status).IsEqualTo(SessionStatus.Cancelled);
+    }
+
+    [Test]
+    public async Task Send_ToAnUnknownSession_IsNotFound() =>
+        await Assert.That(_sessions.Send(Guid.NewGuid(), "hello?", "tests")).IsTypeOf<MessageOutcome.NotFound>();
+
+    [Test]
+    public async Task Send_AsTheAgentsTurnEnds_IsHeld_AndTheSessionContinuesWithIt_OnceTheRunEnds()
+    {
+        var session = Create();
+        var run = _provider.RunOf(session.Id);
+        // Its turn just ended: it takes no more input.
+        run.TakesMessages = false;
+
+        var first = _sessions.Send(session.Id, "one", "tests");
+        run.TakesMessages = true;
+        // Held ones go first: the next mustn't overtake them.
+        var second = _sessions.Send(session.Id, "two", "tests");
+
+        await Assert.That(first).IsTypeOf<MessageOutcome.Held>();
+        await Assert.That(second).IsTypeOf<MessageOutcome.Held>();
+        await Assert.That(run.Sent).IsEmpty();
+        await Assert.That(_sessions.Get(session.Id)!.Messages).IsEquivalentTo(["one", "two"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+
+        run.End(new AgentOutcome.Completed(0));
+
+        await Eventually(session.Id, s => s is { Status: SessionStatus.Working, Attempts: 2 });
+        await Assert.That(EventTypes(session.Id)).IsEquivalentTo(
+            ["session.created", "session.started", "session.completed", "session.queued", "session.started"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        var launch = _provider.Runs.Last().Launch;
+        await Assert.That(launch.Resume).IsEqualTo(run.ProviderSessionId);
+        await Assert.That(launch.Input).IsEquivalentTo(["one", "two"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Kill_OfASessionHoldingMessages_DoesNotContinueIt()
+    {
+        var session = Create();
+        _provider.RunOf(session.Id).TakesMessages = false;
+        _sessions.Send(session.Id, "one", "tests");
+
+        _sessions.Kill(session.Id, null, KillSource.User, "tests");
+        await Task.Delay(50);
+
+        var killed = _sessions.Get(session.Id)!;
+        await Assert.That(killed.Status).IsEqualTo(SessionStatus.Killed);
+        await Assert.That(killed.Messages).IsEquivalentTo(["one"]);
+    }
+
+    [Test]
+    public async Task Continued_GetsAFreshTimeout()
+    {
+        var session = Create(timeoutSeconds: 60);
+        _time.Advance(TimeSpan.FromSeconds(50));
+        _provider.RunOf(session.Id).End(new AgentOutcome.Failed("boom"));
+        var failed = await Eventually(session.Id, s => s.Status == SessionStatus.Failed);
+
+        _sessions.Send(session.Id, "try again", "tests");
+        _time.Advance(TimeSpan.FromSeconds(59));
+
+        var continued = _sessions.Get(session.Id)!;
+        await Assert.That(continued.Status).IsEqualTo(SessionStatus.Working);
+        await Assert.That(continued.Error).IsNull();
+        await Assert.That(failed.Error).IsEqualTo("boom");
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        var killed = await Eventually(session.Id, s => s.Status == SessionStatus.Killed);
+        await Assert.That(killed.KillSource).IsEqualTo(KillSource.Timeout);
+        await Assert.That(_provider.Runs.Last().WasKilled).IsTrue();
+    }
+
+    [Test]
+    public async Task ProviderRefusingTheAgent_GivesItsMessagesBack_ForTheRetry()
+    {
+        var session = Create();
+        _provider.RunOf(session.Id).End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "go on", "tests");
+        var continued = _provider.Runs.Last();
+
+        continued.End(new AgentOutcome.Unavailable(ProviderTrouble.Unreachable, "down"));
+
+        // The provider is paused: the session waits for its retry, still holding the message.
+        var retrying = await Eventually(session.Id, s => s.Status == SessionStatus.Queued);
+        await Assert.That(retrying.Messages).IsEquivalentTo(["go on"]);
+        await Assert.That(retrying.FailedAttempts).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Restart_KeepsHeldMessages_AndAContinuedSessionResumesLikeAnyOther()
+    {
+        var ended = Create();
+        _provider.RunOf(ended.Id).End(new AgentOutcome.Completed(0));
+        var completed = await Eventually(ended.Id, s => s.Status == SessionStatus.Completed);
+        Create();
+        Create();
+        var queued = Create("the prompt");
+        _sessions.Send(queued.Id, "held", "tests");
+        _time.Advance(TimeSpan.FromSeconds(1));
+        // Both slots are busy: it queues behind the one already waiting.
+        _sessions.Send(ended.Id, "continue", "tests");
+
+        var provider = Restart();
+
+        // The two working ones were lost, freeing both slots for the queue, in its order.
+        var launches = provider.Runs.Select(r => r.Launch).ToList();
+        await Assert.That(launches.Select(l => l.SessionId).ToList()).IsEquivalentTo([queued.Id, ended.Id], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(launches[0].Input).IsEquivalentTo(["the prompt", "held"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(launches[1].Resume).IsEqualTo(completed.ProviderSessionId);
+        await Assert.That(launches[1].Input).IsEquivalentTo(["continue"]);
+    }
+
     private static SessionRecord Record(CreateOutcome outcome) => outcome switch
     {
         CreateOutcome.Started s => s.Session,
