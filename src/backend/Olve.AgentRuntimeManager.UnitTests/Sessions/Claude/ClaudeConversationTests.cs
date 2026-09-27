@@ -73,6 +73,49 @@ public class ClaudeConversationTests
     }
 
     [Test]
+    public async Task ClaudeCodesOwnReplayedMessage_WithAnOrigin_IsANotice()
+    {
+        // As Claude Code 2.1.283 logs a background command finishing (beta, session 1b92e925).
+        var entries = ClaudeConversation.Read(
+        [
+            """{"type":"user","message":{"role":"user","content":"<task-notification><status>completed</status></task-notification>"},"parent_tool_use_id":null,"isReplay":true,"origin":{"kind":"task-notification"}}""",
+            """{"type":"user","message":{"role":"user","content":"Continue."},"parent_tool_use_id":null,"isReplay":true}""",
+        ]);
+
+        await Assert.That(entries.Select(e => e.Kind)).IsEquivalentTo([ConversationEntryKind.Notice, ConversationEntryKind.Prompt], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task LoadedTool_ShowsByName()
+    {
+        var entries = ClaudeConversation.Read(
+        [
+            """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"tool_reference","tool_name":"Monitor"}]}]},"parent_tool_use_id":null}""",
+        ]);
+
+        await Assert.That(entries.Single().Text).IsEqualTo("Loaded tool: Monitor");
+    }
+
+    [Test]
+    public async Task WhatItDoesntKnow_IsReported_WhatItSkipsOnPurpose_IsNot()
+    {
+        var unknown = new List<string>();
+
+        ClaudeConversation.Read(
+        [
+            """{"type":"system","subtype":"init"}""",
+            """{"type":"rate_limit_event"}""",
+            """{"type":"assistant","message":{"content":[{"type":"redacted_thinking"},{"type":"server_tool_use","name":"web_search"}]}}""",
+            """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"},{"type":"document"}]}]}}""",
+            """{"type":"brand_new_event"}""",
+        ], unknown.Add);
+
+        await Assert.That(unknown).IsEquivalentTo(
+            ["assistant block \"server_tool_use\"", "tool result block \"document\"", "event \"brand_new_event\""],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task FailedTurn_EndsWithItsErrors()
     {
         var entries = ClaudeConversation.Read(["""{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["boom","bang"]}"""]);

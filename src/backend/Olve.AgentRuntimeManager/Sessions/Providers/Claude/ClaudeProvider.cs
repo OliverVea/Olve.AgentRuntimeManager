@@ -68,11 +68,27 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
 
+    /// <summary>What Claude Code's output held that the conversation doesn't know, each logged once.</summary>
+    private readonly HashSet<string> _unknownSeen = [];
+
+    private void ReportUnknown(string what)
+    {
+        lock (_unknownSeen)
+        {
+            if (!_unknownSeen.Add(what))
+            {
+                return;
+            }
+        }
+
+        logger.LogWarning("Claude Code's output has an unknown {What}: the conversation leaves it out (a newer Claude Code?)", what);
+    }
+
     /// <summary>The session's conversation, read from its raw output (every attempt and resume, in order).</summary>
     public IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId)
     {
         var output = Path.Combine(Folder(options.Value, sessionId), SupervisorFiles.Output);
-        return File.Exists(output) ? ClaudeConversation.Read(SupervisedAgent.ReadLines(output, 0)) : [];
+        return File.Exists(output) ? ClaudeConversation.Read(SupervisedAgent.ReadLines(output, 0), ReportUnknown) : [];
     }
 
     /// <summary>
