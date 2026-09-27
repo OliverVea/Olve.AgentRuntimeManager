@@ -73,6 +73,17 @@ describe("checkEnvRows", () => {
     });
   });
 
+  it("keeps every valid name as a key, __proto__ and constructor included", () => {
+    const { env } = checkEnvRows([
+      { name: "__proto__", value: "a" },
+      { name: "constructor", value: "b" },
+    ]);
+    expect(Object.keys(env!)).toEqual(["__proto__", "constructor"]);
+    expect(JSON.parse(JSON.stringify(env))).toEqual(
+      JSON.parse('{"__proto__":"a","constructor":"b"}'),
+    );
+  });
+
   it("is empty for no rows", () => {
     expect(checkEnvRows([])).toEqual({ problems: [], env: {} });
   });

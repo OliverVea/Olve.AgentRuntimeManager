@@ -62,7 +62,8 @@ export type EnvRowsCheck = {
  */
 export function checkEnvRows(rows: readonly EnvRow[]): EnvRowsCheck {
   const seen = new Set<string>();
-  const env: Record<string, string> = {};
+  // Entries, not assignments to `{}`: a valid name like `__proto__` must stay a key.
+  const env: [string, string][] = [];
   const problems = rows.map((row) => {
     if (isBlankRow(row)) return undefined;
     const name = row.name.trim();
@@ -71,8 +72,8 @@ export function checkEnvRows(rows: readonly EnvRow[]): EnvRowsCheck {
     if (problem) return problem;
     if (seen.has(name)) return `${name} is given twice.`;
     seen.add(name);
-    env[name] = row.value;
+    env.push([name, row.value]);
     return undefined;
   });
-  return { problems, env: problems.some(Boolean) ? undefined : env };
+  return { problems, env: problems.some(Boolean) ? undefined : Object.fromEntries(env) };
 }
