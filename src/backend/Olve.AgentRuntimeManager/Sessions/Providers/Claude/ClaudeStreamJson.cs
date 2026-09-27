@@ -35,6 +35,13 @@ public static class ClaudeStreamJson
     /// <summary>The turn's result if <paramref name="line"/> is a <c>result</c> event; anything else (or not JSON) is null.</summary>
     public static ClaudeResult? ParseResult(string line) => Parse(line) is { } e ? Result(e) : null;
 
+    /// <summary>
+    /// Whether a run's output (its lines of <c>output.jsonl</c>) holds a successful turn: its work
+    /// is done, even if no exit was recorded.
+    /// </summary>
+    public static bool TurnSucceeded(IEnumerable<string> lines) =>
+        lines.Select(ParseResult).FirstOrDefault(r => r is not null) is { IsError: false };
+
     /// <summary>The turn's result if <paramref name="e"/> is a <c>result</c> event, else null.</summary>
     public static ClaudeResult? Result(JsonObject e)
     {

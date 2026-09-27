@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
+using Olve.AgentRuntimeManager.Sessions.Supervision;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
@@ -10,9 +12,13 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// machine's Claude Code setup: no built-in tools, no user or project settings, plugins, MCP
 /// servers, claude.ai connectors, skills or memory. Only the login is shared.
 /// </summary>
-public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILogger<ClaudeProvider> logger) : IAgentProvider
+public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supervisors supervisors, ILogger<ClaudeProvider> logger) : IAgentProvider
 {
     public const string ProviderName = "claude";
+
+    /// <summary>What a resumed agent is told (gentle restart: its supervisor was lost mid-turn).</summary>
+    public const string ResumePrompt =
+        "ARM restarted while you were working. Continue where you left off; if you were in the middle of a tool call, check its effect before repeating it.";
 
     /// <summary>Environment variables passed through to the agent; everything else is withheld (A5b).</summary>
     private static readonly string[] PassedThrough = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "CLAUDE_CODE_OAUTH_TOKEN"];
@@ -21,13 +27,43 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
 
     public IAgentRun Start(AgentLaunch launch)
     {
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, ["--session-id", launch.ProviderSessionId.ToString()], launch.Prompt);
+        logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, run {RunId})", launch.SessionId, launch.Attempt, launch.RunId);
+        return new ClaudeRun(agent, launch.ProviderSessionId.ToString(), options.Value.ExitGrace);
+    }
+
+    /// <summary>
+    /// A working session after a restart (docs/GENTLE-RESTART.md): its supervisor answers, or left
+    /// the agent's exit → follow the run (from its output on disk); its supervisor is gone → kill
+    /// any orphaned agent, then complete if the run's turn succeeded, else resume the Claude session.
+    /// </summary>
+    public RecoveredAgent? Recover(AgentRecovery recovery)
+    {
         var settings = options.Value;
-        var folder = Path.Combine(WorkRoot(settings), launch.SessionId.ToString());
-        var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
-        var process = Process.Start(StartInfo(settings, launch, workDirectory))
-            ?? throw new InvalidOperationException($"'{settings.Command}' did not start.");
-        logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, pid {Pid}) in {Folder}", launch.SessionId, launch.Attempt, process.Id, folder);
-        return new ClaudeRun(process, launch.ProviderSessionId, launch.Prompt, folder, settings.ExitGrace);
+        var folder = Folder(settings, recovery.SessionId);
+        var exit = SupervisorFiles.ReadExit(folder) is { } x && x.RunId == recovery.RunId ? x : null;
+        if (exit is not null || supervisors.IsListening(recovery.SessionId))
+        {
+            logger.LogInformation("Session {SessionId}: re-attaching to run {RunId}", recovery.SessionId, recovery.RunId);
+            var attached = supervisors.Attach(recovery.SessionId, recovery.RunId, folder);
+            return new RecoveredAgent(new ClaudeRun(attached, recovery.ProviderSessionId, settings.ExitGrace), Resumed: false);
+        }
+
+        if (SupervisorFiles.ReadInfo(folder) is { } info && info.RunId == recovery.RunId)
+        {
+            supervisors.KillOrphan(info);
+            var output = Path.Combine(folder, SupervisorFiles.Output);
+            if (File.Exists(output) && ClaudeStreamJson.TurnSucceeded(SupervisedAgent.ReadLines(output, info.OutputStart)))
+            {
+                logger.LogInformation("Session {SessionId}: run {RunId} finished its turn while no server was watching", recovery.SessionId, recovery.RunId);
+                return new RecoveredAgent(new EndedRun(recovery.ProviderSessionId, new AgentOutcome.Completed(0)), Resumed: false);
+            }
+        }
+
+        logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
+            recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
+        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], ResumePrompt);
+        return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
 
     /// <summary>
@@ -50,7 +86,12 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
             info.ArgumentList.Add(argument);
         }
 
-        LockDownEnvironment(info, settings);
+        info.Environment.Clear();
+        foreach (var (name, value) in AgentEnvironment(settings))
+        {
+            info.Environment[name] = value;
+        }
+
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -77,64 +118,91 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, ILog
         return null;
     }
 
-    /// <summary>How the agent is launched: the lockdown flags and a minimal environment.</summary>
-    internal static ProcessStartInfo StartInfo(ClaudeProviderOptions settings, AgentLaunch launch, string workDirectory)
+    /// <summary>Starts the agent under a supervisor, in the session's folder, with <paramref name="prompt"/> as its first message.</summary>
+    private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session, string prompt)
     {
-        var info = new ProcessStartInfo(settings.Command)
-        {
-            WorkingDirectory = workDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        string[] arguments =
+        var settings = options.Value;
+        var folder = Folder(settings, sessionId);
+        var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
+        return supervisors.Launch(sessionId, runId, folder, workDirectory,
+            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings), [ClaudeStreamJson.UserMessage(prompt)]);
+    }
+
+    /// <summary>
+    /// How the agent is launched: the lockdown flags, and <paramref name="session"/>
+    /// (<c>--session-id &lt;id&gt;</c> for a new one, <c>--resume &lt;id&gt;</c>).
+    /// </summary>
+    internal static IReadOnlyList<string> Arguments(string[] session, string model)
+    {
+        List<string> arguments =
         [
             "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
-            // ARM's session id on the first attempt; a retry needs a new one (Claude keeps the failed attempt's).
-            "--session-id", launch.ProviderSessionId.ToString(),
+            // --session-id: ARM's session id on the first attempt, a new one on a retry (Claude keeps
+            // the failed attempt's); --resume: the session it continues.
+            .. session,
             // No built-in tools, and anything that would still ask for permission is denied.
             "--tools", "", "--permission-prompts", "none",
             // Nothing of the user's: settings (and with them hooks and plugins), MCP servers, skills.
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
         ];
-        foreach (var argument in arguments)
+        if (!string.IsNullOrWhiteSpace(model))
         {
-            info.ArgumentList.Add(argument);
+            arguments.Add("--model");
+            arguments.Add(model);
         }
 
-        if (!string.IsNullOrWhiteSpace(launch.Model))
-        {
-            info.ArgumentList.Add("--model");
-            info.ArgumentList.Add(launch.Model);
-        }
-
-        LockDownEnvironment(info, settings);
-        return info;
+        return arguments;
     }
 
     /// <summary>Only the allowlisted variables, plus what keeps Claude Code to itself.</summary>
-    private static void LockDownEnvironment(ProcessStartInfo info, ClaudeProviderOptions settings)
+    internal static Dictionary<string, string> AgentEnvironment(ClaudeProviderOptions settings)
     {
-        info.Environment.Clear();
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in PassedThrough)
         {
             if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
             {
-                info.Environment[name] = value;
+                environment[name] = value;
             }
         }
 
         // The user's claude.ai connectors (Gmail, Calendar, …) load even with --strict-mcp-config.
-        info.Environment["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
-        info.Environment["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1";
+        environment["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
+        environment["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1";
         // The deployment pins the version (vm-deploy.sh); an agent must not update it.
-        info.Environment["DISABLE_UPDATES"] = "1";
+        environment["DISABLE_UPDATES"] = "1";
         if (settings.ConfigDirectory is { Length: > 0 } configDirectory)
         {
-            info.Environment["CLAUDE_CONFIG_DIR"] = configDirectory;
+            environment["CLAUDE_CONFIG_DIR"] = configDirectory;
         }
+
+        return environment;
     }
+
+    /// <summary>
+    /// The command as a full path, looked up on this server's <c>PATH</c> (the supervisor starts it
+    /// with the agent's environment, not this one). Throws if there's no such executable.
+    /// </summary>
+    private static string ResolveCommand(string command)
+    {
+        if (command.Contains('/', StringComparison.Ordinal))
+        {
+            return File.Exists(command) ? Path.GetFullPath(command) : throw new FileNotFoundException($"'{command}' does not exist.", command);
+        }
+
+        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory, command);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"'{command}' is not on the PATH.", command);
+    }
+
+    private static string Folder(ClaudeProviderOptions settings, Guid sessionId) => Path.Combine(WorkRoot(settings), sessionId.ToString());
 
     private static string WorkRoot(ClaudeProviderOptions settings) =>
         settings.WorkRoot is { Length: > 0 } root

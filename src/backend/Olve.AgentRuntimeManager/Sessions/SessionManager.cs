@@ -60,18 +60,34 @@ public sealed class SessionManager : IDisposable
     }
 
     /// <summary>
-    /// Picks up the sessions the previous server left: working ones lost their agent (until gentle
-    /// restart re-attaches them) and are killed, source <c>system</c>; queued ones queue again in
-    /// their order and start as slots allow. Call once, before serving requests.
+    /// Picks up the sessions the previous server left. Working ones get their agent back from their
+    /// provider (gentle restart: re-attached, ended meanwhile, or resumed), keep their slot and
+    /// what's left of their timeout; those whose agent is lost are killed, source <c>system</c>.
+    /// Queued ones queue again in their order and start as slots allow. Call once, before serving
+    /// requests.
     /// </summary>
     public void Recover()
     {
+        var active = _store.Active();
+        // Providers may talk to their agents' supervisors: not under the lock.
+        var recovered = active.Where(s => s.Status == SessionStatus.Working).ToDictionary(s => s.Id, RecoverAgent);
+        var timedOut = new List<SessionRecord>();
         lock (_gate)
         {
-            foreach (var session in _store.Active())
+            foreach (var session in active)
             {
                 if (session.Status == SessionStatus.Working)
                 {
+                    if (recovered[session.Id] is { } found)
+                    {
+                        if (!ReattachLocked(session, found.Agent, found.RunId))
+                        {
+                            timedOut.Add(session);
+                        }
+
+                        continue;
+                    }
+
                     const string reason = "ARM restarted; the agent was lost.";
                     var killed = EndLocked(session, SessionStatus.Killed, s => s with { KillReason = reason, KillSource = KillSource.System });
                     _events.Publish(new SessionKilled
@@ -86,8 +102,13 @@ public sealed class SessionManager : IDisposable
             }
 
             RenumberQueueLocked();
-            _logger.LogInformation("Recovered {Queued} queued sessions", _queue.Count);
+            _logger.LogInformation("Recovered {Working} working and {Queued} queued sessions", _running.Count, _queue.Count);
             StartNextLocked();
+        }
+
+        foreach (var session in timedOut)
+        {
+            Kill(session.Id, $"Timed out after {session.TimeoutSeconds}s.", KillSource.Timeout);
         }
     }
 
@@ -291,6 +312,47 @@ public sealed class SessionManager : IDisposable
         }
     }
 
+    /// <summary>A working session's agent from its provider, and the run it's in; null if it's lost.</summary>
+    private (RecoveredAgent Agent, Guid RunId)? RecoverAgent(SessionRecord session)
+    {
+        if (session is not { RunId: { } runId, ProviderSessionId: { } providerSessionId } || !_providers.TryGetValue(session.Provider, out var provider))
+        {
+            return null;
+        }
+
+        var resumeRunId = Guid.NewGuid();
+        try
+        {
+            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId)) is { } agent
+                ? (agent, agent.Resumed ? resumeRunId : runId)
+                : null;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Session {SessionId}: provider {Provider} could not recover the agent", session.Id, session.Provider);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A recovered agent takes its slot again, with what's left of its session's timeout. False if
+    /// nothing is left: the caller kills it once the lock is released.
+    /// </summary>
+    private bool ReattachLocked(SessionRecord session, RecoveredAgent agent, Guid runId)
+    {
+        _sessions[session.Id] = session;
+        if (session.RunId != runId)
+        {
+            SaveLocked(session with { RunId = runId });
+        }
+
+        TimeSpan? remaining = session is { TimeoutSeconds: { } seconds, StartedAt: { } startedAt }
+            ? startedAt + TimeSpan.FromSeconds(seconds) - _time.GetUtcNow()
+            : null;
+        TrackLocked(session.Id, agent.Run, remaining > TimeSpan.Zero ? remaining : null);
+        return remaining is not { } left || left > TimeSpan.Zero;
+    }
+
     /// <summary>Starts a queued session's agent in a free slot (or fails the session if it can't start).</summary>
     private SessionRecord StartLocked(Guid id)
     {
@@ -298,10 +360,11 @@ public sealed class SessionManager : IDisposable
         var attempt = session.Attempts + 1;
         // The session's own id first; a retry needs a new one (the provider may keep the old one's).
         var providerSessionId = attempt == 1 ? session.Id : Guid.NewGuid();
+        var runId = Guid.NewGuid();
         IAgentRun run;
         try
         {
-            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model, attempt, providerSessionId));
+            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId));
         }
         catch (Exception exception)
         {
@@ -319,24 +382,34 @@ public sealed class SessionManager : IDisposable
             Attempts = attempt,
             StartedAt = now,
             ProviderSessionId = run.ProviderSessionId,
+            RunId = runId,
             Error = null,
         });
+        TrackLocked(id, run, session.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null);
+        _events.Publish(new SessionStarted { At = now, SessionId = id, Previous = session.Status, ProviderSessionId = run.ProviderSessionId });
+        return started;
+    }
+
+    /// <summary>
+    /// A working session's agent in its slot: counted for its provider, killed after
+    /// <paramref name="timeout"/> (none: runs until it ends or is killed), finished when it ends.
+    /// </summary>
+    private void TrackLocked(Guid id, IAgentRun run, TimeSpan? timeout)
+    {
+        var session = _sessions[id];
         var provider = _health[session.Provider];
         provider.Started(id);
-        // No timeout: no timer (the session runs until it ends or is killed).
-        var timer = session.TimeoutSeconds is { } seconds
+        var timer = timeout is { } due
             ? _time.CreateTimer(
-                _ => Kill(id, $"Timed out after {seconds}s.", KillSource.Timeout),
+                _ => Kill(id, $"Timed out after {session.TimeoutSeconds}s.", KillSource.Timeout),
                 state: null,
-                TimeSpan.FromSeconds(seconds),
+                due,
                 Timeout.InfiniteTimeSpan)
             : null;
         _running[id] = new RunningAgent(run, timer, provider.Generation);
-        _events.Publish(new SessionStarted { At = now, SessionId = id, Previous = session.Status, ProviderSessionId = run.ProviderSessionId });
 
         // Not awaited inline: the run may already be complete, and Finish takes the lock.
         _ = Task.Run(async () => Finish(id, run, await run.Completion));
-        return started;
     }
 
     /// <summary>An agent ended on its own: completes or fails its session and frees its slot.</summary>

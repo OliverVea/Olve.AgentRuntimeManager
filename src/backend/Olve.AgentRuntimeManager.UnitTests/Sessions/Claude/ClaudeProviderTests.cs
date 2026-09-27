@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Supervision;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 
@@ -11,7 +12,7 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 /// </summary>
 public class ClaudeProviderTests
 {
-    private static readonly string Stub = PrepareStub();
+    internal static readonly string Stub = PrepareStub();
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-claude-").FullName;
 
@@ -245,13 +246,17 @@ public class ClaudeProviderTests
     {
         var options = new ClaudeProviderOptions { Command = Stub, WorkRoot = _root };
         configure?.Invoke(options);
-        return new ClaudeProvider(Options.Create(options), NullLogger<ClaudeProvider>.Instance);
+        return new ClaudeProvider(Options.Create(options), Supervisors(), NullLogger<ClaudeProvider>.Instance);
     }
+
+    /// <summary>The real supervisor (built next to the tests), with its sockets under the test's folder.</summary>
+    private Supervisors Supervisors() =>
+        new(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
 
     private static AgentLaunch Launch(string prompt)
     {
         var id = Guid.NewGuid();
-        return new(id, prompt, "sonnet", 1, id);
+        return new(id, prompt, "sonnet", 1, id, Guid.NewGuid());
     }
 
     private string Folder(AgentLaunch launch) => Path.Combine(_root, launch.SessionId.ToString());

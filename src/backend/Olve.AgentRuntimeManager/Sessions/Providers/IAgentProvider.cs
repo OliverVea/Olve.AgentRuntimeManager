@@ -22,4 +22,11 @@ public interface IAgentProvider
     /// </summary>
     Task<AgentOutcome.Unavailable?> CheckAsync(CancellationToken cancellationToken) =>
         Task.FromResult<AgentOutcome.Unavailable?>(null);
+
+    /// <summary>
+    /// Finds a working session's agent after a restart (gentle restart, M5a): re-attaches to it,
+    /// reports how it ended while no server was watching, or resumes it. Null when it's lost (the
+    /// session is then killed). Called once per session at startup, not under the runtime's lock.
+    /// </summary>
+    RecoveredAgent? Recover(AgentRecovery recovery) => null;
 }

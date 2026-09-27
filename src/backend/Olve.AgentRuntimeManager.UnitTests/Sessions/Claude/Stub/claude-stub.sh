@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # A stand-in for `claude` (docs/TESTING.md L2): replays recorded stream-json output, chosen by a
 # `stub:<behaviour>` word in the prompt. Writes how it was started (arguments one per line,
-# then the environment) to `invocation.txt` in its working directory.
+# then the environment) to `invocation.txt` in its working directory. `stub:gate` holds the
+# output back until a `release` file appears in the working directory, `stub:gate-exit` then also
+# exits without waiting for its input to close (gentle-restart tests).
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # `claude auth status --json`: logged in with a token, or a login in the configuration folder
@@ -21,6 +23,10 @@ IFS= read -r prompt || exit 0
 printf '%s\n' "$prompt" > prompt.jsonl
 
 case "$prompt" in
+  *stub:gate*) while [ ! -f release ]; do sleep 0.05; done ;;
+esac
+
+case "$prompt" in
   *stub:crash*) echo "Invalid API key · Please run /login" >&2; exit 3 ;;
   *stub:hang*) exec sleep 3600 ;;
   *stub:error*) cat "$here/error.jsonl" ;;
@@ -36,6 +42,7 @@ esac
 
 case "$prompt" in
   *stub:linger*) exec sleep 3600 ;;
+  *stub:gate-exit*) exit 0 ;;
 esac
 
 # Like the CLI: done once its input is closed.

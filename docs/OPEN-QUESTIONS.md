@@ -116,7 +116,7 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   state is rebuilt from. Compared with detached agents adopted by PID after a restart: that has
   no extra process, but can't deliver input (steering, approvals) to an adopted agent, and PID
   adoption is fragile; its exit-code file, rebuild-from-log and hard/scheduled restart modes
-  are borrowed.
+  are borrowed. Confirmed 2026-09-27 and worked out in [`GENTLE-RESTART.md`](GENTLE-RESTART.md).
 - **CLI spike findings (2026-09-26, Claude Code 2.1.283; throwaway code in the gitignored
   `sandbox/cli-spike/`):**
   - *Isolation:* `--tools "" --setting-sources "" --strict-mcp-config --mcp-config <arm>

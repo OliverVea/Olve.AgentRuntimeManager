@@ -22,10 +22,11 @@ src/
 │   │   ├── Api/                                # Runtime for the generated API surface (typed responses, error envelope, validation, binding failures, handler check)
 │   │   ├── Configuration/                      # Auth, telemetry, JSON, host config
 │   │   ├── Events/                             # Event bus + GET /api/events (SSE)
-│   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (fake, Claude)
+│   │   ├── Sessions/                           # Session runtime: queue + slots, state machine, handlers; Providers/ (fake, Claude); Supervision/ (per-session supervisors)
 │   │   ├── Persistence/                        # EF Core + SQLite: ArmDbContext, EfSessionStore, Migrations/
 │   │   ├── Health/                             # Health check endpoints
 │   │   └── appsettings.json                    # Default configuration
+│   ├── Olve.AgentRuntimeManager.Supervisor/    # olve-arm-supervisor: one per session, holds the agent's stdio across restarts (Native AOT)
 │   ├── Olve.AgentRuntimeManager.UnitTests/     # Unit tests (TUnit + Rocks)
 │   ├── Olve.AgentRuntimeManager.ApiTests/      # API behaviour tests over raw HTTP (in-process, or any server via ARM_API_BASE_URL)
 │   ├── tools/version.cs                        # CalVer versioning script
@@ -183,8 +184,9 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
 1. ensures the VM (Ubuntu 24.04 cloud image + cloud-init, fixed IP on libvirt's `default` network,
    autostart) — the first deploy creates it;
 2. extracts the published app from the image and installs it as
-   `/opt/olve-arm/releases/<version>` with a systemd service (`KillMode=process`, so agent
-   processes survive a server restart);
+   `/opt/olve-arm/releases/<version>` with a systemd service (`KillMode=process`, so the
+   per-session supervisors and their agents survive a server restart; their sockets live in the
+   preserved `RuntimeDirectory`, `/run/olve-arm`);
 3. installs the bundle's Claude Code as `/opt/olve-arm/claude/<version>` (uploaded once per
    version) and links it into the release as `claude`, so rolling back a release rolls back its
    Claude Code too;
@@ -254,9 +256,13 @@ positions aren't stored) and reads ended ones from the database.
   can't be regenerated. Add one after changing the model (from `src/backend/`):
   `dotnet ef migrations add <Name> --project Olve.AgentRuntimeManager --output-dir Persistence/Migrations`
   (`dotnet tool restore` first; `ArmDbContextDesignFactory` builds the context without the app).
-- **Restart:** the new server kills the sessions that were working (source `system`, "ARM
-  restarted; the agent was lost.") and queues the queued ones again in their order, until gentle
-  restart (M5a) re-attaches running agents.
+- **Restart (gentle restart, M5a; [`docs/GENTLE-RESTART.md`](docs/GENTLE-RESTART.md)):** each
+  `claude` agent runs under its own supervisor (`olve-arm-supervisor`, shipped next to ARM), which
+  outlives the server. The new server re-attaches to working sessions (they stay `working`, with
+  what's left of their timeout); an agent that ended meanwhile ends its session with its real
+  outcome; if the supervisor is gone too, the session is resumed (`claude --resume`). Sessions
+  whose agent can't be recovered (the fake provider's) are killed (source `system`, "ARM
+  restarted; the agent was lost."). Queued ones queue again in their order.
 - Not stored yet: the event replay buffer (M6) and `Idempotency-Key`s (a retried create after a
   restart creates a new session).
 

@@ -1,28 +1,27 @@
-using System.Diagnostics;
 using System.Globalization;
-using System.Text;
+using Olve.AgentRuntimeManager.Sessions.Supervision;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
 /// <summary>
-/// One Claude Code agent: sends the prompt, keeps every line the agent writes (<c>output.jsonl</c>,
-/// <c>stderr.log</c> in the session's folder), and ends the agent after its first turn's result
-/// by closing its input.
+/// One Claude Code agent, run by its session's supervisor (which gave it its prompt, and keeps
+/// every line it writes in <c>output.jsonl</c> and <c>stderr.log</c>): reads the turn, and ends
+/// the agent after its first turn's result by closing its input. Re-attached after a restart, it
+/// reads the run's output from the start and carries on the same way.
 /// </summary>
 internal sealed class ClaudeRun : IAgentRun
 {
     private const int StderrTailLength = 2_000;
 
-    private readonly Process _process;
+    private readonly SupervisedAgent _agent;
     private volatile bool _killed;
     private volatile bool _stoppedLingering;
 
-    public ClaudeRun(Process process, Guid providerSessionId, string prompt, string folder, TimeSpan exitGrace)
+    public ClaudeRun(SupervisedAgent agent, string providerSessionId, TimeSpan exitGrace)
     {
-        _process = process;
-        ProviderSessionId = providerSessionId.ToString();
-        // Off the caller's thread: providers start agents under the session runtime's lock.
-        Completion = Task.Run(() => RunAsync(prompt, folder, exitGrace));
+        _agent = agent;
+        ProviderSessionId = providerSessionId;
+        Completion = Task.Run(() => RunAsync(exitGrace));
     }
 
     public string ProviderSessionId { get; }
@@ -33,65 +32,42 @@ internal sealed class ClaudeRun : IAgentRun
     {
         // First, so an exit racing the kill still reads as killed.
         _killed = true;
-        try
-        {
-            _process.Kill(entireProcessTree: true);
-        }
-        catch (InvalidOperationException)
-        {
-            // Already exited.
-        }
+        _agent.Kill();
     }
 
-    private async Task<AgentOutcome> RunAsync(string prompt, string folder, TimeSpan exitGrace)
+    private async Task<AgentOutcome> RunAsync(TimeSpan exitGrace)
     {
         try
         {
-            var stderr = CollectStderrAsync(Path.Combine(folder, "stderr.log"));
             ClaudeResult? result = null;
             var signals = new ClaudeSignals();
-            try
-            {
-                await _process.StandardInput.WriteLineAsync(ClaudeStreamJson.UserMessage(prompt));
-                await _process.StandardInput.FlushAsync();
-            }
-            catch (IOException)
-            {
-                // The agent is already gone; its exit code and stderr tell why.
-            }
-
             Task? exitGuard = null;
-            await using (var output = new StreamWriter(Path.Combine(folder, "output.jsonl"), append: true))
+            while (await _agent.ReadLineAsync() is { } line)
             {
-                while (await _process.StandardOutput.ReadLineAsync() is { } line)
+                if (result is not null || ClaudeStreamJson.Parse(line) is not { } e)
                 {
-                    await output.WriteLineAsync(line);
-                    if (result is not null || ClaudeStreamJson.Parse(line) is not { } e)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    signals = signals.Read(e);
-                    if (ClaudeStreamJson.Result(e) is { } turnResult)
-                    {
-                        result = turnResult;
-                        await output.FlushAsync();
-                        // One prompt, one turn: no more input ends the agent.
-                        CloseInput();
-                        exitGuard = StopIfStillRunningAsync(exitGrace);
-                    }
+                signals = signals.Read(e);
+                if (ClaudeStreamJson.Result(e) is { } turnResult)
+                {
+                    result = turnResult;
+                    // One prompt, one turn: no more input ends the agent.
+                    _agent.CloseInput();
+                    exitGuard = StopIfStillRunningAsync(exitGrace);
                 }
             }
 
-            // Output closed without a result, or the agent lingers: it gets the same grace to exit.
-            exitGuard ??= StopIfStillRunningAsync(exitGrace);
-            await _process.WaitForExitAsync();
-            await exitGuard;
+            var exitCode = await _agent.Exit;
+            if (exitGuard is not null)
+            {
+                await exitGuard;
+            }
 
-            var stderrTail = await stderr;
             // An agent stopped only for lingering after a good turn still finished its work.
-            var exitCode = _stoppedLingering && result is { IsError: false } ? 0 : _process.ExitCode;
-            return _killed ? new AgentOutcome.Killed() : Outcome(result, exitCode, stderrTail, signals);
+            exitCode = _stoppedLingering && result is { IsError: false } ? 0 : exitCode;
+            return _killed ? new AgentOutcome.Killed() : Outcome(result, exitCode, _agent.StderrTail(StderrTailLength), signals);
         }
         catch (Exception exception) when (!_killed)
         {
@@ -100,10 +76,6 @@ internal sealed class ClaudeRun : IAgentRun
         catch (Exception)
         {
             return new AgentOutcome.Killed();
-        }
-        finally
-        {
-            _process.Dispose();
         }
     }
 
@@ -148,54 +120,18 @@ internal sealed class ClaudeRun : IAgentRun
     /// <summary>Stops an agent that hasn't exited <paramref name="grace"/> after its input was closed.</summary>
     private async Task StopIfStillRunningAsync(TimeSpan grace)
     {
-        using var timeout = new CancellationTokenSource(grace);
         try
         {
-            await _process.WaitForExitAsync(timeout.Token);
+            await _agent.Exit.WaitAsync(grace);
         }
-        catch (OperationCanceledException)
+        catch (TimeoutException)
         {
             _stoppedLingering = true;
-            try
-            {
-                _process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException)
-            {
-                // Exited meanwhile.
-            }
+            _agent.Kill();
         }
-    }
-
-    private void CloseInput()
-    {
-        try
+        catch (Exception)
         {
-            _process.StandardInput.Close();
+            // The run's own loop reports a lost supervisor.
         }
-        catch (IOException)
-        {
-            // The agent already closed its end.
-        }
-    }
-
-    /// <summary>Copies stderr to its file as it comes (so a full pipe never stalls the agent); returns its tail.</summary>
-    private async Task<string> CollectStderrAsync(string path)
-    {
-        var tail = new StringBuilder();
-        await using var file = new StreamWriter(path, append: true);
-        var buffer = new char[4096];
-        int read;
-        while ((read = await _process.StandardError.ReadAsync(buffer)) > 0)
-        {
-            await file.WriteAsync(buffer.AsMemory(0, read));
-            tail.Append(buffer, 0, read);
-            if (tail.Length > StderrTailLength)
-            {
-                tail.Remove(0, tail.Length - StderrTailLength);
-            }
-        }
-
-        return tail.ToString();
     }
 }

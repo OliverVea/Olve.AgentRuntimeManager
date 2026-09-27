@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The per-session supervisor (gentle restart, M5a; docs/GENTLE-RESTART.md): an internal
+    executable shipped next to ARM, never part of the API or the `arm` CLI. Native AOT on
+    publish, so it's one file that keeps running when a deploy prunes its release folder.
+    ARM references it for the protocol types (Protocol/).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>olve-arm-supervisor</AssemblyName>
+    <RootNamespace>Olve.AgentRuntimeManager.Supervisor</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>

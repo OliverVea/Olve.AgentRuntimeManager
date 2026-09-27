@@ -1,5 +1,6 @@
-# ARM inside its VM. KillMode=process: a restart stops only the server process, so agent
-# processes it spawned keep running and the new server can re-attach (gentle restart, M5a).
+# ARM inside its VM. KillMode=process: a restart stops only the server process, so the
+# per-session supervisors (and their agents) keep running and the new server re-attaches to them
+# (gentle restart, M5a; docs/GENTLE-RESTART.md).
 [Unit]
 Description=Olve.AgentRuntimeManager
 After=network-online.target
@@ -10,6 +11,10 @@ User=arm
 WorkingDirectory=/opt/olve-arm/current
 # /var/lib/olve-arm, owned by arm: the database (ConnectionStrings__Arm in /etc/olve-arm/env).
 StateDirectory=olve-arm
+# /run/olve-arm, owned by arm: the supervisors' sockets (Supervisor__SocketRoot). Kept across
+# restarts (they outlive the server); /run itself is cleared on reboot, as are the supervisors.
+RuntimeDirectory=olve-arm
+RuntimeDirectoryPreserve=yes
 EnvironmentFile=/etc/olve-arm/env
 ExecStart=/opt/olve-arm/current/Olve.AgentRuntimeManager
 Restart=on-failure

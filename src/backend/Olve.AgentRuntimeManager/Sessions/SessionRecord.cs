@@ -33,6 +33,12 @@ public sealed record SessionRecord
     public DateTimeOffset? EndedAt { get; init; }
     /// <summary>The provider's id for the latest attempt's agent.</summary>
     public string? ProviderSessionId { get; init; }
+
+    /// <summary>
+    /// The latest launch of its agent (an attempt, or a resume after a restart): what a restarted
+    /// server looks for among the traces its provider left (docs/GENTLE-RESTART.md).
+    /// </summary>
+    public Guid? RunId { get; init; }
     public int? ExitCode { get; init; }
     /// <summary>Why it failed, or (queued again) why its last attempt did.</summary>
     public string? Error { get; init; }

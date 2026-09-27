@@ -45,6 +45,11 @@
     </ItemGroup>
   </Target>
 
+  <!-- The per-session supervisor (M5a): its protocol types, and its executable next to ARM's. -->
+  <ItemGroup>
+    <ProjectReference Include="../Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Duende.IdentityModel" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />

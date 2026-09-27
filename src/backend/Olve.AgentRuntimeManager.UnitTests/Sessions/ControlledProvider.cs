@@ -17,6 +17,30 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
 
     public Task<AgentOutcome.Unavailable?> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(CheckResult);
 
+    /// <summary>What <see cref="Recover"/> does; unset, every agent is lost.</summary>
+    public Func<AgentRecovery, RecoveredAgent?>? Recovering { get; set; }
+
+    /// <summary>What <see cref="Recover"/> was asked.</summary>
+    public List<AgentRecovery> Recoveries { get; } = [];
+
+    public RecoveredAgent? Recover(AgentRecovery recovery)
+    {
+        Recoveries.Add(recovery);
+        return Recovering?.Invoke(recovery);
+    }
+
+    /// <summary>A recovered agent that ends only when a test says so (<see cref="Runs"/> has it).</summary>
+    public RecoveredAgent Reattach(AgentRecovery recovery, bool resumed = false)
+    {
+        var run = new ControlledRun(new AgentLaunch(recovery.SessionId, recovery.Prompt, recovery.Model, 0, Guid.Empty, resumed ? recovery.ResumeRunId : recovery.RunId));
+        lock (_runs)
+        {
+            _runs.Add(run);
+        }
+
+        return new RecoveredAgent(run, resumed);
+    }
+
     public IReadOnlyList<ControlledRun> Runs
     {
         get

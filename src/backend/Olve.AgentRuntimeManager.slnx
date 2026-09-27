@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj" />
     <Project Path="Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
   </Folder>
   <Folder Name="/test/">

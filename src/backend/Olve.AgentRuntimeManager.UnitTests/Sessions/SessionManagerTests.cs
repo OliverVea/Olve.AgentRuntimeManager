@@ -44,11 +44,21 @@ public class SessionManagerTests : IDisposable
         _database.Store(),
         NullLogger<SessionManager>.Instance);
 
-    /// <summary>The server restarts: the old manager lets go (its agents are lost), a new one recovers.</summary>
-    private ControlledProvider Restart()
+    /// <summary>
+    /// The server restarts: the old manager lets go, a new one recovers. Its provider finds the
+    /// working sessions' agents as <paramref name="recovering"/> says (unset: they're lost), after
+    /// the server was down for <paramref name="away"/>.
+    /// </summary>
+    private ControlledProvider Restart(Func<ControlledProvider, AgentRecovery, RecoveredAgent?>? recovering = null, TimeSpan away = default)
     {
         _sessions.Dispose();
+        _time.Advance(away);
         var provider = new ControlledProvider();
+        if (recovering is not null)
+        {
+            provider.Recovering = r => recovering(provider, r);
+        }
+
         _sessions = NewManager(provider);
         _sessions.Recover();
         return provider;
@@ -129,7 +139,7 @@ public class SessionManagerTests : IDisposable
         await Assert.That(session.Model).IsEqualTo("m");
         await Assert.That(session.Caller).IsEqualTo("tests");
         await Assert.That(session.TimeoutSeconds).IsNull();
-        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id));
+        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id, session.RunId!.Value));
     }
 
     [Test]
@@ -356,6 +366,79 @@ public class SessionManagerTests : IDisposable
         await Assert.That(killed.KillSource).IsEqualTo(KillSource.System);
         await Assert.That(killed.KillReason).IsEqualTo("ARM restarted; the agent was lost.");
         await Assert.That(EventTypes(working.Id)).Contains("session.killed");
+    }
+
+    [Test]
+    public async Task Restart_ReattachedSessions_KeepTheirSlots_AndFinishLater()
+    {
+        var first = Create();
+        var second = Create();
+        var queued = Create("queued");
+
+        var provider = Restart((p, r) => p.Reattach(r));
+
+        await Assert.That(provider.Recoveries.Select(r => r.SessionId)).IsEquivalentTo([first.Id, second.Id]);
+        await Assert.That(provider.Recoveries[0].RunId).IsEqualTo(first.RunId!.Value);
+        await Assert.That(_sessions.Get(first.Id)!.Status).IsEqualTo(SessionStatus.Working);
+        await Assert.That(_sessions.Get(queued.Id)!.Status).IsEqualTo(SessionStatus.Queued);
+        await Assert.That(provider.Runs.Count).IsEqualTo(2);
+
+        provider.RunOf(first.Id).End(new AgentOutcome.Completed(0));
+
+        await Eventually(first.Id, s => s.Status == SessionStatus.Completed);
+        await Eventually(queued.Id, s => s.Status == SessionStatus.Working);
+        await Assert.That(_sessions.Get(first.Id)!.Attempts).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Restart_ResumedSession_RecordsItsNewRun_ButNoNewAttempt()
+    {
+        var working = Create();
+
+        var provider = Restart((p, r) => p.Reattach(r, resumed: true));
+
+        var resumed = _sessions.Get(working.Id)!;
+        await Assert.That(resumed.RunId).IsEqualTo(provider.Recoveries.Single().ResumeRunId);
+        await Assert.That(resumed.Attempts).IsEqualTo(1);
+        await Assert.That(resumed.Status).IsEqualTo(SessionStatus.Working);
+    }
+
+    [Test]
+    public async Task Restart_ReattachedSession_KeepsWhatsLeftOfItsTimeout()
+    {
+        var working = Create(timeoutSeconds: 60);
+
+        Restart((p, r) => p.Reattach(r), away: TimeSpan.FromSeconds(50));
+        _time.Advance(TimeSpan.FromSeconds(9));
+
+        await Assert.That(_sessions.Get(working.Id)!.Status).IsEqualTo(SessionStatus.Working);
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+
+        await Eventually(working.Id, s => s.Status == SessionStatus.Killed);
+        await Assert.That(_sessions.Get(working.Id)!.KillSource).IsEqualTo(KillSource.Timeout);
+    }
+
+    [Test]
+    public async Task Restart_TimeoutRanOutWhileAway_KillsTheReattachedSession()
+    {
+        var working = Create(timeoutSeconds: 60);
+
+        var provider = Restart((p, r) => p.Reattach(r), away: TimeSpan.FromSeconds(61));
+
+        await Eventually(working.Id, s => s.Status == SessionStatus.Killed);
+        await Assert.That(_sessions.Get(working.Id)!.KillSource).IsEqualTo(KillSource.Timeout);
+        await Assert.That(provider.RunOf(working.Id).WasKilled).IsTrue();
+    }
+
+    [Test]
+    public async Task Restart_ProviderFailingToRecover_KillsTheSession_AsSystem()
+    {
+        var working = Create();
+
+        Restart((_, _) => throw new InvalidOperationException("boom"));
+
+        await Assert.That(_sessions.Get(working.Id)!.KillReason).IsEqualTo("ARM restarted; the agent was lost.");
     }
 
     [Test]

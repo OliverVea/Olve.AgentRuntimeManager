@@ -19,18 +19,25 @@ COPY src/codegen/ src/codegen/
 COPY src/frontend/ src/frontend/
 RUN npm run build --workspace src/frontend
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+# The -aot SDK adds the native toolchain for the supervisor's Native AOT publish below.
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
 WORKDIR /src
 
 COPY src/backend/Directory.Build.props src/backend/Directory.Packages.props src/backend/
 COPY src/backend/Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj src/backend/Olve.AgentRuntimeManager/
+COPY src/backend/Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj src/backend/Olve.AgentRuntimeManager.Supervisor/
 RUN dotnet restore src/backend/Olve.AgentRuntimeManager -r linux-x64
 
+COPY src/backend/Olve.AgentRuntimeManager.Supervisor/ src/backend/Olve.AgentRuntimeManager.Supervisor/
 COPY src/backend/Olve.AgentRuntimeManager/ src/backend/Olve.AgentRuntimeManager/
 # The API surface generated from the contract in the Node stage; SkipSpecGen compiles it as is.
 COPY --from=frontend /repo/artifacts/generated/backend/ artifacts/generated/backend/
 # JIT, self-contained: the runtime ships with the app, so the chiseled runtime-deps image suffices.
 RUN dotnet publish src/backend/Olve.AgentRuntimeManager -c Release -r linux-x64 --self-contained -p:SkipSpecGen=true -o /app
+# The per-session supervisor (docs/GENTLE-RESTART.md), next to ARM: Native AOT, one file that keeps
+# running when a deploy prunes its release folder. (ARM itself only uses its dll's protocol types.)
+RUN dotnet publish src/backend/Olve.AgentRuntimeManager.Supervisor -c Release -r linux-x64 -o /supervisor \
+    && cp /supervisor/olve-arm-supervisor /app/olve-arm-supervisor
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
 WORKDIR /app
