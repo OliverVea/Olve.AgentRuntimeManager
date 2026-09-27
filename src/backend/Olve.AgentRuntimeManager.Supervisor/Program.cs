@@ -15,9 +15,10 @@ if (OperatingSystem.IsWindows())
     return 2;
 }
 
-if (args is ["kill", var group, var agent])
+if (args is ["kill", ..])
 {
-    if (!int.TryParse(group, CultureInfo.InvariantCulture, out var groupId) || groupId <= 1
+    if (args is not [_, var group, var agent]
+        || !int.TryParse(group, CultureInfo.InvariantCulture, out var groupId) || groupId <= 1
         || !int.TryParse(agent, CultureInfo.InvariantCulture, out var agentPid) || agentPid <= 1)
     {
         await Console.Error.WriteLineAsync("olve-arm-supervisor: kill <process group> <pid>, both above 1.");

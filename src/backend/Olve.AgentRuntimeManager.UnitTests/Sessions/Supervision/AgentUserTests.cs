@@ -143,10 +143,14 @@ public class AgentUserTests
     [Arguments("kill -5 x")]
     public async Task KillCommand_WithoutAProperGroupAndPid_Refuses(string arguments)
     {
-        using var kill = Process.Start(Supervisor, arguments.Split(' '));
+        // Stdin closed: were it taken for a launch instead, that would show as exit code 2 too, not hang.
+        using var kill = Process.Start(new ProcessStartInfo(Supervisor, arguments.Split(' ')) { RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false })!;
+        kill.StandardInput.Close();
+        var error = await kill.StandardError.ReadToEndAsync().WaitAsync(Guard);
         await kill.WaitForExitAsync().WaitAsync(Guard);
 
         await Assert.That(kill.ExitCode).IsEqualTo(2);
+        await Assert.That(error).Contains("kill <process group> <pid>");
     }
 
     [Test]
