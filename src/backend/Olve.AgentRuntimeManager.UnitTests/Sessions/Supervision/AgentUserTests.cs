@@ -106,7 +106,8 @@ public class AgentUserTests
         var (first, provider) = Server(account);
         var launch = Launch("stub:gate");
         _ = provider.Start(launch);
-        await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null);
+        // Its prompt taken, or the agent ends by itself once its supervisor is gone (no orphan to kill).
+        await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null && File.Exists(Path.Combine(Folder(launch), "work", "prompt.jsonl")));
         first.Dispose();
         var info = SupervisorFiles.ReadInfo(Folder(launch))!;
         Posix.Kill(info.SupervisorPid, Posix.SigKill);
@@ -117,6 +118,89 @@ public class AgentUserTests
 
         await Assert.That(SudoCalls()).Contains($"-n -u {account.Name} -- {Supervisor} kill {info.SupervisorPid} {info.AgentPid}");
         await Until(() => Posix.StartTime(info.AgentPid) != info.AgentStartTime);
+    }
+
+    [Test]
+    public async Task KillOrphan_WithAnAgentUser_NeverSignalsAsArm()
+    {
+        // The sudo that would kill as the agent user refuses: nothing may be killed directly instead.
+        using var sleeper = Sleeper();
+        var supervisors = new Supervisors(Options.Create(new SupervisorOptions
+        {
+            SocketRoot = Path.Combine(_root, "sockets"), User = OwnAccount().Name, Sudo = "/bin/false",
+        }), NullLogger<Supervisors>.Instance);
+        _servers.Add(supervisors);
+
+        supervisors.KillOrphan(Info(sleeper.Id, sleeper.Id));
+
+        await Task.Delay(200);
+        await Assert.That(sleeper.HasExited).IsFalse();
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task KillOrphan_APidOfOneOrLess_KillsNothing(bool supervisorPidZero)
+    {
+        // An agent writes supervisor.json: 0 would be ARM's own process group, 1 (as -1) every process of ARM's user.
+        using var sleeper = Sleeper();
+        var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }),
+            NullLogger<Supervisors>.Instance);
+        _servers.Add(supervisors);
+
+        supervisors.KillOrphan(supervisorPidZero ? Info(0, sleeper.Id) : Info(sleeper.Id, 1));
+
+        await Task.Delay(200);
+        await Assert.That(sleeper.HasExited).IsFalse();
+    }
+
+    [Test]
+    public async Task SessionFiles_ThroughALink_AreNotRead()
+    {
+        var (_, provider) = Server(OwnAccount());
+        var elsewhere = Directory.CreateDirectory(Path.Combine(_root, "elsewhere")).FullName;
+        var recorded = Path.Combine(Path.GetDirectoryName(ClaudeProviderTests.Stub)!, "success.jsonl");
+        File.Copy(recorded, Path.Combine(elsewhere, SupervisorFiles.Output));
+        var linked = Directory.CreateDirectory(Path.Combine(_root, "sessions", Guid.NewGuid().ToString())).FullName;
+        File.CreateSymbolicLink(Path.Combine(linked, SupervisorFiles.Output), Path.Combine(elsewhere, SupervisorFiles.Output));
+        SupervisorFiles.WriteAtomically(Path.Combine(elsewhere, SupervisorFiles.Info), Info(1234, 1234), SupervisorJsonContext.Default.SupervisorInfo);
+        File.CreateSymbolicLink(Path.Combine(linked, SupervisorFiles.Info), Path.Combine(elsewhere, SupervisorFiles.Info));
+        var real = Directory.CreateDirectory(Path.Combine(_root, "sessions", Guid.NewGuid().ToString())).FullName;
+        File.Copy(recorded, Path.Combine(real, SupervisorFiles.Output));
+
+        await Assert.That(provider.Conversation(Guid.Parse(Path.GetFileName(linked)))).IsEmpty();
+        await Assert.That(SupervisorFiles.ReadInfo(linked)).IsNull();
+        await Assert.That(SupervisorFiles.ReadInfo(elsewhere)).IsNotNull();
+        await Assert.That(provider.Conversation(Guid.Parse(Path.GetFileName(real)))).IsNotEmpty();
+    }
+
+    [Test]
+    public async Task SessionOutput_AFifo_IsNotRead_AndDoesNotBlock()
+    {
+        var (_, provider) = Server(OwnAccount());
+        var folder = Directory.CreateDirectory(Path.Combine(_root, "sessions", Guid.NewGuid().ToString())).FullName;
+        using (var mkfifo = Process.Start("mkfifo", [Path.Combine(folder, SupervisorFiles.Output)]))
+        {
+            await mkfifo.WaitForExitAsync();
+        }
+
+        var conversation = await Task.Run(() => provider.Conversation(Guid.Parse(Path.GetFileName(folder)))).WaitAsync(Guard);
+
+        await Assert.That(conversation).IsEmpty();
+    }
+
+    [Test]
+    public async Task Workplace_ALink_IsNotShared_AndTheLaunchFails()
+    {
+        var (_, provider) = Server(OwnAccount());
+        var launch = Launch("Say READY");
+        var target = Directory.CreateDirectory(Path.Combine(_root, "target")).FullName;
+        File.SetUnixFileMode(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Directory.CreateDirectory(Folder(launch));
+        Directory.CreateSymbolicLink(Path.Combine(Folder(launch), "work"), target);
+
+        await Assert.That(() => provider.Start(launch)).Throws<InvalidOperationException>();
+        await Assert.That(File.GetUnixFileMode(target)).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     [Test]
@@ -196,6 +280,15 @@ public class AgentUserTests
         }
     }
 
+    /// <summary>A process leading a process group of its own (as a supervisor does), until the test ends.</summary>
+    private static Sleeper Sleeper() => new(Process.Start(new ProcessStartInfo("setsid", ["sleep", "60"]) { UseShellExecute = false })!);
+
+    private static SupervisorInfo Info(int supervisorPid, int agentPid) => new()
+    {
+        Version = SupervisorProtocol.Version, RunId = Guid.NewGuid(), SupervisorPid = supervisorPid, AgentPid = agentPid,
+        AgentStartTime = Posix.StartTime(agentPid), OutputStart = 0, StderrStart = 0, StartedAt = DateTimeOffset.UtcNow,
+    };
+
     /// <summary>The test's own user, standing in for the agent user.</summary>
     private static AgentAccount OwnAccount()
     {
@@ -260,5 +353,23 @@ public class AgentUserTests
         {
             await Task.Delay(20, timeout.Token);
         }
+    }
+}
+
+/// <summary>A sleeping process, killed when disposed.</summary>
+internal sealed class Sleeper(Process process) : IDisposable
+{
+    public int Id => process.Id;
+
+    public bool HasExited => process.HasExited;
+
+    public void Dispose()
+    {
+        if (!process.HasExited)
+        {
+            process.Kill();
+        }
+
+        process.Dispose();
     }
 }

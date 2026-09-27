@@ -141,22 +141,36 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// same process, together with the process group it ran in. Two agents on one provider session
     /// must never run.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="info"/> is <c>supervisor.json</c>, which an agent running as its own user can
+    /// write (docs/AGENT-USER.md): so no pid of 1 or less (0 is this process's group, -1 every
+    /// process of this user), and with an agent user the signals are sent as that user only, so
+    /// whatever pids it names, nothing of ARM's user is hit.
+    /// </remarks>
     public void KillOrphan(SupervisorInfo info)
     {
+        if (info.SupervisorPid <= 1 || info.AgentPid <= 1)
+        {
+            logger.LogWarning("Run {RunId}: its supervisor.json names no process to kill ({SupervisorPid}, {AgentPid})",
+                info.RunId, info.SupervisorPid, info.AgentPid);
+            return;
+        }
+
         if (Posix.StartTime(info.AgentPid) is not { } startTime || startTime != info.AgentStartTime)
         {
             return;
         }
 
         logger.LogWarning("Run {RunId}: killing its orphaned agent {Pid}", info.RunId, info.AgentPid);
-        // Ours (agents running as ARM's user, or a run from before they had their own).
-        Posix.Kill(-info.SupervisorPid, Posix.SigKill);
-        Posix.Kill(info.AgentPid, Posix.SigKill);
         if (_account.Value is { } account)
         {
-            // The agent user's: only that user can signal them, so the supervisor does it as that user.
+            // Only that user can signal its processes, so the supervisor does it as that user.
             KillAsAgentUser(account, info);
+            return;
         }
+
+        Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+        Posix.Kill(info.AgentPid, Posix.SigKill);
     }
 
     private void KillAsAgentUser(AgentAccount account, SupervisorInfo info)
@@ -216,17 +230,21 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// </summary>
     private static void ShareWithAgent(string directory)
     {
-        // The agent can write the session's folder: a link it put there must not make ARM share its target.
-        if (new DirectoryInfo(directory).LinkTarget is not null)
+        if (OperatingSystem.IsWindows())
         {
-            throw new InvalidOperationException($"'{directory}' is a link, not the session's own folder.");
+            return;
         }
 
+        // The agent can write the session's folder: a link it put there must not make ARM share its
+        // target. Opened without following one, and changed through that handle (no check-then-use).
+        using var handle = Posix.OpenNoFollow(directory, directory: true)
+            ?? throw new InvalidOperationException($"'{directory}' is a link or missing, not the session's own folder.");
         const UnixFileMode shared = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup;
-        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(directory) & shared) != shared)
+        var mode = File.GetUnixFileMode(handle);
+        if ((mode & shared) != shared)
         {
-            File.SetUnixFileMode(directory, File.GetUnixFileMode(directory) | shared);
+            File.SetUnixFileMode(handle, mode | shared);
         }
     }
 
