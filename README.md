@@ -223,9 +223,15 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
 3. installs the bundle's Claude Code as `/opt/olve-arm/claude/<version>` (uploaded once per
    version) and links it into the release as `claude`, so rolling back a release rolls back its
    Claude Code too;
-4. writes the config (`src/deploy/vm/env.{beta,prod}`, the prod OTLP secret from the cluster, the
+4. ensures the agent user (`src/deploy/vm/agent-user.sh`): agents and their supervisors run as
+   `arm-agent`, without sudo and without access to ARM's config, database or home; ARM (`arm`)
+   starts them through a sudoers rule for exactly the supervisor binary, and shares the session
+   folders and sockets with them through the `arm-agent` group. The agents' deploy key lives in
+   `~arm-agent/.ssh/arm-agent-deploy` (moved there from `~arm` on the first such deploy). See
+   [`docs/AGENT-USER.md`](docs/AGENT-USER.md);
+5. writes the config (`src/deploy/vm/env.{beta,prod}`, the prod OTLP secret from the cluster, the
    Claude Code token from the pipeline secret, passed over stdin) and the Authentik CA;
-5. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
+6. ensures a host relay (`100.100.117.17:18792` beta, `:18791` prod → VM:5000).
 
 **Routing** lives in [`Olve.Homelab`](https://github.com/OliverVea/Olve.Homelab): `arm-beta.ovea.pro`
 and `arm-private.ovea.pro` (Tailscale-private) use `hostEndpoint` to target the relay — pods
@@ -272,6 +278,8 @@ Sources in priority order (highest wins):
 | `Providers:Claude:WorkRoot` | `olve-arm/sessions` in the user's local data folder | Each session's folder: working directory (`work/`) and raw output |
 | `Providers:Claude:ConfigDirectory` | *(Claude Code's default, `~/.claude`)* | `CLAUDE_CONFIG_DIR` for the agents |
 | `Providers:Claude:ExitGrace` | `00:00:10` | How long an agent may take to exit after its turn before it's stopped |
+| `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
+| `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
 
 ### Persistence
 
