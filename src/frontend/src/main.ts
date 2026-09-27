@@ -220,9 +220,12 @@ const envPanel = new EnvPanel($<HTMLButtonElement>("#env-toggle"), $("#env-panel
 });
 $("#manage-env").addEventListener("click", () => envDialog.open());
 
-/** Start needs a prompt and an env without problems. */
+/** Whether a create is in flight: Start stays disabled until it settles (no duplicate sessions). */
+let creating = false;
+
+/** Start needs a prompt and an env without problems, and no create in flight. */
 function updateCreate(): void {
-  createButton.disabled = prompt.value.trim() === "" || envPanel.invalid;
+  createButton.disabled = creating || prompt.value.trim() === "" || envPanel.invalid;
 }
 
 function fillComposer(): void {
@@ -260,6 +263,7 @@ $("#composer").addEventListener("submit", (e) => {
 });
 
 async function create(): Promise<void> {
+  if (creating) return; // Ctrl+Enter again while the first is on its way
   const parsed = newSession(
     {
       prompt: prompt.value,
@@ -277,7 +281,8 @@ async function create(): Promise<void> {
     toast(parsed.problem, true);
     return;
   }
-  createButton.disabled = true;
+  creating = true;
+  updateCreate();
   try {
     const { id } = await unwrap(sessionsCreate({ client, body: parsed.value }));
     // Create returns only the id; read the session to show it before its events arrive.
@@ -297,6 +302,8 @@ async function create(): Promise<void> {
     toast(describeError(error), true);
     // A picked variable was deleted meanwhile: the fresh list drops the pick.
     if (error instanceof ApiError && error.code === "ENV_NOT_FOUND") void envRegistry.load();
+  } finally {
+    creating = false;
   }
   updateCreate();
 }
