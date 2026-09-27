@@ -66,7 +66,7 @@ public class ClaudeProviderTests
         [
             "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
             "--session-id", launch.SessionId.ToString(),
-            "--tools", "", "--permission-prompts", "none",
+            "--permission-mode", "bypassPermissions",
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
             "--model", "sonnet",
         ];

@@ -14,7 +14,7 @@ BASE=https://downloads.claude.ai/claude-code-releases
 KEY_URL=https://downloads.claude.ai/keys/claude-code.asc
 KEY_FINGERPRINT=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
 PLATFORM=linux-x64
-LOCKDOWN_FLAGS="--input-format --output-format --session-id --tools --permission-prompts --setting-sources --strict-mcp-config --disable-slash-commands --model"
+LOCKDOWN_FLAGS="--input-format --output-format --session-id --permission-mode --setting-sources --strict-mcp-config --disable-slash-commands --model"
 OUT=${OUT:-/output}
 
 export DEBIAN_FRONTEND=noninteractive

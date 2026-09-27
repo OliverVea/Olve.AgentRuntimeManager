@@ -9,8 +9,9 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// <summary>
 /// Runs Claude Code agents: one locked-down <c>claude -p</c> process per session, spoken to in the
 /// CLI's own <c>stream-json</c> protocol (OPEN-QUESTIONS A10). The agent sees nothing of the
-/// machine's Claude Code setup: no built-in tools, no user or project settings, plugins, MCP
-/// servers, claude.ai connectors, skills or memory. Only the login is shared.
+/// machine's Claude Code setup: no user or project settings, plugins, MCP servers, claude.ai
+/// connectors, skills or memory. Only the login is shared. It has Claude Code's built-in tools,
+/// without permission prompts: the VM is the sandbox until ARM's own tools replace them (M5d, M10).
 /// </summary>
 public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supervisors supervisors, ILogger<ClaudeProvider> logger) : IAgentProvider
 {
@@ -143,8 +144,9 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
             // --session-id: ARM's session id on the first attempt, a new one on a retry (Claude keeps
             // the failed attempt's); --resume: the session it continues.
             .. session,
-            // No built-in tools, and anything that would still ask for permission is denied.
-            "--tools", "", "--permission-prompts", "none",
+            // Claude Code's built-in tools, without asking: the VM is the sandbox until ARM's own
+            // tools replace them (M5d, M10).
+            "--permission-mode", "bypassPermissions",
             // Nothing of the user's: settings (and with them hooks and plugins), MCP servers, skills.
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
         ];

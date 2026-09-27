@@ -9,8 +9,8 @@
 #
 # Gets a client-credentials token from the Authority in /etc/olve-arm/env, creates a
 # claude/haiku session "Tell me a joke" (caller deploy-beta, so it shows in ARM's history), waits
-# for it, and fails unless it completed and its Claude Code saw no tools, MCP servers, user
-# plugins or skills (the session's init event in its output.jsonl). Costs one Haiku turn.
+# for it, and fails unless it completed and its Claude Code had its built-in tools but no MCP
+# servers, user plugins or skills (the session's init event in its output.jsonl). Costs one Haiku turn.
 set -euo pipefail
 
 : "${VERSION:?}" "${CLIENT_SECRET_B64:?}"
@@ -89,7 +89,8 @@ init = next((e for e in events if e.get("type") == "system" and e.get("subtype")
 if init is None:
     fail("no init event in " + output)
 problems = []
-if init.get("tools"): problems.append(f"tools: {init['tools']}")
+# Claude Code's built-in tools are on (M5d), the machine's own setup is not.
+if not init.get("tools"): problems.append("no tools: the agent should have Claude Code's built-in tools")
 if init.get("mcp_servers"): problems.append(f"mcp_servers: {init['mcp_servers']}")
 if init.get("skills"): problems.append(f"skills: {init['skills']}")
 user_plugins = [p for p in init.get("plugins", []) if not str(p.get("source", "")).endswith("@builtin")]
@@ -97,5 +98,5 @@ if user_plugins: problems.append(f"plugins: {user_plugins}")
 if problems:
     fail("; ".join(problems))
 result = next((e for e in events if e.get("type") == "result"), {})
-print(f"Claude Code {init.get('claude_code_version')} ({init.get('model')}) locked down; it says: {result.get('result')!r}")
+print(f"Claude Code {init.get('claude_code_version')} ({init.get('model')}) with {len(init['tools'])} tools, locked down otherwise; it says: {result.get('result')!r}")
 PY
