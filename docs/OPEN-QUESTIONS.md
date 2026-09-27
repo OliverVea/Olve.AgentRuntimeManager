@@ -88,8 +88,10 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   provider-shaped (session ids, update types, permission options) goes into `src/spec/`, so a
   provider can move between direct and ACP without an API change.
 - **How a provider is wired:** lifecycle and the event stream over the provider's transport;
-  ARM's tools served to the agent over MCP (HTTP); the agent's built-in tools and user-level
-  config switched off. Per-provider differences (how to lock down, whether steering and MCP
+  ARM's tools served to the agent over MCP (HTTP); the agent's user-level config switched off.
+  Its built-in tools were meant to be off too; since 2026-09-27 (M5d) they're on, with the VM as
+  the sandbox, so ARM's agents can do real work now, until ARM's own tools (M10) replace them.
+  Per-provider differences (how to lock down, whether steering and MCP
   exist) live in a small capability profile, not in separate runners.
 - **Why Claude goes direct:** the CLI (`claude -p --input-format stream-json --output-format
   stream-json`) did everything the ACP adapter did in the spike, with no Node sidecar and no

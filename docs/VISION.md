@@ -28,6 +28,10 @@ re-evaluated and scoped when it's picked up.
 - **Effort auto-adjustment** mid-session.
 - **Named agent configs**: persisted configs referenced by name at session creation instead of
   inline configuration.
+- **Secret environment variables** (moved here 2026-09-27; plain `env` comes first): `secretEnv`
+  per session and secrets registered in ARM, write-only (never returned, logged or put in events),
+  kept in a k8s Secret per environment the way Olve.Pipelines keeps pipeline secrets (the VM
+  reaching k3s with a ServiceAccount token scoped to that one Secret).
 - **Streaming text**: `session.text` deltas for token-by-token rendering.
 - **Sleeping sessions**: a session that pauses and wakes up later, as the same session, instead
   of dying. The motivating case: sessions waiting for an approval when you clock out sit for
