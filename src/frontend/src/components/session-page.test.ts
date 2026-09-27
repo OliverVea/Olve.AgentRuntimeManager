@@ -63,6 +63,7 @@ async function mount(view = { thinking: false, tools: false, notices: false }) {
   page.session = session("7c1e4a2b-0000-0000-0000-000000000000", {
     status: "completed",
     exitCode: 0,
+    providerSessionId: "7c1e4a2b-0000-0000-0000-000000000000",
     startedAt: "2026-09-27T15:00:00Z",
     endedAt: "2026-09-27T15:01:45Z",
   });
@@ -171,6 +172,73 @@ describe("<session-page>", () => {
     expect(text(page, ".msg.notice")).toEqual([
       "Background command finished, exit 0: mise install",
     ]);
+  });
+
+  it("the message box says what a message will do; a never-started session has none", async () => {
+    const page = await mount();
+    expect(text(page, ".composer .hint")[0]).toContain("continues the session");
+
+    page.session = session("w", { status: "working", providerSessionId: "p" });
+    await Promise.resolve();
+    expect(text(page, ".composer .hint")[0]).toContain("after its current step");
+
+    page.session = session("c", { status: "cancelled" });
+    await Promise.resolve();
+    expect($$(page, ".composer")).toHaveLength(0);
+    expect(text(page, ".no-agent")[0]).toContain("never started");
+  });
+
+  it("Ctrl+Enter sends; what's typed survives a re-render; a failure keeps it", async () => {
+    const page = await mount();
+    const sent = vi.fn();
+    page.addEventListener("send-message", (e) => sent((e as CustomEvent).detail));
+    const box = () => page.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea.message")!;
+
+    box().value = "Push it over SSH";
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    page.conversation = { ...conversation }; // the page re-reads a running session
+    await Promise.resolve();
+    expect(box().value).toBe("Push it over SSH");
+
+    box().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+    );
+    expect(sent).toHaveBeenCalledWith({
+      id: "7c1e4a2b-0000-0000-0000-000000000000",
+      text: "Push it over SSH",
+    });
+
+    page.sendFailed("Couldn't send: offline.");
+    await Promise.resolve();
+    expect(box().value).toBe("Push it over SSH");
+    expect(text(page, ".send-problem")).toEqual(["Couldn't send: offline."]);
+  });
+
+  it("a sent message is labelled with its delivery once it's in the conversation; held ones wait below", async () => {
+    const page = await mount();
+    page.sent({ text: "Do it again", delivery: "continued", caller: "oliver" });
+    page.sent({ text: "And then this", delivery: "pending", caller: "oliver" });
+    await Promise.resolve();
+    expect(text(page, ".label .delivery")).toEqual([
+      "continued · oliver",
+      "2 · sent when the agent starts",
+    ]);
+    expect($$(page, ".msg.prompt.held")).toHaveLength(1);
+
+    page.conversation = {
+      ...conversation,
+      entries: [
+        ...conversation.entries,
+        { seq: 9, kind: "prompt", at: "2026-09-27T15:05:00Z", text: "Do it again" },
+      ],
+    };
+    await Promise.resolve();
+    // The first is in the conversation now, labelled there; the second is still held.
+    expect(text(page, ".label .delivery")).toEqual([
+      "continued · oliver",
+      "1 · sent when the agent starts",
+    ]);
+    expect(page.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("");
   });
 
   it("an empty conversation says why", async () => {

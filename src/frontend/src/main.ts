@@ -3,6 +3,7 @@ import {
   type Session,
   serverInfoApiGet,
   sessionConversationGet,
+  sessionMessagesSend,
   sessionsCreate,
   sessionsDelete,
   sessionsGet,
@@ -304,6 +305,30 @@ page.addEventListener("toggle-times", toggleTimes);
 page.addEventListener("kill-session", (e) => askKill(idOf(e)));
 page.addEventListener("delete-session", (e) => askDelete(idOf(e)));
 page.addEventListener("copy-id", (e) => void copy(idOf(e)));
+page.addEventListener("send-message", (e) => {
+  const { id, text } = (e as CustomEvent<{ id: string; text: string }>).detail;
+  void sendMessage(id, text);
+});
+
+/** Sends a message to a session's agent (M11), then re-reads the page: the session may have continued. */
+async function sendMessage(id: string, text: string): Promise<void> {
+  const caller = prefs.defaults.caller || fallbackCaller();
+  try {
+    const { delivery } = await unwrap(
+      sessionMessagesSend({ client, path: { id }, body: { text, caller } }),
+    );
+    page.sent({ text, delivery, caller });
+    if (pageId === id) {
+      clearTimeout(pageTimer);
+      void loadPage(id);
+    }
+  } catch (error) {
+    page.sendFailed(
+      `Couldn't send: ${describeError(error)} Your message is still here; try again.`,
+    );
+  }
+}
+
 page.addEventListener("view-change", (e) => {
   prefs = { ...prefs, transcript: (e as CustomEvent<Prefs["transcript"]>).detail };
   savePrefs(prefs);

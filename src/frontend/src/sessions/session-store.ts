@@ -27,7 +27,7 @@ const ACTIVE_LIMIT = 100;
 /** Failed (re)connects in a row after which the stream counts as down rather than reconnecting. */
 const DOWN_AFTER_ERRORS = 3;
 
-/** Queued, working, ended: a session only moves forward (but for a retry: `isRetry`). */
+/** Queued, working, ended: a session only moves forward (but for a retry, `isRetry`, and a continuation, `isContinuation`). */
 function rank(status: SessionStatus): number {
   if (status === "queued") return 0;
   if (status === "working") return 1;
@@ -301,7 +301,7 @@ export class SessionStore extends EventTarget {
   /** Keep whichever of the known and the given session is further along. */
   #merge(session: Session): void {
     const known = this.#sessions.get(session.id);
-    if (known && rank(known.status) > rank(session.status)) return;
+    if (known && rank(known.status) > rank(session.status) && !continues(known, session)) return;
     this.#sessions.set(session.id, session);
   }
 
@@ -315,16 +315,40 @@ export class SessionStore extends EventTarget {
       return;
     }
     const current = this.#sessions.get(event.sessionId);
-    if (!current) return; // not one this page shows
+    if (!current) {
+      // An ended session this page hasn't loaded continued: it's active now, so the Overview shows it.
+      if (
+        event.type === "session.queued" &&
+        event.previous &&
+        endedStatuses.includes(event.previous)
+      ) {
+        void this.#add(event.sessionId);
+      }
+      return; // not one this page shows
+    }
     const next = patch(current, event);
+    const continuing = isContinuation(current, event);
     if (
-      (rank(next.status) < rank(current.status) && !isRetry(current, event)) ||
-      (isEnded(current) && next.status !== current.status)
+      (rank(next.status) < rank(current.status) && !isRetry(current, event) && !continuing) ||
+      (isEnded(current) && next.status !== current.status && !continuing)
     ) {
       return; // stale: the session is already further along
     }
     this.#sessions.set(current.id, next);
     if (isRetry(current, event)) void this.#refreshRetries(current.id);
+  }
+
+  /** Reads a session the page doesn't hold and adds it. */
+  async #add(id: string): Promise<void> {
+    const run = this.#run;
+    try {
+      const session = await unwrap(sessionsGet({ client: this.#client, path: { id } }));
+      if (run !== this.#run) return;
+      this.#merge(session);
+      this.#changed();
+    } catch {
+      // The next snapshot brings it.
+    }
   }
 
   /**
@@ -360,6 +384,23 @@ function isRetry(current: Session, event: SessionEvent): boolean {
   );
 }
 
+/** An ended session a message continued (M11): back to the queue from the state it had ended in. */
+function isContinuation(current: Session, event: SessionEvent): boolean {
+  return event.type === "session.queued" && isEnded(current) && event.previous === current.status;
+}
+
+/**
+ * Whether `fresh` (from the API) is the `known` ended session continued, not an older read of it:
+ * still queued for its next run (same attempts), or started again (more attempts).
+ */
+function continues(known: Session, fresh: Session): boolean {
+  if (!isEnded(known) || isEnded(fresh)) return false;
+  return (
+    (fresh.status === "queued" && fresh.attempts === known.attempts) ||
+    fresh.attempts > known.attempts
+  );
+}
+
 /** A session after one of its lifecycle events. */
 function patch(
   session: Session,
@@ -367,7 +408,18 @@ function patch(
 ): Session {
   switch (event.type) {
     case "session.queued": {
-      const next: Session = { ...session, status: "queued", queuePosition: event.position };
+      // A continued session drops its old outcome.
+      const {
+        endedAt: _e,
+        exitCode: _x,
+        killReason: _r,
+        killSource: _s,
+        killCaller: _c,
+        ...rest
+      } = session;
+      const base = isEnded(session) ? rest : session;
+      const next: Session = { ...base, status: "queued", queuePosition: event.position };
+      if (isEnded(session)) delete next.error;
       if (event.error !== undefined) next.error = event.error;
       return next;
     }

@@ -157,6 +157,44 @@ describe("SessionStore", () => {
     expect(store.active[0]?.error).toBeUndefined();
   });
 
+  it("a completed session a message continued goes back to the queue, its outcome cleared", async () => {
+    const api = fakeApi({ sessions: [session("s1")] });
+    const store = start(api);
+    await connected(api, store);
+    api.push({ type: "session.completed", at, sessionId: "s1", previous: "working", exitCode: 0 });
+    await vi.waitFor(() => expect(store.ended.map((s) => s.status)).toEqual(["completed"]));
+
+    api.push({ type: "session.queued", at, sessionId: "s1", position: 1, previous: "completed" });
+
+    await vi.waitFor(() => expect(ids(store.active)).toEqual(["s1:queued"]));
+    expect(store.active[0]?.endedAt).toBeUndefined();
+    expect(store.active[0]?.exitCode).toBeUndefined();
+  });
+
+  it("a continued session it hadn't loaded is read and shown", async () => {
+    const api = fakeApi({ sessions: [] });
+    const store = start(api);
+    await connected(api, store);
+    api.sessions.push(session("old", { status: "queued", attempts: 1 }));
+
+    api.push({ type: "session.queued", at, sessionId: "old", position: 1, previous: "completed" });
+
+    await vi.waitFor(() => expect(ids(store.active)).toEqual(["old:queued"]));
+  });
+
+  it("a fresh read of a continued session wins over its ended state; a stale one doesn't", async () => {
+    const api = fakeApi({ sessions: [] });
+    const store = start(api);
+    await connected(api, store);
+    store.upsert(session("s1", { status: "completed", attempts: 1, endedAt: at }));
+
+    store.upsert(session("s1", { status: "working", attempts: 1 })); // read before it ended
+    expect(store.ended.map((s) => s.id)).toEqual(["s1"]);
+
+    store.upsert(session("s1", { status: "queued", attempts: 1 })); // continued
+    expect(ids(store.active)).toEqual(["s1:queued"]);
+  });
+
   it("reads the providers' health with the snapshot and follows its events", async () => {
     const api = fakeApi({
       providers: [

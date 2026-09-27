@@ -32,6 +32,13 @@ const icon = (name: string) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 
 export type TranscriptView = { thinking: boolean; tools: boolean; notices: boolean };
 
+/** A message this page sent, and what the API said became of it (M11). */
+export type SentMessage = {
+  text: string;
+  delivery: "delivered" | "pending" | "continued";
+  caller: string;
+};
+
 /**
  * `<session-page>` — one session: its card (status · time · outcome, the task, id · model · caller),
  * its details, and its conversation (M5b) as boxes: prompts, agent text, thinking (folded), tool
@@ -55,6 +62,14 @@ export class SessionPage extends BaseElement {
   readonly #opened = new Map<string, boolean>();
   /** Results the user asked to see whole. */
   readonly #whole = new Set<string>();
+  /** Messages sent from this page (the API keeps no record of their delivery), oldest first. */
+  #sent: SentMessage[] = [];
+  /** The message being typed, kept across renders (a running session re-renders every few seconds). */
+  #draft = "";
+  #draftFocused = false;
+  #caret: [number, number] = [0, 0];
+  #sending = false;
+  #sendProblem = "";
   #pendingRender = false;
 
   set session(session: Session | undefined) {
@@ -83,10 +98,32 @@ export class SessionPage extends BaseElement {
     this.#rerender();
   }
 
-  /** A new session: forget which calls were opened. */
+  /** The message was sent: show it with its delivery, and clear the box. */
+  sent(message: SentMessage): void {
+    this.#sent.push(message);
+    this.#draft = "";
+    this.#caret = [0, 0];
+    this.#sending = false;
+    this.#sendProblem = "";
+    this.#rerender();
+  }
+
+  /** The message wasn't sent: say why, and keep it in the box. */
+  sendFailed(problem: string): void {
+    this.#sending = false;
+    this.#sendProblem = problem;
+    this.#rerender();
+  }
+
+  /** A new session: forget which calls were opened, what was sent and typed. */
   reset(): void {
     this.#opened.clear();
     this.#whole.clear();
+    this.#sent = [];
+    this.#draft = "";
+    this.#draftFocused = false;
+    this.#sending = false;
+    this.#sendProblem = "";
     this.#session = undefined;
     this.#conversation = undefined;
     this.#problem = "";
@@ -95,6 +132,30 @@ export class SessionPage extends BaseElement {
   constructor() {
     super();
     this.root.addEventListener("click", (e) => this.#click(e as MouseEvent));
+    // The message box: remember what's typed (and where), so a re-render doesn't lose it.
+    this.root.addEventListener("input", (e) => this.#typed(e.target as HTMLElement));
+    this.root.addEventListener("keyup", (e) => this.#typed(e.target as HTMLElement));
+    this.root.addEventListener("focusin", (e) => {
+      if ((e.target as HTMLElement).matches?.("textarea.message")) this.#draftFocused = true;
+    });
+    this.root.addEventListener("focusout", (e) => {
+      if ((e.target as HTMLElement).matches?.("textarea.message")) this.#draftFocused = false;
+    });
+    this.root.addEventListener("keydown", (e) => {
+      const key = e as KeyboardEvent;
+      if (
+        key.key === "Enter" &&
+        (key.ctrlKey || key.metaKey) &&
+        (key.target as HTMLElement).matches?.("textarea.message")
+      ) {
+        key.preventDefault();
+        this.#send();
+      }
+    });
+    this.root.addEventListener("submit", (e) => {
+      e.preventDefault();
+      this.#send();
+    });
     // `toggle` doesn't bubble; capture it to remember what the user opened.
     this.root.addEventListener(
       "toggle",
@@ -123,6 +184,43 @@ export class SessionPage extends BaseElement {
 
   protected override styles(): string {
     return pageStyles;
+  }
+
+  /** Puts the draft back into the fresh message box, with the focus and caret where they were. */
+  protected override afterRender(): void {
+    const box = this.root.querySelector<HTMLTextAreaElement>("textarea.message");
+    if (!box) return;
+    box.value = this.#draft;
+    grow(box);
+    if (this.#draftFocused) {
+      box.focus();
+      box.setSelectionRange(this.#caret[0], this.#caret[1]);
+    }
+  }
+
+  #typed(target: HTMLElement): void {
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("textarea.message")) return;
+    this.#draft = target.value;
+    this.#caret = [target.selectionStart, target.selectionEnd];
+    grow(target);
+    const send = this.root.querySelector<HTMLButtonElement>("button.send");
+    if (send) send.disabled = this.#sending || !this.#draft.trim();
+  }
+
+  #send(): void {
+    const text = this.#draft.trim();
+    const session = this.#session;
+    if (!text || !session || this.#sending) return;
+    this.#sending = true;
+    this.#sendProblem = "";
+    this.dispatchEvent(
+      new CustomEvent("send-message", {
+        bubbles: true,
+        composed: true,
+        detail: { id: session.id, text },
+      }),
+    );
+    this.render();
   }
 
   protected override template(): string {
@@ -217,6 +315,32 @@ export class SessionPage extends BaseElement {
       <button class="${notices ? "on" : ""}" data-view="notices" title="${notices ? "Hide" : "Show"} notices (what the agent's own tooling told it)" aria-pressed="${notices}">${icon("info")}</button>
       <button class="${tools ? "on" : ""}" data-view="tools" title="${tools ? "Close" : "Open"} every tool call" aria-pressed="${tools}">${icon(tools ? "collapse" : "expand")}</button>
     </span>`;
+    // Sent from this page: each one labels the first matching prompt after the last one matched;
+    // those not in the conversation yet show at the end (held ones dashed, in order).
+    this.#labels.clear();
+    const unseen: SentMessage[] = [];
+    let after = 0;
+    for (const m of this.#sent) {
+      const hit = c?.entries.find(
+        (e) =>
+          e.kind === "prompt" &&
+          !e.parentToolId &&
+          e.seq > after &&
+          (e.text ?? "").trim() === m.text,
+      );
+      if (hit) {
+        this.#labels.set(hit.seq, m);
+        after = hit.seq;
+      } else unseen.push(m);
+    }
+    const pending = (list: SentMessage[]) =>
+      list
+        .map((m, i) =>
+          m.delivery === "pending"
+            ? `<div class="e"><div class="t"></div><div class="c"><div class="msg prompt held">${icon("user")}<div class="body"><div class="label">Held<span class="delivery">${i + 1} · sent when the agent starts</span></div><div class="md">${markdown(m.text)}</div></div></div></div></div>`
+            : `<div class="e"><div class="t"></div><div class="c"><div class="msg prompt">${icon("user")}<div class="body"><div class="label">Prompt<span class="delivery ${m.delivery}">${m.delivery} · ${escapeHtml(m.caller)}</span></div><div class="md">${markdown(m.text)}</div></div></div></div></div>`,
+        )
+        .join("");
     let body: string;
     if (!c) body = `<div class="empty">Loading the conversation…</div>`;
     else if (!c.entries.length)
@@ -230,7 +354,40 @@ export class SessionPage extends BaseElement {
       if (!isEnded(s))
         body += `<div class="following">Refreshes every few seconds while it runs.</div>`;
     }
-    return `<section class="transcript"><div class="t-head"><span class="counts">${counts}</span>${toggles}</div><div class="t-body">${body}</div></section>`;
+    body += pending(unseen);
+    return `<section class="transcript"><div class="t-head"><span class="counts">${counts}</span>${toggles}</div><div class="t-body">${body}</div>${this.#messageBox(s)}</section>`;
+  }
+
+  /** Which sent message labels which prompt (by seq), worked out for each render. */
+  readonly #labels = new Map<number, SentMessage>();
+
+  /** The box at the bottom of the transcript, or why there's none (M11). */
+  #messageBox(s: Session): string {
+    if (!s.providerSessionId && isEnded(s)) {
+      return `<div class="no-agent">This session never started, so there's no agent to message.</div>`;
+    }
+    const hint =
+      s.status === "working"
+        ? "Working: a message reaches the agent after its current step."
+        : s.status === "queued"
+          ? "Queued: messages are held and sent when the agent starts, after the prompt."
+          : "The agent has finished: a message continues the session, with everything so far in mind.";
+    const problem = this.#sendProblem
+      ? `<div class="send-problem">${escapeHtml(this.#sendProblem)}</div>`
+      : "";
+    return `<form class="composer compose">
+      <textarea class="message" rows="1" placeholder="Message the agent…" aria-label="Message the agent"></textarea>
+      <div class="row"><span class="hint">${hint}</span><span class="spacer"></span><span class="hint">Ctrl+Enter</span><button class="primary send" type="submit" ${this.#sending || !this.#draft.trim() ? "disabled" : ""}>${this.#sending ? "Sending…" : "Send"}</button></div>
+      ${problem}
+    </form>`;
+  }
+
+  /** A prompt this page sent: what became of it, and who sent it. */
+  #delivery(e: ConversationEntry): string {
+    const m = this.#labels.get(e.seq);
+    return m
+      ? `<span class="delivery ${m.delivery}">${m.delivery === "pending" ? "held, now sent" : m.delivery} · ${escapeHtml(m.caller)}</span>`
+      : "";
   }
 
   /** The time in the gutter: a button that switches between `+m:ss` and clock times. */
@@ -259,7 +416,7 @@ export class SessionPage extends BaseElement {
           box(
             "prompt",
             "user",
-            `<div class="label">Prompt</div><div class="md">${markdown(e.text ?? "")}</div>`,
+            `<div class="label">Prompt${this.#delivery(e)}</div><div class="md">${markdown(e.text ?? "")}</div>`,
           ),
         );
       case "text":
@@ -394,6 +551,13 @@ export class SessionPage extends BaseElement {
   }
 }
 
+/** Grows the message box with its text (one line to start). */
+function grow(box: HTMLTextAreaElement): void {
+  box.style.height = "auto";
+  box.style.height = `${box.scrollHeight + 2}px`;
+  box.classList.toggle("multiline", box.value.includes("\n") || box.scrollHeight > 42);
+}
+
 const pageStyles = `
   :host { display: block; }
   button { font: inherit; color: inherit; cursor: pointer; }
@@ -514,6 +678,22 @@ const pageStyles = `
   .turn-end::before, .turn-end::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .turn-end.failed { color: var(--failed); }
   .turn-end .took { color: var(--faint); }
+
+  /* The message box (M11), at the bottom of the transcript: the composer's look. */
+  .composer { background: var(--card); border: 0; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding: 10px 16px 12px; }
+  .composer textarea { display: block; width: 100%; min-height: 38px; max-height: 50vh; resize: none; overflow-y: hidden; border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; background: var(--field); color: var(--text); font: inherit; line-height: 20px; box-sizing: border-box; }
+  .composer textarea.multiline { resize: vertical; overflow-y: auto; }
+  .composer textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .composer .row { display: flex; align-items: center; gap: 8px 16px; margin-top: 10px; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .hint { color: var(--faint); font-size: 12px; }
+  .primary { height: 32px; border: 0; border-radius: 6px; padding: 0 16px; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+  .primary:disabled { opacity: .45; cursor: default; }
+  .send-problem { margin-top: 6px; font-size: 13px; color: var(--danger); }
+  .no-agent { border-top: 1px solid var(--line); padding: 10px 16px; color: var(--dim); font-size: 13px; }
+  .label .delivery { margin-left: 8px; font: 11px var(--mono); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
+  .label .delivery.continued { color: var(--working); }
+  .msg.prompt.held { background: transparent; border: 1px dashed var(--line); }
 
   @media (max-width: 720px) {
     .e, .subagent .e { grid-template-columns: 1fr; padding: 4px 12px; }
