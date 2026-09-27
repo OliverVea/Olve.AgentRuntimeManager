@@ -23,6 +23,10 @@ export class EnvDialog {
   #confirming: string | undefined;
   /** What went wrong with the last change from the list. */
   #problem = "";
+  /** Whether an add is in flight (Add stays disabled until it settles). */
+  #adding = false;
+  /** Why the server refused the last add; kept until the form is typed in again. */
+  #addProblem = "";
 
   constructor(
     readonly dialog: HTMLDialogElement,
@@ -95,10 +99,19 @@ export class EnvDialog {
     }
   }
 
-  /** Flags the Add form's name in place and enables Add when it can be sent. */
-  checkAdd(serverProblem = ""): void {
+  /**
+   * Flags the Add form's name in place and enables Add when it can be sent. While an add is in
+   * flight, Add stays disabled and the flags stay as they are.
+   */
+  checkAdd(): void {
+    const button = this.#el<HTMLButtonElement>("[data-add-submit]");
+    if (this.#adding) {
+      button.disabled = true;
+      return;
+    }
     const input = this.#addInput("name");
     const name = input.value.trim();
+    const serverProblem = this.#addProblem;
     const problem =
       serverProblem ||
       (name
@@ -109,8 +122,7 @@ export class EnvDialog {
     const err = this.#el("[data-add-err]");
     err.textContent = problem;
     err.hidden = !problem;
-    this.#el<HTMLButtonElement>("[data-add-submit]").disabled =
-      !name || (!!problem && !serverProblem);
+    button.disabled = !name || (!!problem && !serverProblem);
   }
 
   #item(v: EnvVariable, i: number, now: number): string {
@@ -195,7 +207,10 @@ export class EnvDialog {
   #input(e: Event): void {
     const input = e.target as HTMLInputElement;
     if (input.dataset.editValue !== undefined && this.#editing) this.#editing.value = input.value;
-    else if (input.dataset.add === "name") this.checkAdd();
+    else if (input.dataset.add === "name" || input.dataset.add === "value") {
+      this.#addProblem = "";
+      this.checkAdd();
+    }
   }
 
   /** Enter in a field never submits the dialog's form: it adds, or saves an edit. */
@@ -221,9 +236,12 @@ export class EnvDialog {
 
   async #add(): Promise<void> {
     const name = this.#addInput("name").value.trim();
-    if (!name || envNameProblem(name, "registered") || this.registry.get(name)) return;
-    const button = this.#el<HTMLButtonElement>("[data-add-submit]");
-    button.disabled = true;
+    if (this.#adding || !name || envNameProblem(name, "registered") || this.registry.get(name)) {
+      return;
+    }
+    this.#adding = true;
+    this.#addProblem = "";
+    this.checkAdd();
     try {
       await this.registry.set(name, {
         value: this.#addInput("value").value,
@@ -232,10 +250,12 @@ export class EnvDialog {
       this.#addInput("name").value = "";
       this.#addInput("value").value = "";
       this.#addInput("default").checked = false;
-      this.checkAdd();
       this.#addInput("name").focus();
     } catch (error) {
-      this.checkAdd(describeError(error));
+      this.#addProblem = describeError(error);
+    } finally {
+      this.#adding = false;
+      this.checkAdd();
     }
   }
 

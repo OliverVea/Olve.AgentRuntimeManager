@@ -221,6 +221,31 @@ describe("the Environment variables dialog", () => {
     expect(submit.defaultPrevented).toBe(true);
   });
 
+  it("keeps Add disabled while an add is in flight, and its refusal through a list refresh", async () => {
+    const { dialog, api, registry } = await open(listed());
+    const name = q<HTMLInputElement>(dialog, '[data-add="name"]');
+    const add = q<HTMLButtonElement>(dialog, "[data-add-submit]");
+    const err = q(dialog, "[data-add-err]");
+    type(name, "NEW_ONE");
+    api.holdEnvWrites();
+    add.click();
+    expect(add.disabled).toBe(true);
+    await vi.waitFor(() => expect(api.envCalls().some((c) => c.method === "PUT")).toBe(true));
+    await registry.load(); // a refresh while the PUT is on its way
+    expect(add.disabled).toBe(true);
+    api.failEnv(400, "INVALID_REQUEST", "The server says no.");
+    api.releaseEnvWrites();
+    await vi.waitFor(() => expect(err.textContent).toBe("The server says no."));
+    expect(add.disabled).toBe(false);
+
+    await registry.load(); // e.g. after a switch elsewhere in the list
+    expect(err.textContent).toBe("The server says no.");
+    expect(name.classList.contains("bad")).toBe(true);
+
+    type(name, "NEW_TWO"); // typing again clears it
+    expect(err.hidden).toBe(true);
+  });
+
   it("shows a failed fetch", async () => {
     const api = fakeApi();
     api.failEnv(401, "UNAUTHORIZED", "");

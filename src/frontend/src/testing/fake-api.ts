@@ -34,7 +34,8 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `holdSearch` makes searches wait for `releaseSearch`, to deliver events before the snapshot.
  * `providers` is what `GET /api/providers/health` answers (every provider available by default).
  * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
- * call to `/api/env` answer with the given error envelope instead.
+ * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
+ * DELETEs wait for `releaseEnvWrites`.
  */
 export function fakeApi(
   options: {
@@ -48,6 +49,7 @@ export function fakeApi(
   const sessions = options.sessions ?? [];
   const env = options.env ?? [];
   let envFailure: Response | undefined;
+  let heldWrites: Array<() => void> | undefined;
   const encoder = new TextEncoder();
   let events: ReadableStreamDefaultController<Uint8Array> | undefined;
   let nextId = 1;
@@ -93,6 +95,9 @@ export function fakeApi(
       );
     }
     if (url.pathname === "/api/env" || url.pathname.startsWith("/api/env/")) {
+      if (heldWrites && request.method !== "GET") {
+        await new Promise<void>((resolve) => heldWrites?.push(resolve));
+      }
       const failure = envFailure;
       envFailure = undefined;
       if (failure) return failure;
@@ -138,6 +143,14 @@ export function fakeApi(
     envCalls: () => calls.filter((c) => c.path.startsWith("/api/env")),
     failEnv(status: number, code: string, message: string) {
       envFailure = Response.json({ error: { code, message, details: {} } }, { status });
+    },
+    holdEnvWrites() {
+      heldWrites = [];
+    },
+    releaseEnvWrites() {
+      const waiting = heldWrites ?? [];
+      heldWrites = undefined;
+      for (const resolve of waiting) resolve();
     },
     streams: () => calls.filter((c) => c.path === "/api/events").length,
     searches: () => calls.filter((c) => c.path === "/api/sessions/search"),
