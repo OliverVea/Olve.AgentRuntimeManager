@@ -55,7 +55,7 @@ const conversation: Conversation = {
   lastSeq: 8,
 };
 
-async function mount(view = { thinking: false, tools: false }) {
+async function mount(view = { thinking: false, tools: false, notices: false }) {
   const page = document.createElement(SessionPage.tagName) as SessionPage;
   document.body.append(page);
   pages.push(page);
@@ -114,7 +114,7 @@ describe("<session-page>", () => {
     ($$(page, '[data-view="thinking"]')[0] as HTMLElement).click();
     ($$(page, '[data-view="tools"]')[0] as HTMLElement).click();
 
-    expect(changes).toHaveBeenLastCalledWith({ thinking: true, tools: true });
+    expect(changes).toHaveBeenLastCalledWith({ thinking: true, tools: true, notices: false });
     expect(($$(page, ".msg.thinking details")[0] as HTMLDetailsElement).open).toBe(true);
     expect($$(page, ".tool details").every((d) => (d as HTMLDetailsElement).open)).toBe(true);
   });
@@ -132,7 +132,7 @@ describe("<session-page>", () => {
   });
 
   it("a long result stops at 12 lines until asked for all of it", async () => {
-    const page = await mount({ thinking: false, tools: true });
+    const page = await mount({ thinking: false, tools: true, notices: false });
     const long = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
     page.conversation = {
       ...conversation,
@@ -147,6 +147,30 @@ describe("<session-page>", () => {
     ($$(page, "[data-whole]")[0] as HTMLElement).click();
 
     expect(result()).toBe(30);
+  });
+
+  it("notices are hidden until their icon is on, then show in one line", async () => {
+    const page = await mount();
+    page.conversation = {
+      ...conversation,
+      entries: [
+        ...conversation.entries,
+        {
+          seq: 9,
+          kind: "notice",
+          at: "2026-09-27T15:01:46Z",
+          text: '<task-notification><summary>Background command "cd /w &amp;&amp; mise install" completed (exit code 0)</summary></task-notification>',
+        },
+      ],
+    };
+    await Promise.resolve();
+    expect($$(page, ".msg.notice")).toHaveLength(0);
+
+    ($$(page, '[data-view="notices"]')[0] as HTMLElement).click();
+
+    expect(text(page, ".msg.notice")).toEqual([
+      "Background command finished, exit 0: mise install",
+    ]);
   });
 
   it("an empty conversation says why", async () => {

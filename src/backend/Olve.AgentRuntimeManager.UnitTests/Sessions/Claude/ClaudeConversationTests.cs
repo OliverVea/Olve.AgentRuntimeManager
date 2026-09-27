@@ -25,7 +25,7 @@ public class ClaudeConversationTests
         string[] lines =
         [
             """{"type":"system","subtype":"init","tools":["Bash"]}""",
-            """{"type":"user","message":{"role":"user","content":"Fix the build"},"parent_tool_use_id":null,"timestamp":"2026-09-27T10:00:00Z"}""",
+            """{"type":"user","message":{"role":"user","content":"Fix the build"},"parent_tool_use_id":null,"isReplay":true,"timestamp":"2026-09-27T10:00:00Z"}""",
             """{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Look first."},{"type":"text","text":"Checking."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},"parent_tool_use_id":null}""",
             """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt\nb.txt","is_error":false}]},"parent_tool_use_id":null}""",
             """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"no such file"},{"type":"image"}],"is_error":true}]},"parent_tool_use_id":null}""",
@@ -54,9 +54,22 @@ public class ClaudeConversationTests
     [Test]
     public async Task UserMessage_AsTextBlocks_IsAPrompt()
     {
-        var entries = ClaudeConversation.Read(["""{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue."}]}}"""]);
+        var entries = ClaudeConversation.Read(["""{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue."}]},"isReplay":true}"""]);
 
         await Assert.That(entries.Single()).IsEqualTo(entries.Single() with { Kind = ConversationEntryKind.Prompt, Text = "Continue." });
+    }
+
+    [Test]
+    public async Task UserText_ArmDidntSend_IsANotice_ButASubagentsTaskIsAPrompt()
+    {
+        var entries = ClaudeConversation.Read(
+        [
+            """{"type":"user","message":{"role":"user","content":"<task-notification><status>completed</status></task-notification>"},"parent_tool_use_id":null}""",
+            """{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Review the diff."}]},"parent_tool_use_id":"t4"}""",
+        ]);
+
+        await Assert.That(entries.Select(e => e.Kind)).IsEquivalentTo([ConversationEntryKind.Notice, ConversationEntryKind.Prompt], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(entries[1].ParentToolId).IsEqualTo("t4");
     }
 
     [Test]

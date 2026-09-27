@@ -32,6 +32,8 @@ function formatEntry(e: ConversationEntry): string {
       return `${nest}${e.isError ? "✗ Tool error" : "← Result"}${body(e.text === undefined ? undefined : clip(e.text))}`;
     case "turn_end":
       return `${nest}${e.isError ? "■ Turn failed" : "■ Turn ended"}${body(e.text)}`;
+    case "notice":
+      return `${nest}ⓘ Notice${body(e.text)}`;
   }
 }
 

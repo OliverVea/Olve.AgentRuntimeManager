@@ -6,7 +6,7 @@ namespace Arm;
 
 /** What a conversation entry is. */
 enum ConversationEntryKind {
-  /** A user message to the agent: the session's prompt (and, after a restart, the resume message). */
+  /** A message to the agent: the session's prompt (and, after a restart, the resume message), or a subagent's task. */
   prompt,
 
   /** The agent's text. */
@@ -23,6 +23,12 @@ enum ConversationEntryKind {
 
   /** The end of one of the agent's turns: `isError` when the turn failed, `text` its final answer or error. */
   turn_end,
+
+  /**
+   * Something the agent's own tooling told it, not a message from anyone: e.g. that a command it
+   * started in the background has finished. `text` as the provider gave it.
+   */
+  notice,
 }
 
 /** One entry of a session's conversation. */

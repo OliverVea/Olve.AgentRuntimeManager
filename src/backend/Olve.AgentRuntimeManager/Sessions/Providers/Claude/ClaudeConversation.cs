@@ -8,8 +8,9 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
 /// <summary>
 /// A session's conversation, read from Claude Code's <c>stream-json</c> output (<c>output.jsonl</c>):
-/// user messages (echoed back with <c>--replay-user-messages</c>) and tool results from <c>user</c>
-/// events, the agent's text, thinking and tool calls from <c>assistant</c> events, and each turn's
+/// user messages (echoed back with <c>--replay-user-messages</c>, marked <c>isReplay</c>), Claude
+/// Code's own messages to the agent (notices: top-level user text it wasn't sent, e.g. that a
+/// background command finished) and tool results from <c>user</c> events, the agent's text, thinking and tool calls from <c>assistant</c> events, and each turn's
 /// end from <c>result</c> events. Everything else (<c>system</c>, rate limits, …) is left out.
 /// </summary>
 public static class ClaudeConversation
@@ -29,7 +30,9 @@ public static class ClaudeConversation
             switch (ClaudeStreamJson.Text(e["type"]))
             {
                 case "user":
-                    entries.AddRange(User(e["message"]?["content"], at, parent));
+                    // What ARM sent comes back as a replay; a subagent's task comes with its parent.
+                    var told = parent is not null || e["isReplay"] is JsonValue replay && replay.TryGetValue<bool>(out var isReplay) && isReplay;
+                    entries.AddRange(User(e["message"]?["content"], at, parent, told ? ConversationEntryKind.Prompt : ConversationEntryKind.Notice));
                     break;
                 case "assistant":
                     entries.AddRange(Assistant(e["message"]?["content"], at, parent));
@@ -45,11 +48,11 @@ public static class ClaudeConversation
     }
 
     /// <summary>A user event: a message to the agent (a prompt), or tool results.</summary>
-    private static IEnumerable<ConversationEntryRecord> User(JsonNode? content, DateTimeOffset? at, string? parent)
+    private static IEnumerable<ConversationEntryRecord> User(JsonNode? content, DateTimeOffset? at, string? parent, ConversationEntryKind message)
     {
-        if (ClaudeStreamJson.Text(content) is { } message)
+        if (ClaudeStreamJson.Text(content) is { } plain)
         {
-            yield return new ConversationEntryRecord(ConversationEntryKind.Prompt, Text: message, ParentToolId: parent, At: at);
+            yield return new ConversationEntryRecord(message, Text: plain, ParentToolId: parent, At: at);
             yield break;
         }
 
@@ -75,7 +78,7 @@ public static class ClaudeConversation
 
         if (texts.Count > 0)
         {
-            yield return new ConversationEntryRecord(ConversationEntryKind.Prompt, Text: string.Join("\n\n", texts), ParentToolId: parent, At: at);
+            yield return new ConversationEntryRecord(message, Text: string.Join("\n\n", texts), ParentToolId: parent, At: at);
         }
     }
 

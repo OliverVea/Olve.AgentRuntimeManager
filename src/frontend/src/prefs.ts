@@ -21,8 +21,8 @@ export type Prefs = {
   theme?: Theme;
   /** Times after the status: running time (`relative`) or clock times (`absolute`). */
   times: "relative" | "absolute";
-  /** The session page's transcript: thinking shown, every tool call open. */
-  transcript: { thinking: boolean; tools: boolean };
+  /** The session page's transcript: thinking and notices shown, every tool call open. */
+  transcript: { thinking: boolean; tools: boolean; notices: boolean };
 };
 
 const key = "arm-prefs";
@@ -30,7 +30,7 @@ const key = "arm-prefs";
 export const initialPrefs: Prefs = {
   defaults: { model: "claude/sonnet", caller: "" },
   times: "relative",
-  transcript: { thinking: false, tools: false },
+  transcript: { thinking: false, tools: false, notices: false },
 };
 
 export function loadPrefs(storage: Storage | undefined = safeStorage()): Prefs {

@@ -84,6 +84,20 @@ export function preview(result: ConversationEntry): string {
   return line ?? "(no output)";
 }
 
+/**
+ * A notice in one line: Claude Code's `<task-notification>` as "Background command finished, exit 0:
+ * <command>"; anything else as given.
+ */
+export function noticeText(text: string): string {
+  const summary = text.match(/<summary>([\s\S]*?)<\/summary>/)?.[1];
+  if (summary === undefined) return text;
+  const plain = summary.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const done = plain.match(/^Background command "([\s\S]*)" (completed|failed|was killed)(.*)$/);
+  if (!done) return plain;
+  const exit = done[3]?.match(/exit code (\d+)/)?.[1];
+  return `Background command ${done[2] === "completed" ? "finished" : done[2]}${exit ? `, exit ${exit}` : ""}: ${shellGist(done[1] ?? "")}`;
+}
+
 /** Time taken between two entries: `<0.1s`, `0.4s`, `12s`, `2m`; empty without both times. */
 export function took(from: string | undefined, to: string | undefined): string {
   if (!from || !to) return "";

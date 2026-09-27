@@ -4,6 +4,7 @@ import {
   gist,
   inputFields,
   markdown,
+  noticeText,
   offset,
   preview,
   shellGist,
@@ -69,6 +70,12 @@ describe("conversation helpers", () => {
     expect(took("2026-09-27T15:00:00Z", "2026-09-27T15:02:59Z")).toBe("2m 59s");
     expect(took("2026-09-27T15:00:00Z", "2026-09-27T15:00:16Z")).toBe("16s");
     expect(took(undefined, "2026-09-27T15:00:00Z")).toBe("");
+  });
+
+  it("noticeText summarizes Claude Code's task notifications", () => {
+    const n = `<task-notification>\n<summary>Background command "cd /w &amp;&amp; mise install &gt;log" completed (exit code 0)</summary>\n</task-notification>`;
+    expect(noticeText(n)).toBe("Background command finished, exit 0: mise install >log");
+    expect(noticeText("Something else")).toBe("Something else");
   });
 
   it("offset: minutes and seconds into the conversation", () => {

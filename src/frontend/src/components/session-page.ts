@@ -4,6 +4,7 @@ import {
   clockSeconds,
   inputFields,
   markdown,
+  noticeText,
   offset,
   preview,
   RESULT_LINES,
@@ -20,6 +21,7 @@ const sprite = `<svg width="0" height="0" style="position:absolute" aria-hidden=
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
   <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
@@ -28,7 +30,7 @@ const sprite = `<svg width="0" height="0" style="position:absolute" aria-hidden=
 
 const icon = (name: string) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 
-export type TranscriptView = { thinking: boolean; tools: boolean };
+export type TranscriptView = { thinking: boolean; tools: boolean; notices: boolean };
 
 /**
  * `<session-page>` — one session: its card (status · time · outcome, the task, id · model · caller),
@@ -48,7 +50,7 @@ export class SessionPage extends BaseElement {
   #conversation: Conversation | undefined;
   #problem = "";
   #times: TimesAs = "relative";
-  #view: TranscriptView = { thinking: false, tools: false };
+  #view: TranscriptView = { thinking: false, tools: false, notices: false };
   /** Tool calls (by toolId) the user opened or closed themselves, overriding "open every tool call". */
   readonly #opened = new Map<string, boolean>();
   /** Results the user asked to see whole. */
@@ -209,9 +211,10 @@ export class SessionPage extends BaseElement {
     const counts = c
       ? `<span>${plural(c.turns, "turn")}</span><span>${plural(c.messages, "message")}</span><span>${plural(c.toolCalls, "tool call")}</span>`
       : "";
-    const { thinking, tools } = this.#view;
+    const { thinking, tools, notices } = this.#view;
     const toggles = `<span class="toggles">
       <button class="${thinking ? "on" : ""}" data-view="thinking" title="${thinking ? "Hide" : "Show"} thinking" aria-pressed="${thinking}">${icon("bulb")}</button>
+      <button class="${notices ? "on" : ""}" data-view="notices" title="${notices ? "Hide" : "Show"} notices (what the agent's own tooling told it)" aria-pressed="${notices}">${icon("info")}</button>
       <button class="${tools ? "on" : ""}" data-view="tools" title="${tools ? "Close" : "Open"} every tool call" aria-pressed="${tools}">${icon(tools ? "collapse" : "expand")}</button>
     </span>`;
     let body: string;
@@ -221,6 +224,7 @@ export class SessionPage extends BaseElement {
     else {
       const start = c.entries.find((e) => e.at)?.at;
       body = topLevel(c.entries)
+        .filter((e) => notices || e.kind !== "notice")
         .map((e) => this.#entry(e, c.entries, start))
         .join("");
       if (!isEnded(s))
@@ -262,6 +266,11 @@ export class SessionPage extends BaseElement {
         return row(
           this.#stamp(e.at, start),
           box("text", "message", `<div class="md">${markdown(e.text ?? "")}</div>`),
+        );
+      case "notice":
+        return row(
+          this.#stamp(e.at, start),
+          box("notice", "info", escapeHtml(noticeText(e.text ?? ""))),
         );
       case "thinking":
         return row(
@@ -372,7 +381,7 @@ export class SessionPage extends BaseElement {
     } else if (d.copy) fire("copy-id", d.copy);
     else if (d.kill) fire("kill-session", d.kill);
     else if (d.delete) fire("delete-session", d.delete);
-    else if (d.view === "thinking" || d.view === "tools") {
+    else if (d.view === "thinking" || d.view === "tools" || d.view === "notices") {
       this.#view = { ...this.#view, [d.view]: !this.#view[d.view] };
       // "Open every tool call" applies to all of them again.
       if (d.view === "tools") this.#opened.clear();
@@ -455,6 +464,7 @@ const pageStyles = `
   .msg.thinking summary { cursor: pointer; color: var(--dim); font-style: italic; font-size: 13px; list-style: none; }
   .msg.thinking summary::before { content: "▸ "; font-style: normal; } .msg.thinking details[open] summary::before { content: "▾ "; }
   .msg .thought { color: var(--dim); font-style: italic; white-space: pre-wrap; margin-top: 4px; font-size: 13px; }
+  .msg.notice { border-style: dashed; padding: 3px 10px; color: var(--faint); font: italic 13px system-ui, sans-serif; }
   .msg.answer { border-color: var(--completed); background: var(--completed-bg); } .msg.answer > svg.i { color: var(--completed); }
   .msg.answer.failed { border-color: var(--failed); background: var(--failed-bg); color: var(--failed); } .msg.answer.failed > svg.i { color: var(--failed); }
   .label { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--dim); margin-bottom: 2px; }
