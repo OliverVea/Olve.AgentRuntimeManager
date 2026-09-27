@@ -1,4 +1,10 @@
-import type { ArmEventData, ProviderHealth, Session, SessionSearch } from "@arm/client";
+import type {
+  ArmEventData,
+  EnvVariable,
+  ProviderHealth,
+  Session,
+  SessionSearch,
+} from "@arm/client";
 import { vi } from "vitest";
 import { createApiClient } from "../api-client.js";
 
@@ -27,12 +33,21 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * stays open; `push` writes one SSE frame to the latest, `endStream` ends it like a redeploy.
  * `holdSearch` makes searches wait for `releaseSearch`, to deliver events before the snapshot.
  * `providers` is what `GET /api/providers/health` answers (every provider available by default).
+ * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
+ * call to `/api/env` answer with the given error envelope instead.
  */
 export function fakeApi(
-  options: { sessions?: Session[]; search?: () => Response; providers?: ProviderHealth[] } = {},
+  options: {
+    sessions?: Session[];
+    search?: () => Response;
+    providers?: ProviderHealth[];
+    env?: EnvVariable[];
+  } = {},
 ) {
   const calls: Call[] = [];
   const sessions = options.sessions ?? [];
+  const env = options.env ?? [];
+  let envFailure: Response | undefined;
   const encoder = new TextEncoder();
   let events: ReadableStreamDefaultController<Uint8Array> | undefined;
   let nextId = 1;
@@ -77,6 +92,33 @@ export function fakeApi(
         ],
       );
     }
+    if (url.pathname === "/api/env" || url.pathname.startsWith("/api/env/")) {
+      const failure = envFailure;
+      envFailure = undefined;
+      if (failure) return failure;
+      const name = decodeURIComponent(url.pathname.slice("/api/env/".length));
+      const at = env.findIndex((v) => v.name === name);
+      if (request.method === "GET") return Response.json(env);
+      if (request.method === "PUT") {
+        const variable = { name, ...body, updatedAt: "2026-09-27T12:00:00Z" } as EnvVariable;
+        if (at >= 0) env[at] = variable;
+        else env.push(variable);
+        return Response.json(variable);
+      }
+      if (request.method === "DELETE" && at >= 0) {
+        env.splice(at, 1);
+        return new Response(null, { status: 204 });
+      }
+      return Response.json(
+        {
+          error: {
+            code: "ENV_NOT_FOUND",
+            message: `No environment variable '${name}' is registered.`,
+          },
+        },
+        { status: 404 },
+      );
+    }
     if (request.method === "GET" && url.pathname === "/api/events") {
       const stream = new ReadableStream<Uint8Array>({
         start: (controller) => {
@@ -92,6 +134,11 @@ export function fakeApi(
     client: createApiClient("http://test", { fetch }),
     calls,
     sessions,
+    env,
+    envCalls: () => calls.filter((c) => c.path.startsWith("/api/env")),
+    failEnv(status: number, code: string, message: string) {
+      envFailure = Response.json({ error: { code, message, details: {} } }, { status });
+    },
     streams: () => calls.filter((c) => c.path === "/api/events").length,
     searches: () => calls.filter((c) => c.path === "/api/sessions/search"),
     push(event: ArmEventData) {
