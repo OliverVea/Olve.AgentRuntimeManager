@@ -10,7 +10,7 @@ import {
   sessionsKill,
 } from "@arm/client";
 import { createApiClient } from "./api-client.js";
-import { describeError, unwrap } from "./api-errors.js";
+import { ApiError, describeError, unwrap } from "./api-errors.js";
 import * as auth from "./auth/oidc.js";
 import { escapeHtml } from "./base-element.js";
 import { SessionList, type View } from "./components/session-list.js";
@@ -295,6 +295,8 @@ async function create(): Promise<void> {
     );
   } catch (error) {
     toast(describeError(error), true);
+    // A picked variable was deleted meanwhile: the fresh list drops the pick.
+    if (error instanceof ApiError && error.code === "ENV_NOT_FOUND") void envRegistry.load();
   }
   updateCreate();
 }
