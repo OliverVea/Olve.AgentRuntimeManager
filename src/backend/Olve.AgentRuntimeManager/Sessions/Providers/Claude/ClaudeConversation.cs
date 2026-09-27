@@ -23,6 +23,7 @@ public static class ClaudeConversation
     {
         unknown ??= _ => { };
         var entries = new List<ConversationEntryRecord>();
+        DateTimeOffset? last = null;
         foreach (var line in lines)
         {
             if (ClaudeStreamJson.Parse(line) is not { } e)
@@ -31,6 +32,7 @@ public static class ClaudeConversation
             }
 
             var at = Time(e["timestamp"]);
+            last = at ?? last;
             var parent = ClaudeStreamJson.Text(e["parent_tool_use_id"]);
             switch (ClaudeStreamJson.Text(e["type"]))
             {
@@ -47,7 +49,8 @@ public static class ClaudeConversation
                     break;
                 case "result" when ClaudeStreamJson.Result(e) is { } result:
                     var text = result.Text is { Length: > 0 } answer ? answer : result.Errors.Count > 0 ? string.Join("; ", result.Errors) : null;
-                    entries.Add(new ConversationEntryRecord(ConversationEntryKind.TurnEnd, Text: text, IsError: result.IsError, At: at));
+                    // A `result` has no timestamp: the turn ended when its last event was written.
+                    entries.Add(new ConversationEntryRecord(ConversationEntryKind.TurnEnd, Text: text, IsError: result.IsError, At: at ?? last));
                     break;
                 case { } type when !IgnoredEvents.Contains(type):
                     unknown($"event \"{type}\"");

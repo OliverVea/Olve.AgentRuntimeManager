@@ -465,7 +465,7 @@ export class SessionPage extends BaseElement {
               `<div class="md">${markdown(e.text ?? "")}</div>`,
             ),
           ) +
-          `<div class="turn-end ${e.isError ? "failed" : ""}">${e.isError ? "Turn failed" : "Turn ended"} · ${this.#stamp(e.at, start)}${time ? ` <span class="took">(${time})</span>` : ""}</div>`
+          `<div class="turn-end ${e.isError ? "failed" : ""}">${e.isError ? "Turn failed" : "Turn ended"}${e.at ? ` · ${this.#stamp(e.at, start)}` : ""}${time ? ` <span class="took">(${time})</span>` : ""}</div>`
         );
       }
       default:

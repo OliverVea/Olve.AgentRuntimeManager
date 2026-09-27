@@ -116,6 +116,18 @@ public class ClaudeConversationTests
     }
 
     [Test]
+    public async Task TurnEnd_WithoutATimestamp_TakesTheLastEventsTime()
+    {
+        var entries = ClaudeConversation.Read(
+        [
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]},"timestamp":"2026-09-27T18:45:10Z"}""",
+            """{"type":"result","subtype":"success","is_error":false,"result":"Done."}""",
+        ]);
+
+        await Assert.That(entries[^1].At).IsEqualTo(new DateTimeOffset(2026, 9, 27, 18, 45, 10, TimeSpan.Zero));
+    }
+
+    [Test]
     public async Task FailedTurn_EndsWithItsErrors()
     {
         var entries = ClaudeConversation.Read(["""{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["boom","bang"]}"""]);
