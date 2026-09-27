@@ -107,6 +107,10 @@ re-evaluated and scoped when it's picked up.
 
 ## Frontends & interaction
 
+- **File previews** (added 2026-09-27, with M17's files): files in a conversation, sent or
+  handed back, open in the web UI without downloading: CSV and Excel as tables, Word and PDF as
+  documents, text and Markdown rendered, PNG/JPEG and other images inline, and so on for other
+  common types.
 - **CLI served by the server, like `pl`**: the pipeline builds `arm` (linux-x64/arm64,
   darwin-arm64) into the bundle, the image carries it, and ARM serves it at `/download/{asset}`
   (outside `/api`, anonymous). Each environment serves the CLI matching its API; `arm` can warn
