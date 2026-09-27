@@ -5,5 +5,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// <paramref name="ProviderSessionId"/> is the id to give the agent, new for every attempt (a
 /// failed attempt's id stays taken). <paramref name="RunId"/> names this launch, so a restarted
 /// server can tell its traces from an earlier attempt's (docs/GENTLE-RESTART.md).
+/// <paramref name="Env"/>: the session's environment variables for the agent (null: none).
 /// </summary>
-public sealed record AgentLaunch(Guid SessionId, string Prompt, string Model, int Attempt, Guid ProviderSessionId, Guid RunId);
+public sealed record AgentLaunch(Guid SessionId, string Prompt, string Model, int Attempt, Guid ProviderSessionId, Guid RunId,
+    IReadOnlyDictionary<string, string>? Env = null);

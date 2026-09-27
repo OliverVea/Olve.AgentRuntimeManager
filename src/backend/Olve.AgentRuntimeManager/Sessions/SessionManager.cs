@@ -156,7 +156,8 @@ public sealed class SessionManager : IDisposable
     /// <c>session.created</c>, then <c>session.started</c> (or <c>session.failed</c> if the agent
     /// can't start) or <c>session.queued</c>.
     /// </summary>
-    public CreateOutcome Create(CreateSession request)
+    /// <param name="agentEnv">The environment the agent gets, resolved from the registered variables and the request's own.</param>
+    public CreateOutcome Create(CreateSession request, IReadOnlyDictionary<string, string>? agentEnv = null)
     {
         if (!_providers.ContainsKey(request.Provider))
         {
@@ -180,6 +181,9 @@ public sealed class SessionManager : IDisposable
                 Model = request.Model,
                 Caller = request.Caller,
                 TimeoutSeconds = request.TimeoutSeconds,
+                Env = request.Env,
+                UseEnv = request.UseEnv,
+                AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);
@@ -323,7 +327,7 @@ public sealed class SessionManager : IDisposable
         var resumeRunId = Guid.NewGuid();
         try
         {
-            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId)) is { } agent
+            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv)) is { } agent
                 ? (agent, agent.Resumed ? resumeRunId : runId)
                 : null;
         }
@@ -364,7 +368,7 @@ public sealed class SessionManager : IDisposable
         IAgentRun run;
         try
         {
-            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId));
+            run = _providers[session.Provider].Start(new AgentLaunch(session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv));
         }
         catch (Exception exception)
         {

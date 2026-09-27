@@ -86,6 +86,23 @@ describe("session create", () => {
     expect(req.body).toEqual({ prompt: "do it", provider: "fake", model: "opus", caller: "ci", timeoutSeconds: 600 });
   });
 
+  test("--env and --use-env repeat, into env and useEnv", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(
+      ["session", "create", "x", ...required, "--env", "A=1", "--env", "B=x=y", "--use-env", "GH", "--use-env", "EXTRA"],
+      f,
+    );
+    expect(r.code).toBe(0);
+    expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, env: { A: "1", B: "x=y" }, useEnv: ["GH", "EXTRA"] });
+  });
+
+  test("--env without NAME=value is a usage error", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(["session", "create", "x", ...required, "--env", "NOVALUE"], f);
+    expect(r.code).toBe(2);
+    expect(f.requests.length).toBe(0);
+  });
+
   test("a prompt starting with a dash goes after --", async () => {
     const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await runCli(["session", "create", ...required, "--url", url, "--token", "tok", "--", "-5 degrees"], { fetch: f.fetch });

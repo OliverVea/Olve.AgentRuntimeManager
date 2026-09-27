@@ -97,6 +97,32 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task SessionEnv_ReachesTheAgent()
+    {
+        var launch = Launch("Say READY") with { Env = new Dictionary<string, string> { ["GIT_AUTHOR_NAME"] = "Oliver" } };
+
+        await Provider().Start(launch).Completion;
+
+        var (_, environment) = await Invocation(launch);
+        await Assert.That(environment["GIT_AUTHOR_NAME"]).IsEqualTo("Oliver");
+    }
+
+    [Test]
+    public async Task ArmsOwnVariables_WinOverTheSessionsEnv()
+    {
+        var launch = Launch("Say READY") with
+        {
+            Env = new Dictionary<string, string> { ["DISABLE_UPDATES"] = "0", ["ENABLE_CLAUDEAI_MCP_SERVERS"] = "true" },
+        };
+
+        await Provider().Start(launch).Completion;
+
+        var (_, environment) = await Invocation(launch);
+        await Assert.That(environment["DISABLE_UPDATES"]).IsEqualTo("1");
+        await Assert.That(environment["ENABLE_CLAUDEAI_MCP_SERVERS"]).IsEqualTo("false");
+    }
+
+    [Test]
     public async Task ConfigDirectory_IsPassedAsClaudeConfigDir()
     {
         var launch = Launch("Say READY");

@@ -27,7 +27,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
     public IAgentRun Start(AgentLaunch launch)
     {
-        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, ["--session-id", launch.ProviderSessionId.ToString()], launch.Prompt);
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, ["--session-id", launch.ProviderSessionId.ToString()], launch.Prompt, launch.Env);
         logger.LogInformation("Session {SessionId}: started Claude Code (attempt {Attempt}, run {RunId})", launch.SessionId, launch.Attempt, launch.RunId);
         return new ClaudeRun(agent, launch.ProviderSessionId.ToString(), options.Value.ExitGrace);
     }
@@ -62,7 +62,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
-        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], ResumePrompt);
+        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], ResumePrompt, recovery.Env);
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
 
@@ -118,14 +118,17 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         return null;
     }
 
-    /// <summary>Starts the agent under a supervisor, in the session's folder, with <paramref name="prompt"/> as its first message.</summary>
-    private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session, string prompt)
+    /// <summary>
+    /// Starts the agent under a supervisor, in the session's folder, with <paramref name="prompt"/>
+    /// as its first message and the session's <paramref name="env"/> in its environment.
+    /// </summary>
+    private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session, string prompt, IReadOnlyDictionary<string, string>? env)
     {
         var settings = options.Value;
         var folder = Folder(settings, sessionId);
         var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
-            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings), [ClaudeStreamJson.UserMessage(prompt)]);
+            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env), [ClaudeStreamJson.UserMessage(prompt)]);
     }
 
     /// <summary>
@@ -154,10 +157,13 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         return arguments;
     }
 
-    /// <summary>Only the allowlisted variables, plus what keeps Claude Code to itself.</summary>
-    internal static Dictionary<string, string> AgentEnvironment(ClaudeProviderOptions settings)
+    /// <summary>
+    /// The session's own variables (<paramref name="env"/>), then the allowlisted ones and what keeps
+    /// Claude Code to itself on top: ARM's always win (their names are reserved, so they don't meet).
+    /// </summary>
+    internal static Dictionary<string, string> AgentEnvironment(ClaudeProviderOptions settings, IReadOnlyDictionary<string, string>? env = null)
     {
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        var environment = new Dictionary<string, string>(env ?? new Dictionary<string, string>(), StringComparer.Ordinal);
         foreach (var name in PassedThrough)
         {
             if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)

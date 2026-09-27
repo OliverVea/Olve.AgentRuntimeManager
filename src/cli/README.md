@@ -10,11 +10,13 @@ single self-contained binary with `bun build --compile`.
 arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
-                   [--idempotency-key KEY]
+                   [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>
+
+arm env [list] | arm env set <name> <value> [--default] | arm env delete <name>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 

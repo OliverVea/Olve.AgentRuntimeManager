@@ -16,6 +16,8 @@ public static class SessionMapping
         Model = session.Model,
         Caller = session.Caller,
         TimeoutSeconds = session.TimeoutSeconds,
+        Env = session.Env,
+        UseEnv = session.UseEnv,
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

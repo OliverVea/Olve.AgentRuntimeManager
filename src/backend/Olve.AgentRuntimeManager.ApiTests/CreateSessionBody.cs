@@ -6,4 +6,8 @@ public sealed record CreateSessionBody(string Prompt, string Caller = "api-tests
     public string Provider { get; init; } = "fake";
 
     public string Model { get; init; } = "fake";
+
+    public IReadOnlyDictionary<string, string>? Env { get; init; }
+
+    public IReadOnlyList<string>? UseEnv { get; init; }
 }

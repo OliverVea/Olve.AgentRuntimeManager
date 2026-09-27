@@ -56,6 +56,26 @@ export function commaList(options: OptionValues, name: string): string[] | undef
   return entries.length ? entries : undefined;
 }
 
+/** Every value of a repeatable option (`--use-env A --use-env B`); none is unset. */
+export function repeated(options: OptionValues, name: string): string[] | undefined {
+  const raw = options[name];
+  const values = raw === undefined ? [] : Array.isArray(raw) ? raw : [String(raw)];
+  return values.length ? values : undefined;
+}
+
+/** `NAME=value` pairs from a repeatable option (`--env A=1 --env B=2`); the value may hold `=`. */
+export function keyValues(options: OptionValues, name: string): Record<string, string> | undefined {
+  const entries = repeated(options, name);
+  if (entries === undefined) return undefined;
+  const pairs: Record<string, string> = {};
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    if (at <= 0) throw new UsageError(`--${name} must be NAME=value, got '${entry}'`);
+    pairs[entry.slice(0, at)] = entry.slice(at + 1);
+  }
+  return pairs;
+}
+
 /** A date or date-time (`2026-09-01`, `2026-09-01T12:00:00Z`), sent as an ISO 8601 UTC timestamp. */
 export function dateTime(options: OptionValues, name: string): string | undefined {
   const value = text(options, name);

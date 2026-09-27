@@ -41,7 +41,7 @@ export type Io = {
   interactive?: boolean;
 };
 
-type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string }>;
+type ParseArgsOptions = Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }>;
 
 function toParseArgs(options: Record<string, OptionSpec>): ParseArgsOptions {
   return Object.fromEntries(
@@ -50,6 +50,7 @@ function toParseArgs(options: Record<string, OptionSpec>): ParseArgsOptions {
       {
         type: spec.type,
         ...(spec.short ? { short: spec.short } : {}),
+        ...(spec.multiple ? { multiple: true } : {}),
       },
     ]),
   );

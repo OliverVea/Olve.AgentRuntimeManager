@@ -85,6 +85,13 @@ output (the agent's answer included) is kept in `<WorkRoot>/<session id>/output.
 conversation is in the API (M5b). It uses the machine's Claude Code login (or
 `CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
 
+Agents get environment variables (`Variables/`): ones registered in ARM (`GET/PUT/DELETE
+/api/env/{name}`, `arm env`), the `default` ones for every agent and the others when a session
+names them (`useEnv`), plus the session's own `env` on top. A session takes them when it's created
+(its retries and resumes get the same), and the names ARM sets itself (`PATH`, `HOME`, `CLAUDE_*`,
+`ARM_*`, …) are refused. None of it is secret: anyone with API access reads it back (secrets are
+in VISION).
+
 A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
 429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)
 says why and until when: `limited` until the limit resets, `unreachable` for a wait that doubles

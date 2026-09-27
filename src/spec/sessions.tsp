@@ -45,6 +45,19 @@ model CreateSession {
    * with source `timeout`. Unset: no timeout.
    */
   @minValue(1) timeoutSeconds?: int32;
+
+  /**
+   * Environment variables for the agent, on top of the registered ones (a name given here wins).
+   * Names as for registered variables (letters, digits, `_`; not reserved), else a 400. Not for
+   * secrets: they're returned with the session and in its events.
+   */
+  env?: Record<string>;
+
+  /**
+   * Registered environment variables that aren't `default` to give the agent too, by name (an
+   * unknown name is a 400). Their values are taken now, when the session is created.
+   */
+  useEnv?: string[];
 }
 
 /** A session: what it was created with (defaults resolved) and its lifecycle. */
@@ -62,6 +75,12 @@ model Session {
 
   /** Set when the session has a timeout. */
   timeoutSeconds?: int32;
+
+  /** The session's own `env`, as given (registered variables' values aren't repeated here). */
+  env?: Record<string>;
+
+  /** The registered, non-default environment variables it asked for, by name. */
+  useEnv?: string[];
 
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;

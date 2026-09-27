@@ -12,7 +12,7 @@ import {
 } from "@arm/client";
 import { send, unwrap } from "../api";
 import { UsageError } from "../errors";
-import { commaListOf, dateTime, integer, text, textOrDefault } from "../options";
+import { commaListOf, dateTime, integer, keyValues, repeated, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandContext, CommandGroup, OptionValues } from "../registry";
 
@@ -39,6 +39,8 @@ export function formatSession(s: Session): string {
     ["model", s.model],
     ["caller", s.caller],
     ["timeoutSeconds", s.timeoutSeconds],
+    ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
+    ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
     ["attempts", s.attempts],
     ["retriesLeft", s.retriesLeft],
     ["createdAt", s.createdAt],
@@ -89,6 +91,8 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
     model: textOrDefault(options, "model", ctx.settings.model ?? DEFAULT_MODEL),
     caller: textOrDefault(options, "caller", ctx.settings.caller ?? ctx.user),
     timeoutSeconds: integer(options, "timeout-seconds", { min: 1 }),
+    env: keyValues(options, "env"),
+    useEnv: repeated(options, "use-env"),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
@@ -127,6 +131,18 @@ export const sessionGroup: CommandGroup = {
           type: "string",
           description: "Repeating a key within 24h returns the original session instead of creating another",
           valueName: "KEY",
+        },
+        env: {
+          type: "string",
+          description: "An environment variable for the agent (not for secrets: it's shown with the session)",
+          valueName: "NAME=VALUE",
+          multiple: true,
+        },
+        "use-env": {
+          type: "string",
+          description: "A registered, non-default environment variable to give the agent (see `arm env list`)",
+          valueName: "NAME",
+          multiple: true,
         },
       },
       async run({ args, options, client, settings, user }) {

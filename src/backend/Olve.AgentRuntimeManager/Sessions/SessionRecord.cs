@@ -18,6 +18,18 @@ public sealed record SessionRecord
     /// <summary>Seconds it may run once started; null: no timeout.</summary>
     public int? TimeoutSeconds { get; init; }
 
+    /// <summary>The session's own environment variables, as given.</summary>
+    public IReadOnlyDictionary<string, string>? Env { get; init; }
+
+    /// <summary>The registered, non-default environment variables it asked for.</summary>
+    public IReadOnlyList<string>? UseEnv { get; init; }
+
+    /// <summary>
+    /// The environment its agent gets, resolved when the session was created: the registered
+    /// defaults, the ones it asked for, and its own (winning). Every launch, retry and resume uses it.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? AgentEnv { get; init; }
+
     /// <summary>How often its agent was started.</summary>
     public int Attempts { get; init; }
 

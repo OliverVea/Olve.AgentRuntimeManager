@@ -4,6 +4,7 @@ using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Health;
 using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Variables;
 using Olve.Utilities.AsyncOnStartup;
 
 var builder = WebApplication.CreateSlimBuilder(args);
@@ -15,6 +16,7 @@ builder.ConfigureTelemetry();
 builder.Services.AddEventServices(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddSessionServices(builder.Configuration);
+builder.Services.AddEnvServices();
 builder.Services.AddSingleton<IAuthConfigGetHandler, GetAuthConfigHandler>();
 builder.Services.AddSingleton<IServerInfoApiGetHandler, GetServerInfoHandler>();
 

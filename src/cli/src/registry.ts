@@ -8,6 +8,8 @@ export type OptionSpec = {
   description: string;
   /** Placeholder shown in help for string options, e.g. `N` in `--limit N`. */
   valueName?: string;
+  /** A string option that may be given more than once (`--env A=1 --env B=2`); its value is a list. */
+  multiple?: boolean;
 };
 
 export type ArgSpec = {
@@ -15,7 +17,7 @@ export type ArgSpec = {
   description: string;
 };
 
-export type OptionValues = Record<string, string | boolean | undefined>;
+export type OptionValues = Record<string, string | string[] | boolean | undefined>;
 
 export type CommandContext = {
   /** Positional arguments by name (all required). */

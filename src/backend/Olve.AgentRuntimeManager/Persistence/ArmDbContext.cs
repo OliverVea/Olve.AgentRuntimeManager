@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Variables;
 
 namespace Olve.AgentRuntimeManager.Persistence;
 
@@ -8,8 +9,13 @@ public sealed class ArmDbContext(DbContextOptions<ArmDbContext> options) : DbCon
 {
     public DbSet<SessionRecord> Sessions => Set<SessionRecord>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    public DbSet<EnvVariableRecord> EnvVariables => Set<EnvVariableRecord>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
         modelBuilder.ApplyConfiguration(new SessionRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new EnvVariableRecordConfiguration());
+    }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

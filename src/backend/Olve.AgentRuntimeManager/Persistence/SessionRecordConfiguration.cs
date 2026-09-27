@@ -15,6 +15,10 @@ public sealed class SessionRecordConfiguration : IEntityTypeConfiguration<Sessio
         session.Ignore(s => s.QueuePosition);
         session.Property(s => s.Status).HasConversion<string>();
         session.Property(s => s.KillSource).HasConversion<string>();
+        // Environment variables as JSON text: read and written whole, never queried.
+        session.Property(s => s.Env).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());
+        session.Property(s => s.UseEnv).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>());
+        session.Property(s => s.AgentEnv).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());
         session.HasIndex(s => s.CreatedAt);
         session.HasIndex(s => s.Status);
     }

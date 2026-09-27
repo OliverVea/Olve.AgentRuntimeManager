@@ -20,4 +20,6 @@ public sealed record SessionBody(
     string? Error,
     string? KillReason,
     string? KillSource,
-    string? KillCaller);
+    string? KillCaller,
+    IReadOnlyDictionary<string, string>? Env = null,
+    IReadOnlyList<string>? UseEnv = null);
