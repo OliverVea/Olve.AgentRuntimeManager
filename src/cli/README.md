@@ -87,6 +87,19 @@ file is. `ARM_HOME` moves the folder (default `~/.arm`).
 session either way (`status` and `queuePosition` tell them apart). `arm session list` pages newest
 first; its footer says which matches are shown and the `--offset` of the next page.
 
+## Environment variables
+
+`arm env set NAME VALUE [--default]` registers a variable agents get in their environment;
+`arm env list` shows them (name, value, whether it's `--default`, when it was last updated) and
+`arm env delete NAME` unregisters one. A `--default` variable goes to every agent; otherwise it
+only reaches sessions that ask for it by name with `arm session create --use-env NAME`. Where a
+session's own `--env NAME=VALUE` names the same variable, the session's value wins.
+
+Sessions take the registered values when they're created, so changing or deleting a variable later
+doesn't touch sessions that already exist. Names ARM sets for its agents itself (`PATH`, `HOME`,
+`CLAUDE_*`, `ARM_*`, …) are refused. Values aren't secret: anyone with API access reads them back,
+so don't register credentials this way.
+
 `arm events` tails `GET /api/events` (Hey API's SSE client) until Ctrl+C, which exits `0`. By
 default it prints one line per event (`12:03:04 session.created <sessionId> "prompt"`, local
 time; heartbeats hidden; `session.killed` shows `source=`, `caller=` when a user killed it, and
