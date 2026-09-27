@@ -206,9 +206,12 @@ Open question for Oliver: should a resume be visible (a `session.resumed` event,
 Built (`Olve.AgentRuntimeManager.Supervisor`, `Sessions/Supervision/`, `ClaudeProvider.Recover`,
 `SessionManager.Recover`), with the restart tests above (`ClaudeRecoveryTests`,
 `SessionManagerTests.Restart_*`). Checked by hand: the AOT binary from the image keeps serving
-after its file is deleted, and a second client replays the run from its start. Still to check on
-beta: `KillMode=process` with the preserved `RuntimeDirectory`, a session spanning a deploy, and
-whether a running `claude` re-executes itself by path.
+after its file is deleted, and a second client replays the run from its start. On beta
+(2026-09-27, release 20260927-090643): the deploy's Haiku check ran under a supervisor; a Haiku
+session with `systemctl restart olve-arm` 4 s into its turn kept its supervisor (`KillMode=process`,
+sockets in the preserved `/run/olve-arm`), was re-attached by the new server ("Recovered 1
+working"), and completed (attempt 1, exit 0). Not yet seen for real: the resume path (supervisor
+lost), and whether a running `claude` re-executes itself by path (the release-pruning case).
 
 Known limits:
 - Sessions working while the first release with supervisors deploys have no run id (their agent
