@@ -15,6 +15,9 @@ import * as auth from "./auth/oidc.js";
 import { escapeHtml } from "./base-element.js";
 import { SessionList, type View } from "./components/session-list.js";
 import { SessionPage } from "./components/session-page.js";
+import { EnvDialog } from "./env/env-dialog.js";
+import { EnvPanel } from "./env/env-panel.js";
+import { EnvRegistry } from "./env/env-registry.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
 import { parseModel, shortId } from "./sessions/format.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
@@ -32,6 +35,7 @@ const client = createApiClient(baseUrl, {
   onUnauthorized: auth.refresh,
 });
 const store = new SessionStore(client);
+const envRegistry = new EnvRegistry(client);
 let prefs: Prefs = loadPrefs();
 
 const $ = <E extends HTMLElement = HTMLElement>(selector: string) => {
@@ -178,11 +182,13 @@ function renderAuthState(): void {
   signedIn = now;
   if (now) {
     store.start();
+    void envRegistry.load();
     void loadServerInfo();
     fillComposer();
     route();
   } else {
     store.stop();
+    envRegistry.clear();
     $("#env").innerHTML = "";
     closeProviders();
   }
@@ -204,6 +210,20 @@ function toast(text: string, error = false): void {
 const prompt = $<HTMLTextAreaElement>("#prompt");
 const createButton = $<HTMLButtonElement>("#create");
 const fallbackCaller = () => userName() || "web";
+
+// The session's env (M5d): its own rows and the registered variables it picks, in a panel under
+// the row; the registered ones are managed in their own dialog, from Options.
+const envDialog = new EnvDialog($<HTMLDialogElement>("#env-dialog"), envRegistry);
+const envPanel = new EnvPanel($<HTMLButtonElement>("#env-toggle"), $("#env-panel"), envRegistry, {
+  manage: () => envDialog.open(),
+  change: updateCreate,
+});
+$("#manage-env").addEventListener("click", () => envDialog.open());
+
+/** Start needs a prompt and an env without problems. */
+function updateCreate(): void {
+  createButton.disabled = prompt.value.trim() === "" || envPanel.invalid;
+}
 
 function fillComposer(): void {
   $<HTMLInputElement>("#c-model").value = prefs.defaults.model;
@@ -227,7 +247,7 @@ $("#advanced").addEventListener("click", () => {
   toggle.textContent = open ? "Advanced ▴" : "Advanced ▾";
 });
 prompt.addEventListener("input", () => {
-  createButton.disabled = prompt.value.trim() === "";
+  updateCreate();
   fitPrompt();
 });
 prompt.addEventListener("keydown", (e) => {
@@ -246,10 +266,14 @@ async function create(): Promise<void> {
       model: $<HTMLInputElement>("#c-model").value,
       caller: $<HTMLInputElement>("#c-caller").value,
       timeout: $<HTMLInputElement>("#c-timeout").value,
+      env: envPanel.rows,
+      useEnv: envPanel.useEnv,
     },
     fallbackCaller(),
   );
   if (!parsed.ok) {
+    // Ctrl+Enter gets here past a disabled Start: show the flagged row.
+    if (envPanel.invalid && !envPanel.open) envPanel.setOpen(true);
     toast(parsed.problem, true);
     return;
   }
@@ -260,6 +284,7 @@ async function create(): Promise<void> {
     const session = await unwrap(sessionsGet({ client, path: { id } }));
     store.upsert(session);
     prompt.value = "";
+    envPanel.clear();
     fitPrompt();
     fillComposer();
     setView("overview");
@@ -271,7 +296,7 @@ async function create(): Promise<void> {
   } catch (error) {
     toast(describeError(error), true);
   }
-  createButton.disabled = prompt.value.trim() === "";
+  updateCreate();
 }
 
 // --- views ---------------------------------------------------------------------------------------
