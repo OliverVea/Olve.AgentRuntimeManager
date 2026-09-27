@@ -33,6 +33,9 @@ re-evaluated and scoped when it's picked up.
   kept in a k8s Secret per environment the way Olve.Pipelines keeps pipeline secrets (the VM
   reaching k3s with a ServiceAccount token scoped to that one Secret).
 - **Streaming text**: `session.text` deltas for token-by-token rendering.
+- **Revive** (moved here from M11 on 2026-09-27: a message already continues an ended session in
+  place): a new, independent session seeded with an ended one's conversation, with its own tools,
+  skills and policy (`arm session revive <id> -p "follow-up"`, `session.revived`).
 - **Sleeping sessions**: a session that pauses and wakes up later, as the same session, instead
   of dying. The motivating case: sessions waiting for an approval when you clock out sit for
   hours, hit their timeout and die before you're back. Instead, a session that has waited long

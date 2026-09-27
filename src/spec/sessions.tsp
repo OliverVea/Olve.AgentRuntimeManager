@@ -267,3 +267,46 @@ model SessionKilled {
   /** The `caller` of the kill request. Set when `source` is `user`. */
   caller?: string;
 }
+
+/** A message to a session's agent (M11). */
+model SendMessage {
+  /** What to tell the agent. Must not be blank. */
+  @minLength(1) text: string;
+
+  /** Who sends it. Free text, like a session's `caller`. */
+  @minLength(1) caller: string;
+}
+
+/** What became of a message. */
+enum MessageDelivery {
+  /** The agent is working: it got the message now, and sees it after its current step. */
+  delivered,
+
+  /** The session is queued: the message is held, and its agent gets it when it starts (after the prompt). */
+  pending,
+
+  /**
+   * The session had ended (completed, failed or killed): it continues, back to `queued`, and the
+   * message is what its agent is told next, with the rest of the conversation still in mind.
+   */
+  continued,
+}
+
+model SentMessage {
+  delivery: MessageDelivery;
+}
+
+@route("/sessions/{id}/messages")
+interface SessionMessages {
+  /**
+   * Sends a message to the session's agent: delivered at once while it works, held until it starts
+   * while it's queued, or the session continues with it once it has ended. A session cancelled
+   * before it ever started has no agent to continue: a 409.
+   */
+  @post send(...SessionId, @body body: SendMessage):
+    | (AcceptedResponse & { @body body: SentMessage })
+    | BadRequest
+    | NotFound
+    | Conflict
+    | UnauthorizedResponse;
+}
