@@ -96,6 +96,6 @@ public static class ClaudeStreamJson
     private static int? Number(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
 
-    private static string? Text(JsonNode? node) =>
+    internal static string? Text(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 }

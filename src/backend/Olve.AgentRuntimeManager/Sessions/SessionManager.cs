@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Events;
+using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 
 namespace Olve.AgentRuntimeManager.Sessions;
@@ -213,6 +214,18 @@ public sealed class SessionManager : IDisposable
         }
 
         return _store.Get(id);
+    }
+
+    /// <summary>A session's conversation, from its provider; null if there's no such session.</summary>
+    public IReadOnlyList<ConversationEntryRecord>? Conversation(Guid id)
+    {
+        if (Get(id) is not { } session)
+        {
+            return null;
+        }
+
+        // A provider no longer configured has nothing to read it from.
+        return _providers.TryGetValue(session.Provider, out var provider) ? provider.Conversation(id) : [];
     }
 
     /// <summary>Sessions matching every given filter, newest first, one page at a time.</summary>

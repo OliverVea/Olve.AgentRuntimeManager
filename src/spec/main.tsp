@@ -4,6 +4,7 @@ import "./errors.tsp";
 import "./auth-config.tsp";
 import "./server-info.tsp";
 import "./sessions.tsp";
+import "./conversation.tsp";
 import "./providers.tsp";
 import "./env.tsp";
 import "./events.tsp";

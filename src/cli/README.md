@@ -13,6 +13,7 @@ arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-s
                    [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
+arm session conversation <id>
 arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>
 

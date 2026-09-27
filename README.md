@@ -86,6 +86,13 @@ output (the agent's answer included) is kept in `<WorkRoot>/<session id>/output.
 conversation is in the API (M5b). It uses the machine's Claude Code login (or
 `CLAUDE_CODE_OAUTH_TOKEN`); tests run it against a stub CLI replaying recorded output.
 
+`GET /api/sessions/{id}/conversation` (`arm session conversation <id>`) is a session's transcript
+(`Sessions/Conversations/`): every entry in order, numbered by `seq` (prompts, the agent's text and
+thinking, tool calls and results, each turn's end; a subagent's entries carry `parentToolId`), plus
+counts. Its provider reads it on request: `claude` from the session's `output.jsonl` (agents run with
+`--replay-user-messages`, so what they're told is in it too), `fake` from memory, scripted with
+`fake:say=…` and `fake:tool=…`.
+
 Agents get environment variables (`Variables/`): ones registered in ARM (`GET/PUT/DELETE
 /api/env/{name}`, `arm env`), the `default` ones for every agent and the others when a session
 names them (`useEnv`), plus the session's own `env` on top. A session takes them when it's created

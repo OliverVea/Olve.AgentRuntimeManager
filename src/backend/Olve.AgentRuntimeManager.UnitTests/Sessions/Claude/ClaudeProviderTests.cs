@@ -65,6 +65,7 @@ public class ClaudeProviderTests
         string[] expected =
         [
             "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+            "--replay-user-messages",
             "--session-id", launch.SessionId.ToString(),
             "--permission-mode", "bypassPermissions",
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",

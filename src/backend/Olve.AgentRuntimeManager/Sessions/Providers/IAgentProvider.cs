@@ -1,3 +1,5 @@
+using Olve.AgentRuntimeManager.Sessions.Conversations;
+
 namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
 /// <summary>
@@ -29,4 +31,10 @@ public interface IAgentProvider
     /// session is then killed). Called once per session at startup, not under the runtime's lock.
     /// </summary>
     RecoveredAgent? Recover(AgentRecovery recovery) => null;
+
+    /// <summary>
+    /// A session's conversation so far, in order (M5b): every attempt and resume of its agent.
+    /// Entries never change or move, so their positions are stable. Empty when there's none.
+    /// </summary>
+    IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId) => [];
 }

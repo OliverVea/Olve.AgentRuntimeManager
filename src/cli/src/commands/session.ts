@@ -1,4 +1,5 @@
 import {
+  sessionConversationGet,
   sessionsCreate,
   sessionsDelete,
   sessionsGet,
@@ -15,6 +16,7 @@ import { UsageError } from "../errors";
 import { commaListOf, dateTime, integer, keyValues, repeated, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandContext, CommandGroup, OptionValues } from "../registry";
+import { formatConversation } from "./conversation";
 
 /** Every session status (typed, so a status added to the contract fails to compile here). */
 const statusSet: Record<SessionStatus, true> = {
@@ -181,6 +183,16 @@ export const sessionGroup: CommandGroup = {
       async run({ args, client }) {
         const session = await unwrap(sessionsGet({ client, path: { id: args.id! } }), client);
         return { json: session, pretty: formatSession(session) };
+      },
+    },
+    {
+      name: "conversation",
+      summary: "Show a session's conversation: what its agent was told and did, in order",
+      args: [idArg],
+      options: {},
+      async run({ args, client }) {
+        const conversation = await unwrap(sessionConversationGet({ client, path: { id: args.id! } }), client);
+        return { json: conversation, pretty: formatConversation(conversation) };
       },
     },
     {

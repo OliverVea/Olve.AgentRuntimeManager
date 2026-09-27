@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
+using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
@@ -65,6 +66,13 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
         var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], ResumePrompt, recovery.Env);
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
+    }
+
+    /// <summary>The session's conversation, read from its raw output (every attempt and resume, in order).</summary>
+    public IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId)
+    {
+        var output = Path.Combine(Folder(options.Value, sessionId), SupervisorFiles.Output);
+        return File.Exists(output) ? ClaudeConversation.Read(SupervisedAgent.ReadLines(output, 0)) : [];
     }
 
     /// <summary>
@@ -141,6 +149,8 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         List<string> arguments =
         [
             "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+            // What it's told goes into its output too, so the conversation (M5b) has it.
+            "--replay-user-messages",
             // --session-id: ARM's session id on the first attempt, a new one on a retry (Claude keeps
             // the failed attempt's); --resume: the session it continues.
             .. session,
