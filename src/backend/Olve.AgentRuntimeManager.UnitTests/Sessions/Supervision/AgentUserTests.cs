@@ -147,10 +147,11 @@ public class AgentUserTests
         }), NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
 
-        supervisors.KillOrphan(Info(sleeper.Id, sleeper.Id));
+        var gone = supervisors.KillOrphan(Info(sleeper.Id, sleeper.Id));
 
         await Task.Delay(200);
         await Assert.That(sleeper.HasExited).IsFalse();
+        await Assert.That(gone).IsFalse();
     }
 
     [Test]
@@ -164,10 +165,75 @@ public class AgentUserTests
             NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
 
-        supervisors.KillOrphan(supervisorPidZero ? Info(0, sleeper.Id) : Info(sleeper.Id, 1));
+        var gone = supervisors.KillOrphan(supervisorPidZero ? Info(0, sleeper.Id) : Info(sleeper.Id, 1));
 
         await Task.Delay(200);
         await Assert.That(sleeper.HasExited).IsFalse();
+        // Nothing checked, so an agent may still run.
+        await Assert.That(gone).IsFalse();
+    }
+
+    [Test]
+    public async Task SupervisorLost_OrphanCantBeKilled_FailsTheSession_InsteadOfResuming()
+    {
+        // As an agent from before the agent user would be: the kill as that user can't reach it.
+        var account = OwnAccount();
+        var (first, provider) = Server(account);
+        var launch = Launch("stub:gate");
+        _ = provider.Start(launch);
+        await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null && File.Exists(Path.Combine(Folder(launch), "work", "prompt.jsonl")));
+        first.Dispose();
+        var info = SupervisorFiles.ReadInfo(Folder(launch))!;
+        Posix.Kill(info.SupervisorPid, Posix.SigKill);
+        var (second, recovering) = Server(account, sudo: "/bin/false");
+        await Until(() => !second.IsListening(launch.SessionId));
+        try
+        {
+            var recovery = new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, launch.ProviderSessionId.ToString(), launch.RunId, Guid.NewGuid());
+
+            var recovered = recovering.Recover(recovery)!;
+
+            await Assert.That(recovered.Resumed).IsFalse();
+            await Assert.That(await recovered.Run.Completion.WaitAsync(Guard)).IsEqualTo(new AgentOutcome.Failed(ClaudeProvider.OrphanAlive));
+            await Assert.That(Posix.StartTime(info.AgentPid)).IsEqualTo(info.AgentStartTime);
+            await Assert.That(SupervisorFiles.ReadInfo(Folder(launch))!.RunId).IsEqualTo(launch.RunId);
+        }
+        finally
+        {
+            Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+        }
+    }
+
+    [Test]
+    public async Task KillCommand_AProcessItCantSignal_ExitsNonZero()
+    {
+        Skip.When(Posix.GetEUid() == 0, "As root it could signal anything: this would kill a real process.");
+        var root = Directory.GetDirectories("/proc").Select(d => int.TryParse(Path.GetFileName(d), out var pid) ? pid : 0)
+            .First(pid => pid > 1 && OwnerUid(pid) == 0);
+
+        using var kill = Process.Start(new ProcessStartInfo(Supervisor, ["kill", root.ToString(System.Globalization.CultureInfo.InvariantCulture), root.ToString(System.Globalization.CultureInfo.InvariantCulture)])
+        {
+            RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false,
+        })!;
+        kill.StandardInput.Close();
+        var error = await kill.StandardError.ReadToEndAsync().WaitAsync(Guard);
+        await kill.WaitForExitAsync().WaitAsync(Guard);
+
+        await Assert.That(kill.ExitCode).IsEqualTo(1);
+        await Assert.That(error).Contains("could not signal");
+
+        static int? OwnerUid(int pid)
+        {
+            try
+            {
+                var line = File.ReadLines($"/proc/{pid}/status").FirstOrDefault(l => l.StartsWith("Uid:", StringComparison.Ordinal));
+                return line is null ? null : int.Parse(line.Split('\t', StringSplitOptions.RemoveEmptyEntries)[1], System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
     }
 
     [Test]
@@ -320,11 +386,11 @@ public class AgentUserTests
     }
 
     /// <summary>A server whose agents run as <paramref name="account"/>, through the sudo stub.</summary>
-    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account)
+    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account, string? sudo = null)
     {
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions
         {
-            SocketRoot = Path.Combine(_root, "sockets"), User = account.Name, Sudo = SudoStub(),
+            SocketRoot = Path.Combine(_root, "sockets"), User = account.Name, Sudo = sudo ?? SudoStub(),
         }), NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };

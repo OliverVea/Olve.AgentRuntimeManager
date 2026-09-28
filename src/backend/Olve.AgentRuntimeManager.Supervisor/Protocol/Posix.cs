@@ -21,6 +21,18 @@ public static partial class Posix
     [LibraryImport("libc", EntryPoint = "kill", SetLastError = true)]
     public static partial int Kill(int pid, int signal);
 
+    /// <summary>
+    /// Sends <paramref name="signal"/> to <paramref name="pid"/> (a process group when negative):
+    /// true if it was sent or there's no such process (any more); false otherwise, with the errno
+    /// (EPERM: a process of another user).
+    /// </summary>
+    public static bool SignalOrGone(int pid, int signal, out int error)
+    {
+        const int noSuchProcess = 3;
+        error = Kill(pid, signal) == 0 ? 0 : Marshal.GetLastPInvokeError();
+        return error is 0 or noSuchProcess;
+    }
+
     [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
     public static partial int Close(int fd);
 

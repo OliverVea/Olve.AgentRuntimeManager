@@ -22,6 +22,13 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
     public const string ResumePrompt =
         "ARM restarted while you were working. Continue where you left off; if you were in the middle of a tool call, check its effect before repeating it.";
 
+    /// <summary>
+    /// Why a session whose supervisor was lost fails instead of resuming: its agent may still run
+    /// (e.g. one from before the agent user, docs/AGENT-USER.md), and a second must not join it.
+    /// </summary>
+    public const string OrphanAlive =
+        "ARM restarted and lost this session's supervisor, and its agent may still be running (it could not be killed), so it was not resumed.";
+
     /// <summary>Environment variables passed through to the agent; everything else is withheld (A5b).</summary>
     private static readonly string[] PassedThrough = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "CLAUDE_CODE_OAUTH_TOKEN"];
 
@@ -63,12 +70,20 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
         if (SupervisorFiles.ReadInfo(folder) is { } info && info.RunId == recovery.RunId)
         {
-            supervisors.KillOrphan(info);
+            var orphanGone = supervisors.KillOrphan(info);
             var output = Path.Combine(folder, SupervisorFiles.Output);
             if (File.Exists(output) && ClaudeStreamJson.TurnSucceeded(SupervisedAgent.ReadLines(output, info.OutputStart)))
             {
                 logger.LogInformation("Session {SessionId}: run {RunId} finished its turn while no server was watching", recovery.SessionId, recovery.RunId);
                 return new RecoveredAgent(new EndedRun(recovery.ProviderSessionId, new AgentOutcome.Completed(0)), Resumed: false);
+            }
+
+            if (!orphanGone)
+            {
+                // Resuming would put a second agent on the Claude session.
+                logger.LogError("Session {SessionId}: run {RunId}'s agent may still be running and could not be killed; not resuming",
+                    recovery.SessionId, recovery.RunId);
+                return new RecoveredAgent(new EndedRun(recovery.ProviderSessionId, new AgentOutcome.Failed(OrphanAlive)), Resumed: false);
             }
         }
 

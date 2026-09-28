@@ -148,41 +148,43 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <summary>
     /// Kills what's left of a run whose supervisor is gone: its agent, if the pid still names the
     /// same process, together with the process group it ran in. Two agents on one provider session
-    /// must never run.
+    /// must never run: false when an agent may still be running (it couldn't be killed, or
+    /// <paramref name="info"/> names no process to check), so the caller mustn't start another.
     /// </summary>
     /// <remarks>
     /// <paramref name="info"/> is <c>supervisor.json</c>, which an agent running as its own user can
     /// write (docs/AGENT-USER.md): so no pid of 1 or less (0 is this process's group, -1 every
     /// process of this user), and with an agent user the signals are sent as that user only, so
-    /// whatever pids it names, nothing of ARM's user is hit.
+    /// whatever pids it names, nothing of ARM's user is hit. An agent from before the agent user
+    /// (ARM's user) is then one that can't be killed.
     /// </remarks>
-    public void KillOrphan(SupervisorInfo info)
+    public bool KillOrphan(SupervisorInfo info)
     {
         if (info.SupervisorPid <= 1 || info.AgentPid <= 1)
         {
             logger.LogWarning("Run {RunId}: its supervisor.json names no process to kill ({SupervisorPid}, {AgentPid})",
                 info.RunId, info.SupervisorPid, info.AgentPid);
-            return;
+            return false;
         }
 
         if (Posix.StartTime(info.AgentPid) is not { } startTime || startTime != info.AgentStartTime)
         {
-            return;
+            return true;
         }
 
         logger.LogWarning("Run {RunId}: killing its orphaned agent {Pid}", info.RunId, info.AgentPid);
         if (_account.Value is { } account)
         {
             // Only that user can signal its processes, so the supervisor does it as that user.
-            KillAsAgentUser(account, info);
-            return;
+            return KillAsAgentUser(account, info);
         }
 
         Posix.Kill(-info.SupervisorPid, Posix.SigKill);
         Posix.Kill(info.AgentPid, Posix.SigKill);
+        return true;
     }
 
-    private void KillAsAgentUser(AgentAccount account, SupervisorInfo info)
+    private bool KillAsAgentUser(AgentAccount account, SupervisorInfo info)
     {
         var settings = options.Value;
         var start = StartInfo(settings, account,
@@ -196,16 +198,22 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             {
                 process.Kill();
                 logger.LogError("Run {RunId}: killing its orphaned agent as {User} timed out", info.RunId, account.Name);
+                return false;
             }
-            else if (process.ExitCode != 0)
+
+            if (process.ExitCode != 0)
             {
                 logger.LogError("Run {RunId}: killing its orphaned agent as {User} failed ({ExitCode}): {Error}",
                     info.RunId, account.Name, process.ExitCode, error.Result.Trim());
+                return false;
             }
+
+            return true;
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             logger.LogError(exception, "Run {RunId}: could not kill its orphaned agent as {User}", info.RunId, account.Name);
+            return false;
         }
     }
 

@@ -7,7 +7,7 @@ using Olve.AgentRuntimeManager.Supervisor.Protocol;
 // runs the agent and serves the session's socket until the agent has ended.
 // `olve-arm-supervisor kill <process group> <pid>`: SIGKILLs an orphaned run's process group and
 // agent, for an ARM whose agents run as another user (docs/AGENT-USER.md): ARM runs this as that
-// user, so it can signal exactly what that user can.
+// user, so it can signal exactly what that user can. Exit code 1: something there that it couldn't signal.
 // Unix only: sockets and file modes, setsid, process groups (ARM runs on Linux).
 if (OperatingSystem.IsWindows())
 {
@@ -25,8 +25,16 @@ if (args is ["kill", ..])
         return 2;
     }
 
-    Posix.Kill(-groupId, Posix.SigKill);
-    Posix.Kill(agentPid, Posix.SigKill);
+    // Gone already is fine; anything else (EPERM: a process of another user, e.g. an agent from
+    // before the agent user) means it may still run, and ARM must not start a second one.
+    var groupGone = Posix.SignalOrGone(-groupId, Posix.SigKill, out var groupError);
+    var agentGone = Posix.SignalOrGone(agentPid, Posix.SigKill, out var agentError);
+    if (!groupGone || !agentGone)
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: could not signal process group {groupId} (errno {groupError}) or pid {agentPid} (errno {agentError}).");
+        return 1;
+    }
+
     return 0;
 }
 
