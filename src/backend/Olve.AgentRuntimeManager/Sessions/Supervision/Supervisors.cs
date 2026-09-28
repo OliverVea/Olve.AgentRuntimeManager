@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -22,8 +23,12 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <summary>Environment the supervisor itself gets: only what a framework-dependent build needs to find .NET.</summary>
     private static readonly string[] SupervisorEnvironment = ["DOTNET_ROOT", "DOTNET_ROOT_X64"];
 
+    /// <summary>The configured agent user's account, looked up once (null: agents run as ARM's own user).</summary>
+    private readonly Lazy<AgentAccount?> _account = new(() => AgentAccount.Find(options.Value.User));
+
     /// <summary>
-    /// Starts a supervisor running <paramref name="command"/> for a run, with <paramref name="input"/>
+    /// Starts a supervisor running <paramref name="command"/> for a run in <paramref name="workingDirectory"/>
+    /// (made here if it's new, or with an agent user by the supervisor, so it's that user's), with <paramref name="input"/>
     /// as the agent's first input. Doesn't wait for it: the launch goes to its stdin (a small pipe
     /// write), and the returned agent connects in the background.
     /// </summary>
@@ -32,25 +37,39 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     {
         var settings = options.Value;
         var socketPath = SocketPath(sessionId);
+        var account = _account.Value;
+        if (account is null)
+        {
+            Directory.CreateDirectory(workingDirectory);
+        }
+        else
+        {
+            // The supervisor writes the session's files and the agent its work: both as the agent user.
+            // A new workplace the supervisor makes itself; one from before the agent user is ARM's.
+            ShareWithAgent(folder);
+            if (Directory.Exists(workingDirectory))
+            {
+                ShareWithAgent(workingDirectory);
+            }
+        }
+
         var launch = new SupervisorLaunch
         {
             Version = SupervisorProtocol.Version,
             RunId = runId,
             Command = command,
             Arguments = arguments,
-            Environment = environment,
+            Environment = account is null ? environment : account.Identify(environment),
             WorkingDirectory = workingDirectory,
             Input = input,
             Folder = folder,
             SocketPath = socketPath,
+            ClientUid = Posix.GetEUid(),
         };
 
-        var info = new ProcessStartInfo(Command(settings))
-        {
-            WorkingDirectory = folder,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
+        var info = StartInfo(settings, account, [Command(settings)]);
+        info.WorkingDirectory = folder;
+        info.RedirectStandardInput = true;
         info.Environment.Clear();
         foreach (var name in SupervisorEnvironment)
         {
@@ -129,18 +148,128 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <summary>
     /// Kills what's left of a run whose supervisor is gone: its agent, if the pid still names the
     /// same process, together with the process group it ran in. Two agents on one provider session
-    /// must never run.
+    /// must never run: false when an agent may still be running (it couldn't be killed, or
+    /// <paramref name="info"/> names no process to check), so the caller mustn't start another.
     /// </summary>
-    public void KillOrphan(SupervisorInfo info)
+    /// <remarks>
+    /// <paramref name="info"/> is <c>supervisor.json</c>, which an agent running as its own user can
+    /// write (docs/AGENT-USER.md): so no pid of 1 or less (0 is this process's group, -1 every
+    /// process of this user), and with an agent user the signals are sent as that user only, so
+    /// whatever pids it names, nothing of ARM's user is hit. An agent from before the agent user
+    /// (ARM's user) is then one that can't be killed.
+    /// </remarks>
+    public bool KillOrphan(SupervisorInfo info)
     {
+        if (info.SupervisorPid <= 1 || info.AgentPid <= 1)
+        {
+            logger.LogWarning("Run {RunId}: its supervisor.json names no process to kill ({SupervisorPid}, {AgentPid})",
+                info.RunId, info.SupervisorPid, info.AgentPid);
+            return false;
+        }
+
         if (Posix.StartTime(info.AgentPid) is not { } startTime || startTime != info.AgentStartTime)
+        {
+            return true;
+        }
+
+        logger.LogWarning("Run {RunId}: killing its orphaned agent {Pid}", info.RunId, info.AgentPid);
+        if (_account.Value is { } account)
+        {
+            // Only that user can signal its processes, so the supervisor does it as that user.
+            return KillAsAgentUser(account, info);
+        }
+
+        Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+        Posix.Kill(info.AgentPid, Posix.SigKill);
+        return true;
+    }
+
+    private bool KillAsAgentUser(AgentAccount account, SupervisorInfo info)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, account,
+            [Command(settings), "kill", info.SupervisorPid.ToString(CultureInfo.InvariantCulture), info.AgentPid.ToString(CultureInfo.InvariantCulture)]);
+        start.RedirectStandardError = true;
+        try
+        {
+            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(settings.ConnectTimeout))
+            {
+                process.Kill();
+                logger.LogError("Run {RunId}: killing its orphaned agent as {User} timed out", info.RunId, account.Name);
+                return false;
+            }
+
+            if (process.ExitCode != 0)
+            {
+                logger.LogError("Run {RunId}: killing its orphaned agent as {User} failed ({ExitCode}): {Error}",
+                    info.RunId, account.Name, process.ExitCode, error.Result.Trim());
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogError(exception, "Run {RunId}: could not kill its orphaned agent as {User}", info.RunId, account.Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):
+    /// directly, or as the agent user through <c>sudo -n -u &lt;user&gt; --</c> (non-interactive:
+    /// a missing sudoers rule fails at once instead of waiting for a password).
+    /// </summary>
+    private static ProcessStartInfo StartInfo(SupervisorOptions settings, AgentAccount? account, IReadOnlyList<string> arguments)
+    {
+        var info = new ProcessStartInfo(account is null ? arguments[0] : settings.Sudo) { UseShellExecute = false };
+        if (account is not null)
+        {
+            foreach (var argument in (string[])["-n", "-u", account.Name, "--", arguments[0]])
+            {
+                info.ArgumentList.Add(argument);
+            }
+        }
+
+        foreach (var argument in arguments.Skip(1))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        return info;
+    }
+
+    /// <summary>
+    /// Lets the agent user's group (which ARM is in) write <paramref name="directory"/>, and what's
+    /// created in it inherit the group (setgid); the group itself comes from the work root's setgid.
+    /// </summary>
+    private static void ShareWithAgent(string directory)
+    {
+        if (OperatingSystem.IsWindows())
         {
             return;
         }
 
-        logger.LogWarning("Run {RunId}: killing its orphaned agent {Pid}", info.RunId, info.AgentPid);
-        Posix.Kill(-info.SupervisorPid, Posix.SigKill);
-        Posix.Kill(info.AgentPid, Posix.SigKill);
+        // The agent can write the session's folder: a link it put there must not make ARM share its
+        // target. Opened without following one, and changed through that handle (no check-then-use).
+        using var handle = Posix.OpenNoFollow(directory, directory: true)
+            ?? throw new InvalidOperationException($"'{directory}' is a link or missing, not the session's own folder.");
+        const UnixFileMode shared = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup;
+        var mode = File.GetUnixFileMode(handle);
+        if ((mode & shared) != shared)
+        {
+            try
+            {
+                File.SetUnixFileMode(handle, mode | shared);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Not ARM's: a workplace the agent's supervisor made, and the agent changed. Its own business.
+            }
+        }
     }
 
     public string SocketPath(Guid sessionId) => Path.Combine(SocketRoot(options.Value), $"{sessionId}.sock");

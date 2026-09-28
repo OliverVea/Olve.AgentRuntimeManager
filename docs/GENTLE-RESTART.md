@@ -146,8 +146,10 @@ providerSessionId), returning a run for cases 1–4 or null for 5. The default r
 
 - **No secrets on disk.** `supervisor.json` never stores argv or env: the env carries
   `CLAUDE_CODE_OAUTH_TOKEN` (and later `secretEnv`).
-- **Sockets in a runtime dir.** Not a security boundary: agents run as ARM's uid, so any path
-  ARM can reach, a tool-using agent (M8/M10) can too; that's the sandboxing question, not M5a.
+- **Sockets in a runtime dir.** Not a security boundary: agents ran as ARM's uid, so any path
+  ARM can reach, a tool-using agent (M8/M10) could too; that's the sandboxing question, not M5a.
+  (Since [AGENT-USER.md](AGENT-USER.md) agents and their supervisors run as their own user, and a
+  supervisor only takes connections from ARM's uid.)
   The reasons are that `/run` is cleared on reboot and paths stay short. Sockets go under
   `Supervisor:SocketRoot`: on the VMs
   `/run/olve-arm/supervisors` (systemd `RuntimeDirectory=olve-arm` with
