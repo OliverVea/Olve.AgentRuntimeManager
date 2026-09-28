@@ -27,12 +27,4 @@ public sealed record SupervisorLaunch
     public required string Folder { get; init; }
 
     public required string SocketPath { get; init; }
-
-    /// <summary>
-    /// The only user allowed on the socket (ARM's; checked with <c>SO_PEERCRED</c>). Agents may run as
-    /// another user than ARM (docs/AGENT-USER.md), and the socket is then shared with ARM's group:
-    /// this keeps one agent from attaching to another session's supervisor. Unset: anyone who can
-    /// open the socket (a launch from before this field).
-    /// </summary>
-    public int? ClientUid { get; init; }
 }

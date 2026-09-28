@@ -32,9 +32,7 @@ public static class SupervisorFiles
     {
         try
         {
-            // Not through a link: the folder is the agent's to write (docs/AGENT-USER.md).
-            using var file = Posix.OpenRegularFile(path);
-            return file is null ? null : JsonSerializer.Deserialize(file, type);
+            return JsonSerializer.Deserialize(File.ReadAllBytes(path), type);
         }
         catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
         {

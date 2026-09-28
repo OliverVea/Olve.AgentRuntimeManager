@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Text;
@@ -42,7 +41,6 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
         try
         {
-            CreateWorkingDirectory();
             _agent = Process.Start(StartInfo()) ?? throw new InvalidOperationException($"'{launch.Command}' did not start.");
         }
         catch (Exception exception)
@@ -134,23 +132,6 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         }
     }
 
-    /// <summary>
-    /// Makes the agent's working directory if it's new, as the agent's user: its own, so git trusts
-    /// a repository right in it (docs/AGENT-USER.md). Shared with the group, as ARM shares the session's folder.
-    /// </summary>
-    private void CreateWorkingDirectory()
-    {
-        if (Directory.Exists(launch.WorkingDirectory))
-        {
-            return;
-        }
-
-        Directory.CreateDirectory(launch.WorkingDirectory);
-        File.SetUnixFileMode(launch.WorkingDirectory, File.GetUnixFileMode(launch.WorkingDirectory)
-            | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup);
-    }
-
     private ProcessStartInfo StartInfo()
     {
         var info = new ProcessStartInfo(launch.Command)
@@ -185,9 +166,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         File.Delete(launch.SocketPath);
         var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         listener.Bind(new UnixDomainSocketEndPoint(launch.SocketPath));
-        // The group too: an agent running as its own user (docs/AGENT-USER.md) has ARM in its group.
-        // Who may talk on it is checked per connection (ClientUid).
-        File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
+        File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         listener.Listen(4);
         return listener;
     }
@@ -205,13 +184,6 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             catch (Exception exception) when (exception is OperationCanceledException or SocketException or ObjectDisposedException)
             {
                 return;
-            }
-
-            if (launch.ClientUid is { } allowed && OperatingSystem.IsLinux() && Posix.PeerUid(socket) is var peer && peer != allowed)
-            {
-                _log.Write($"run {launch.RunId}: refused a connection from user {peer?.ToString(CultureInfo.InvariantCulture) ?? "?"}");
-                socket.Dispose();
-                continue;
             }
 
             var connection = new ArmConnection(socket, this, _log);

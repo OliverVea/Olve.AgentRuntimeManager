@@ -62,12 +62,7 @@ public sealed class SupervisedAgent
     {
         try
         {
-            using var file = Posix.OpenRegularFile(Path.Combine(_folder, SupervisorFiles.Stderr));
-            if (file is null)
-            {
-                return "";
-            }
-
+            using var file = new FileStream(Path.Combine(_folder, SupervisorFiles.Stderr), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var start = Math.Max(_stderrStart ?? 0, file.Length - (length * 4L));
             file.Seek(start, SeekOrigin.Begin);
             using var reader = new StreamReader(file, Utf8);
@@ -262,18 +257,10 @@ public sealed class SupervisedAgent
         _exit.TrySetException(new SupervisorLostException(error));
     }
 
-    /// <summary>
-    /// The complete lines of a file from a byte offset on; none if it's missing or not a regular
-    /// file of its own (a link, a FIFO: the folder is the agent's to write, docs/AGENT-USER.md).
-    /// </summary>
+    /// <summary>The complete lines of a file from a byte offset on.</summary>
     internal static IEnumerable<string> ReadLines(string path, long offset)
     {
-        using var file = Posix.OpenRegularFile(path);
-        if (file is null || offset < 0)
-        {
-            return [];
-        }
-
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         file.Seek(offset, SeekOrigin.Begin);
         using var reader = new StreamReader(file, Utf8);
         var text = reader.ReadToEnd();

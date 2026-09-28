@@ -15,18 +15,6 @@ public sealed class SupervisorOptions
     /// </summary>
     public string SocketRoot { get; set; } = "";
 
-    /// <summary>
-    /// The user the supervisors, and with them the agents, run as (docs/AGENT-USER.md). Empty: ARM's
-    /// own user, as in local dev and tests. Set: ARM starts each supervisor with
-    /// <c>sudo -n -u &lt;user&gt;</c>, which needs a sudoers rule for exactly the supervisor, and ARM a
-    /// member of the user's group, which must own the sessions' work root and socket root (setgid).
-    /// The deployment sets this up (src/deploy/vm/vm-deploy.sh).
-    /// </summary>
-    public string User { get; set; } = "";
-
-    /// <summary>The <c>sudo</c> that starts supervisors as <see cref="User"/> (a name on <c>PATH</c>, or a path).</summary>
-    public string Sudo { get; set; } = "sudo";
-
     /// <summary>How long a new supervisor may take to answer, and how long a lost one is waited for.</summary>
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(10);
 }

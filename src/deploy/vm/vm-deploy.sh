@@ -14,11 +14,9 @@
 #    autostart (libvirt `default` NAT network)
 # 2. extract /app from the image tarball (the same self-contained publish the container ships)
 # 3. ensure that Claude Code version in the VM (/opt/olve-arm/claude/<version>, uploaded once)
-# 4. ensure the agent user (arm-agent): agents run as their own unprivileged user, not as `arm`
-#    (docs/AGENT-USER.md); the first run also moves what agents had as `arm` over to it
-# 5. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
+# 4. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
 #    Code (so a release rolls back with its own), point `current` at it, restart the service
-# 6. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
+# 5. ensure the host relay: <Tailscale IP>:<port> → VM:5000 (systemd socket + socket-proxyd).
 #    Pods can't open NEW connections into libvirt's NAT network, so the Olve.Homelab route
 #    targets this relay via `hostEndpoint` instead of the VM directly.
 set -euo pipefail
@@ -95,30 +93,16 @@ wait_for_vm() {
   $SSH_VM "cloud-init status --wait >/dev/null; test -d /opt/olve-arm/releases"
 }
 
-# A private folder in the VM to upload to (arm's home, 0700), for what root installs from there:
-# the VM's /tmp is shared with the agent user, who could take those names first.
-vm_stage() {
-  $SSH_VM 'mktemp -d "$HOME/.deploy.XXXXXX"'
-}
-
 ensure_claude() {
   [ -n "$CLAUDE_VERSION" ] || { log "no Claude Code in this bundle"; return; }
   local dir=/opt/olve-arm/claude/$CLAUDE_VERSION
   if $SSH_VM "test -x $dir/claude"; then return; fi
   log "installing Claude Code $CLAUDE_VERSION"
-  local stage
-  stage=$(vm_stage)
   scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    "$CLAUDE_DIR/claude" "arm@$IP:$stage/claude"
+    "$CLAUDE_DIR/claude" "arm@$IP:/tmp/claude"
   $SSH_VM "set -e
-    mkdir -p $dir && install -m 0755 $stage/claude $dir/claude && rm -rf $stage
+    mkdir -p $dir && install -m 0755 /tmp/claude $dir/claude && rm -f /tmp/claude
     $dir/claude --version"
-}
-
-ensure_agent_user() {
-  # Before the release: its service needs the user (and arm in its group) when it starts.
-  log "ensuring the agent user"
-  $SSH_VM "sudo bash -s" < "$HERE/agent-user.sh"
 }
 
 extract_app() {
@@ -162,23 +146,21 @@ write_env() {
 install_release() {
   log "installing release $VERSION"
   tar -C "$WORK/app" -czf "$WORK/app.tgz" .
-  local stage
-  stage=$(vm_stage)
   scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    "$WORK/app.tgz" "$WORK/env" "$WORK/authentik-ca.crt" "$HERE/olve-arm.service" "arm@$IP:$stage/"
+    "$WORK/app.tgz" "$WORK/env" "$WORK/authentik-ca.crt" "$HERE/olve-arm.service" "arm@$IP:/tmp/"
   $SSH_VM "set -e
     rel=/opt/olve-arm/releases/$VERSION
-    rm -rf \$rel && mkdir -p \$rel && tar -C \$rel -xzf $stage/app.tgz
+    rm -rf \$rel && mkdir -p \$rel && tar -C \$rel -xzf /tmp/app.tgz
     [ -z '$CLAUDE_VERSION' ] || ln -sfn /opt/olve-arm/claude/$CLAUDE_VERSION/claude \$rel/claude
     ln -sfn \$rel /opt/olve-arm/current
-    sudo install -m 0600 -o arm $stage/env /etc/olve-arm/env
-    sudo install -m 0644 $stage/authentik-ca.crt /usr/local/share/ca-certificates/authentik-ca.crt
+    sudo install -m 0600 -o arm /tmp/env /etc/olve-arm/env
+    sudo install -m 0644 /tmp/authentik-ca.crt /usr/local/share/ca-certificates/authentik-ca.crt
     sudo update-ca-certificates >/dev/null
-    sudo install -m 0644 $stage/olve-arm.service /etc/systemd/system/olve-arm.service
+    sudo install -m 0644 /tmp/olve-arm.service /etc/systemd/system/olve-arm.service
     sudo systemctl daemon-reload
     sudo systemctl enable olve-arm >/dev/null 2>&1
     sudo systemctl restart olve-arm
-    rm -rf $stage
+    rm -f /tmp/app.tgz /tmp/env
     ls -1dt /opt/olve-arm/releases/* | tail -n +3 | xargs -r rm -rf   # keep 2 releases: current + previous
     # keep the Claude Code versions the kept releases link to
     used=\$(readlink /opt/olve-arm/releases/*/claude | xargs -r -n1 dirname)
@@ -229,7 +211,6 @@ EOF
 ensure_vm
 wait_for_vm
 ensure_claude
-ensure_agent_user
 extract_app
 write_env
 install_release
