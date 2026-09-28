@@ -20,6 +20,8 @@ public sealed record AgentAccount(string Name, string Home)
             ["LOGNAME"] = Name,
         };
 
+    private static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// Looks <paramref name="user"/> up (<c>getent passwd</c>, so any user database the system has).
     /// Empty: null, agents run as ARM's user. Throws if there's no such user: that's a broken
@@ -36,9 +38,15 @@ public sealed record AgentAccount(string Name, string Home)
         info.ArgumentList.Add("passwd");
         info.ArgumentList.Add(user);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("'getent' did not start.");
-        var output = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-        return process.ExitCode == 0 && Parse(output) is { } account && account.Name == user
+        // Bounded: a user database that doesn't answer (NSS over the network) must not hold a launch.
+        var output = process.StandardOutput.ReadToEndAsync();
+        if (!process.WaitForExit(LookupTimeout) || !output.Wait(LookupTimeout))
+        {
+            process.Kill();
+            throw new InvalidOperationException($"Looking up the agent user '{user}' (Supervisor:User) took more than {LookupTimeout.TotalSeconds:0} s.");
+        }
+
+        return process.ExitCode == 0 && Parse(output.Result) is { } account && account.Name == user
             ? account
             : throw new InvalidOperationException($"The agent user '{user}' (Supervisor:User) does not exist.");
     }

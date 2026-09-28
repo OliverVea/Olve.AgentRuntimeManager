@@ -40,16 +40,25 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         var account = _account.Value;
         if (account is null)
         {
+            logger.LogDebug("Session {SessionId}: agents run as ARM's own user; making the workplace {Directory}", sessionId, workingDirectory);
             Directory.CreateDirectory(workingDirectory);
         }
         else
         {
             // The supervisor writes the session's files and the agent its work: both as the agent user.
             // A new workplace the supervisor makes itself; one from before the agent user is ARM's.
+            // Anything already at the workplace's path (a link too, even a dangling one) is shared,
+            // which refuses a link.
+            logger.LogDebug("Session {SessionId}: agents run as {User}; sharing the session's folder {Folder}", sessionId, account.Name, folder);
             ShareWithAgent(folder);
-            if (Directory.Exists(workingDirectory))
+            if (Posix.ExistsNoFollow(workingDirectory))
             {
+                logger.LogDebug("Session {SessionId}: sharing the existing workplace {Directory}", sessionId, workingDirectory);
                 ShareWithAgent(workingDirectory);
+            }
+            else
+            {
+                logger.LogDebug("Session {SessionId}: no workplace yet at {Directory}: the supervisor makes it", sessionId, workingDirectory);
             }
         }
 
@@ -203,8 +212,9 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
 
             if (process.ExitCode != 0)
             {
+                // Bounded: something else holding the pipe mustn't hold recovery.
                 logger.LogError("Run {RunId}: killing its orphaned agent as {User} failed ({ExitCode}): {Error}",
-                    info.RunId, account.Name, process.ExitCode, error.Result.Trim());
+                    info.RunId, account.Name, process.ExitCode, error.Wait(settings.ConnectTimeout) ? error.Result.Trim() : "");
                 return false;
             }
 
