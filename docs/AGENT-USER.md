@@ -90,9 +90,12 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   `supervisor.json`, which the agent can write, so ARM never signals them itself: a process group
   0 would be ARM's own (a crash loop on every restart), -1 every process of `arm`, and any pid
   may be pointed at an `arm` process. Pids of 1 or less are refused outright, and the start-time
-  check that the pid is still the agent stays in ARM (reading `/proc`). Price: an orphan left from
-  before the agent user (an `arm` process) is no longer killed; that needs an old agent to outlive
-  its supervisor across the upgrade deploy, and the session is then resumed next to it.
+  check that the pid is still the agent stays in ARM (reading `/proc`). The `kill` command exits 1
+  when it couldn't signal the group or the agent (EPERM). An orphan that couldn't be killed (one
+  left from before the agent user, running as `arm`), or a `supervisor.json` that names no pid to
+  check, **fails the session** ("its agent may still be running … so it was not resumed") instead
+  of resuming it: a second agent on the same Claude session must not happen. A run whose turn had
+  already succeeded still completes.
 
 ## The VM (`vm-deploy.sh` → `agent-user.sh`, every deploy, idempotent)
 
@@ -108,9 +111,12 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
 - every deploy, for what agents still running as `arm` keep making:
   - `~arm/.claude/projects` is synced to the agent user, newer files over older (continuing an
     earlier session resumes its Claude session, which Claude Code keeps there);
-  - each git repository in the sessions that `arm` owns is added to the agent's
-    `safe.directory` (else git refuses it: "dubious ownership"). One entry per repository: git
-    2.43 has no prefix patterns (2.46 adds them), and `*` would trust a repository of any owner;
+  - each git repository `arm` owns in a workplace `arm` owns (one from before the agent user; a
+    new `work/` is the agent's) is added to the agent's `safe.directory` (else git refuses it:
+    "dubious ownership"). One entry per repository: git 2.43 has no prefix patterns (2.46 adds
+    them), and `*` would trust a repository of any owner. The walk stays within 3 levels of such
+    a workplace (not into `node_modules`), however much an agent puts there; entries are
+    compared NUL-separated (a path may hold a newline);
 - the deploy key `~arm/.ssh/arm-agent-deploy` is copied to `~arm-agent/.ssh/`, with GitHub's
   host key from `~arm/.ssh/known_hosts`. The registered `GIT_SSH_COMMAND`
   (`ssh -i ~/.ssh/arm-agent-deploy …`) needs no change: `~` is now the agent's. A new key goes to
@@ -118,7 +124,11 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   remove arm's copy once no agent from before runs as `arm`; it stays for now so those can
   still push;
 - everything written into the agent's home is written as the agent (`runuser`): it owns that
-  home, and root following a link it put there would write or chown anything.
+  home, and root following a link it put there would write or chown anything. Each of those
+  steps runs under `timeout` (30 s, as the agent) and is best effort: the agent can make any file
+  there a FIFO (blocking its reader or writer), a directory, or break its `~/.gitconfig`, and
+  that must not stop or stall every deploy. A failure or a timeout is a warning in the deploy's
+  log; an unreadable git config skips the `safe.directory` step at once.
 
 `vm-deploy.sh` uploads to a private folder in `arm`'s home (`mktemp -d`, `0700`), not `/tmp`,
 which the agent user shares: it could take the names root installs from.
@@ -156,7 +166,11 @@ Can't:
   refusing another uid. The sudo rule and the user switch itself can't run there.
 - `agent-user.sh`'s steps, run twice in a scratch folder with the root-only commands stubbed:
   idempotent, the transcript sync newer-over-older both ways, `safe.directory` for arm's repos
-  only, the host key but no other `known_hosts` line.
+  only (not deeper than 3 levels, nor in `node_modules`; a path with a newline as one entry),
+  the host key but no other `known_hosts` line. And with the agent's home sabotaged (as the
+  reviews listed): `~/.gitconfig` a directory, a FIFO or corrupt; `~/.claude` or `~/.ssh` a
+  plain file; `~/.ssh/known_hosts` or the key a FIFO: every run exits 0, with a warning, within
+  one step timeout.
 - After the first deploy with this, on beta: the deploy's Claude check (a Haiku session through
   ARM) runs as `arm-agent`; then by hand: `ps -o user` of a supervisor and its agent;
   `sudo -l` fails for the agent; it can't read `/etc/olve-arm/env` or `arm.db`; a session that
