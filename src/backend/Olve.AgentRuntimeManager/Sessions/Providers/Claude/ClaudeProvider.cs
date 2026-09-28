@@ -161,8 +161,9 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env)
     {
         var settings = options.Value;
-        var folder = Folder(settings, sessionId);
-        var workDirectory = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
+        var folder = Directory.CreateDirectory(Folder(settings, sessionId)).FullName;
+        // Made by Supervisors.Launch, or with an agent user by the supervisor, as that user (docs/AGENT-USER.md).
+        var workDirectory = Path.Combine(folder, "work");
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
             ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env),
             [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))]);

@@ -42,6 +42,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
         try
         {
+            CreateWorkingDirectory();
             _agent = Process.Start(StartInfo()) ?? throw new InvalidOperationException($"'{launch.Command}' did not start.");
         }
         catch (Exception exception)
@@ -131,6 +132,23 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
                 // A newer ARM's message: ignored (the protocol only grows).
                 break;
         }
+    }
+
+    /// <summary>
+    /// Makes the agent's working directory if it's new, as the agent's user: its own, so git trusts
+    /// a repository right in it (docs/AGENT-USER.md). Shared with the group, as ARM shares the session's folder.
+    /// </summary>
+    private void CreateWorkingDirectory()
+    {
+        if (Directory.Exists(launch.WorkingDirectory))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(launch.WorkingDirectory);
+        File.SetUnixFileMode(launch.WorkingDirectory, File.GetUnixFileMode(launch.WorkingDirectory)
+            | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup);
     }
 
     private ProcessStartInfo StartInfo()

@@ -100,6 +100,22 @@ public class AgentUserTests
     }
 
     [Test]
+    public async Task Workplace_New_IsMadeByTheSupervisor()
+    {
+        // As the agent's user on the VMs: its own, so git trusts a repository right in it.
+        var (_, provider) = Server(OwnAccount());
+        var launch = Launch("Say READY");
+        var work = Path.Combine(Folder(launch), "work");
+
+        _ = provider.Start(launch);
+        var madeBeforeTheSupervisor = Directory.Exists(work);
+        await Until(() => SupervisorFiles.ReadExit(Folder(launch)) is not null);
+
+        await Assert.That(madeBeforeTheSupervisor).IsFalse();
+        await Assert.That(File.Exists(Path.Combine(work, "prompt.jsonl"))).IsTrue();
+    }
+
+    [Test]
     public async Task SupervisorLost_OrphanIsKilled_AsTheAgentUser()
     {
         var account = OwnAccount();

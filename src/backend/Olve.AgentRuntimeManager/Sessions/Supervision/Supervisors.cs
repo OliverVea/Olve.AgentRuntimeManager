@@ -27,7 +27,8 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     private readonly Lazy<AgentAccount?> _account = new(() => AgentAccount.Find(options.Value.User));
 
     /// <summary>
-    /// Starts a supervisor running <paramref name="command"/> for a run, with <paramref name="input"/>
+    /// Starts a supervisor running <paramref name="command"/> for a run in <paramref name="workingDirectory"/>
+    /// (made here if it's new, or with an agent user by the supervisor, so it's that user's), with <paramref name="input"/>
     /// as the agent's first input. Doesn't wait for it: the launch goes to its stdin (a small pipe
     /// write), and the returned agent connects in the background.
     /// </summary>
@@ -37,11 +38,19 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         var settings = options.Value;
         var socketPath = SocketPath(sessionId);
         var account = _account.Value;
-        if (account is not null)
+        if (account is null)
+        {
+            Directory.CreateDirectory(workingDirectory);
+        }
+        else
         {
             // The supervisor writes the session's files and the agent its work: both as the agent user.
+            // A new workplace the supervisor makes itself; one from before the agent user is ARM's.
             ShareWithAgent(folder);
-            ShareWithAgent(workingDirectory);
+            if (Directory.Exists(workingDirectory))
+            {
+                ShareWithAgent(workingDirectory);
+            }
         }
 
         var launch = new SupervisorLaunch
@@ -244,7 +253,14 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         var mode = File.GetUnixFileMode(handle);
         if ((mode & shared) != shared)
         {
-            File.SetUnixFileMode(handle, mode | shared);
+            try
+            {
+                File.SetUnixFileMode(handle, mode | shared);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Not ARM's: a workplace the agent's supervisor made, and the agent changed. Its own business.
+            }
         }
     }
 
