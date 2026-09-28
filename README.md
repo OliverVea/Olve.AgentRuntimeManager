@@ -227,7 +227,7 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
    `arm-agent`, without sudo and without access to ARM's config, database or home; ARM (`arm`)
    starts them through a sudoers rule for exactly the supervisor binary, and shares the session
    folders and sockets with them through the `arm-agent` group. The agents' deploy key lives in
-   `~arm-agent/.ssh/arm-agent-deploy` (moved there from `~arm` on the first such deploy). See
+   `~arm-agent/.ssh/arm-agent-deploy` (copied there from `~arm`). See
    [`docs/AGENT-USER.md`](docs/AGENT-USER.md);
 5. writes the config (`src/deploy/vm/env.{beta,prod}`, the prod OTLP secret from the cluster, the
    Claude Code token from the pipeline secret, passed over stdin) and the Authentik CA;
