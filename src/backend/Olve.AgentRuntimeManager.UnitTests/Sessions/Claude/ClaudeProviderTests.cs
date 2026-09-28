@@ -5,6 +5,7 @@ using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
+using Olve.AgentRuntimeManager.UnitTests.Support;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 
@@ -18,8 +19,15 @@ public class ClaudeProviderTests
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-claude-").FullName;
 
+    /// <summary>How long any wait in a test may take: nothing may hang the test run.</summary>
+    private static readonly TimeSpan Guard = TimeSpan.FromSeconds(15);
+
     [After(Test)]
-    public void Cleanup() => Directory.Delete(_root, recursive: true);
+    public void Cleanup()
+    {
+        TestProcesses.KillSupervisors(_root);
+        Directory.Delete(_root, recursive: true);
+    }
 
     [Test]
     public async Task Turn_Succeeds_Completes()
@@ -27,7 +35,7 @@ public class ClaudeProviderTests
         var launch = Launch("Say READY");
 
         var run = Provider().Start(launch);
-        var outcome = await run.Completion;
+        var outcome = await run.Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(run.ProviderSessionId).IsEqualTo(launch.SessionId.ToString());
@@ -38,7 +46,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY");
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var sent = await File.ReadAllTextAsync(Path.Combine(Folder(launch), "work", "prompt.jsonl"));
         await Assert.That(Told(sent.Trim())).IsEqualTo("Say READY");
@@ -49,7 +57,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY");
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var kept = await File.ReadAllLinesAsync(Path.Combine(Folder(launch), "output.jsonl"));
         var recorded = await File.ReadAllLinesAsync(Path.Combine(Path.GetDirectoryName(Stub)!, "success.jsonl"));
@@ -61,7 +69,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY");
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var (arguments, _) = await Invocation(launch);
         string[] expected =
@@ -80,10 +88,17 @@ public class ClaudeProviderTests
     [Test]
     public async Task Environment_IsOnlyTheAllowlistAndTheLockdown()
     {
+        // Process-wide, so put back after: no other test sees it.
         Environment.SetEnvironmentVariable("ARM_TEST_SECRET", "hunter2");
         var launch = Launch("Say READY");
-
-        await Provider().Start(launch).Completion;
+        try
+        {
+            await Provider().Start(launch).Completion.WaitAsync(Guard);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ARM_TEST_SECRET", null);
+        }
 
         var (_, environment) = await Invocation(launch);
         await Assert.That(environment["ENABLE_CLAUDEAI_MCP_SERVERS"]).IsEqualTo("false");
@@ -104,7 +119,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY") with { Env = new Dictionary<string, string> { ["GIT_AUTHOR_NAME"] = "Oliver" } };
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var (_, environment) = await Invocation(launch);
         await Assert.That(environment["GIT_AUTHOR_NAME"]).IsEqualTo("Oliver");
@@ -118,7 +133,7 @@ public class ClaudeProviderTests
             Env = new Dictionary<string, string> { ["DISABLE_UPDATES"] = "0", ["ENABLE_CLAUDEAI_MCP_SERVERS"] = "true" },
         };
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var (_, environment) = await Invocation(launch);
         await Assert.That(environment["DISABLE_UPDATES"]).IsEqualTo("1");
@@ -130,7 +145,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY");
 
-        await Provider(o => o.ConfigDirectory = "/etc/claude-arm").Start(launch).Completion;
+        await Provider(o => o.ConfigDirectory = "/etc/claude-arm").Start(launch).Completion.WaitAsync(Guard);
 
         var (_, environment) = await Invocation(launch);
         await Assert.That(environment["CLAUDE_CONFIG_DIR"]).IsEqualTo("/etc/claude-arm");
@@ -141,7 +156,7 @@ public class ClaudeProviderTests
     {
         var launch = Launch("Say READY") with { Model = " " };
 
-        await Provider().Start(launch).Completion;
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
 
         var (arguments, _) = await Invocation(launch);
         await Assert.That(arguments).DoesNotContain("--model");
@@ -150,7 +165,7 @@ public class ClaudeProviderTests
     [Test]
     public async Task Turn_Errors_Fails()
     {
-        var outcome = await Provider().Start(Launch("stub:error")).Completion;
+        var outcome = await Provider().Start(Launch("stub:error")).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
         await Assert.That(((AgentOutcome.Failed)outcome).Error).Contains("error_during_execution");
@@ -159,7 +174,7 @@ public class ClaudeProviderTests
     [Test]
     public async Task ApiRejectingTheToken_IsTheProvidersTrouble_Unauthorized()
     {
-        var outcome = await Provider().Start(Launch("stub:unauthorized")).Completion;
+        var outcome = await Provider().Start(Launch("stub:unauthorized")).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
             ProviderTrouble.Unauthorized, "Failed to authenticate. API Error: 401 OAuth access token is invalid."));
@@ -168,7 +183,7 @@ public class ClaudeProviderTests
     [Test]
     public async Task NoLogin_IsUnauthorized_ThoughNoRequestWasSent()
     {
-        var outcome = await Provider().Start(Launch("stub:not-logged-in")).Completion;
+        var outcome = await Provider().Start(Launch("stub:not-logged-in")).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
             ProviderTrouble.Unauthorized, "Not logged in · Please run /login"));
@@ -177,7 +192,7 @@ public class ClaudeProviderTests
     [Test]
     public async Task UsageLimit_IsLimited_UntilItResets()
     {
-        var outcome = await Provider().Start(Launch("stub:limited")).Completion;
+        var outcome = await Provider().Start(Launch("stub:limited")).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Unavailable(
             ProviderTrouble.Limited, "You've hit your session limit · resets 10pm (UTC)", DateTimeOffset.FromUnixTimeSeconds(1790460000)));
@@ -189,7 +204,7 @@ public class ClaudeProviderTests
     [Arguments("stub:offline")]
     public async Task ApiDownOrUnreachable_IsUnreachable(string prompt)
     {
-        var outcome = await Provider().Start(Launch(prompt)).Completion;
+        var outcome = await Provider().Start(Launch(prompt)).Completion.WaitAsync(Guard);
 
         var unavailable = await Assert.That(outcome).IsTypeOf<AgentOutcome.Unavailable>();
         await Assert.That(unavailable!.Trouble).IsEqualTo(ProviderTrouble.Unreachable);
@@ -202,7 +217,7 @@ public class ClaudeProviderTests
         var launch = Launch("Say READY") with { Attempt = 2, ProviderSessionId = Guid.NewGuid() };
 
         var run = Provider().Start(launch);
-        await run.Completion;
+        await run.Completion.WaitAsync(Guard);
 
         var (arguments, _) = await Invocation(launch);
         await Assert.That(arguments[Array.IndexOf(arguments, "--session-id") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
@@ -212,7 +227,7 @@ public class ClaudeProviderTests
     [Test]
     public async Task Exit_BeforeAResult_FailsWithTheExitCodeAndStderr()
     {
-        var outcome = await Provider().Start(Launch("stub:crash")).Completion;
+        var outcome = await Provider().Start(Launch("stub:crash")).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed(
             "Claude Code exited with code 3 before finishing its turn: Invalid API key · Please run /login"));

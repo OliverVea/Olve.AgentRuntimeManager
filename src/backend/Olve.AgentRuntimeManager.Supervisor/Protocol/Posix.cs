@@ -76,6 +76,10 @@ public static partial class Posix
         return error is 2 or 6 or 20 or 40 ? null : throw new IOException($"Could not open '{path}' (errno {error}).");
     }
 
+    /// <summary>Whether anything is at <paramref name="path"/>, a link (even a dangling one) included: not followed.</summary>
+    public static bool ExistsNoFollow(string path) =>
+        new FileInfo(path) is var info && (info.LinkTarget is not null || info.Exists || Directory.Exists(path));
+
     /// <summary>
     /// A session file opened for reading (<see cref="OpenNoFollow"/>); null if it's missing, a link,
     /// or not a regular file (a FIFO would block its reader, a directory can't be read).
@@ -142,6 +146,8 @@ public static partial class Posix
     /// <summary>
     /// When a process started, in clock ticks since boot (<c>/proc/&lt;pid&gt;/stat</c>, field 22);
     /// null if it isn't running (or this isn't Linux). A pid plus its start time names one process.
+    /// A zombie isn't running: it has ended, and only waits for its parent to reap it (which, for an
+    /// orphan in a container whose pid 1 doesn't reap, may never happen).
     /// </summary>
     public static long? StartTime(int pid)
     {
@@ -150,7 +156,7 @@ public static partial class Posix
             var stat = File.ReadAllText($"/proc/{pid}/stat");
             // The command name (field 2) is in parentheses and may contain spaces: count from after it.
             var fields = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
-            return long.Parse(fields[19], CultureInfo.InvariantCulture);
+            return fields[0] is "Z" or "X" ? null : long.Parse(fields[19], CultureInfo.InvariantCulture);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException)
         {

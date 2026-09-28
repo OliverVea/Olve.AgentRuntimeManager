@@ -24,7 +24,10 @@ run = "npm run codegen:test"
 [tasks."backend:test"]
 description = "Backend build + unit and API tests (API tests in-process)"
 dir = "src/backend"
-run = ["dotnet build", "dotnet test"]
+# Nothing may hang CI: a test taking over a minute fails by name (assembly [Timeout]); a testhost
+# silent for 5 minutes is dumped, with the tests still running named (--hangdump), and the whole
+# session ends after 15 (--timeout; a normal run takes about 3).
+run = ["dotnet build", "dotnet test --no-build --timeout 15m --hangdump --hangdump-timeout 5m"]
 
 [tasks."api:image"]
 description = "API tests against the real Docker image: builds and starts it, runs the suite in base-URL mode (needs Docker)"
