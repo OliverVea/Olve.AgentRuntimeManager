@@ -10,6 +10,7 @@
     <PackageReference Include="Olve.Results.TUnit" />
     <PackageReference Include="Rocks" />
     <PackageReference Include="TUnit" />
+    <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
   </ItemGroup>
 
   <ItemGroup>

@@ -9,6 +9,7 @@ using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Persistence;
+using Olve.AgentRuntimeManager.UnitTests.Support;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 
@@ -32,6 +33,7 @@ public class ClaudeRecoveryTests
             server.Dispose();
         }
 
+        TestProcesses.KillSupervisors(_root);
         Directory.Delete(_root, recursive: true);
     }
 

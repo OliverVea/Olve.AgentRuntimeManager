@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
@@ -9,6 +11,7 @@ using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
+using Olve.AgentRuntimeManager.UnitTests.Support;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Supervision;
 
@@ -34,6 +37,7 @@ public class AgentUserTests
             server.Dispose();
         }
 
+        TestProcesses.KillSupervisors(_root);
         Directory.Delete(_root, recursive: true);
     }
 
@@ -115,6 +119,7 @@ public class AgentUserTests
         await Assert.That(File.Exists(Path.Combine(work, "prompt.jsonl"))).IsTrue();
     }
 
+    [NotInParallel("signals")]
     [Test]
     public async Task SupervisorLost_OrphanIsKilled_AsTheAgentUser()
     {
@@ -136,6 +141,7 @@ public class AgentUserTests
         await Until(() => Posix.StartTime(info.AgentPid) != info.AgentStartTime);
     }
 
+    [NotInParallel("signals")]
     [Test]
     public async Task KillOrphan_WithAnAgentUser_NeverSignalsAsArm()
     {
@@ -154,6 +160,7 @@ public class AgentUserTests
         await Assert.That(gone).IsFalse();
     }
 
+    [NotInParallel("signals")]
     [Test]
     [Arguments(true)]
     [Arguments(false)]
@@ -173,6 +180,7 @@ public class AgentUserTests
         await Assert.That(gone).IsFalse();
     }
 
+    [NotInParallel("signals")]
     [Test]
     public async Task SupervisorLost_OrphanCantBeKilled_FailsTheSession_InsteadOfResuming()
     {
@@ -200,10 +208,14 @@ public class AgentUserTests
         }
         finally
         {
-            Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+            if (info.SupervisorPid > 1)
+            {
+                Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+            }
         }
     }
 
+    [NotInParallel("signals")]
     [Test]
     public async Task KillCommand_AProcessItCantSignal_ExitsNonZero()
     {
@@ -263,7 +275,7 @@ public class AgentUserTests
         var folder = Directory.CreateDirectory(Path.Combine(_root, "sessions", Guid.NewGuid().ToString())).FullName;
         using (var mkfifo = Process.Start("mkfifo", [Path.Combine(folder, SupervisorFiles.Output)]))
         {
-            await mkfifo.WaitForExitAsync();
+            await mkfifo.WaitForExitAsync().WaitAsync(Guard);
         }
 
         var conversation = await Task.Run(() => provider.Conversation(Guid.Parse(Path.GetFileName(folder)))).WaitAsync(Guard);
@@ -274,17 +286,91 @@ public class AgentUserTests
     [Test]
     public async Task Workplace_ALink_IsNotShared_AndTheLaunchFails()
     {
-        var (_, provider) = Server(OwnAccount());
+        const UnixFileMode privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var account = OwnAccount();
+        var log = new ListLogger<Supervisors>();
+        var (_, provider) = Server(account, log: log);
         var launch = Launch("Say READY");
         var target = Directory.CreateDirectory(Path.Combine(_root, "target")).FullName;
-        File.SetUnixFileMode(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        File.SetUnixFileMode(target, privateMode);
         Directory.CreateDirectory(Folder(launch));
-        Directory.CreateSymbolicLink(Path.Combine(Folder(launch), "work"), target);
+        var work = Path.Combine(Folder(launch), "work");
+        Directory.CreateSymbolicLink(work, target);
 
-        await Assert.That(() => provider.Start(launch)).Throws<InvalidOperationException>();
-        await Assert.That(File.GetUnixFileMode(target)).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        // Self-diagnosing (it failed once, only in the pipeline's pod, as root): every precondition
+        // and the branch Supervisors took go into the failure message.
+        string opened;
+        using (var handle = Posix.OpenNoFollow(work, directory: true))
+        {
+            opened = handle is null ? "refused" : "OPENED";
+        }
+
+        var preconditions = string.Join("; ",
+            $"euid {Posix.GetEUid()}", $"Environment.UserName '{System.Environment.UserName}'", $"account {account}",
+            $"Supervisor:User '{account.Name}'", $"arch {RuntimeInformation.ProcessArchitecture}/{RuntimeInformation.OSArchitecture}",
+            $"os {RuntimeInformation.OSDescription}", $"work links to '{new FileInfo(work).LinkTarget}'",
+            $"Directory.Exists(work) {Directory.Exists(work)}", $"ExistsNoFollow(work) {Posix.ExistsNoFollow(work)}",
+            $"OpenNoFollow(work, directory) {opened}");
+        Console.WriteLine($"Workplace_ALink preconditions: {preconditions}");
+        await Assert.That(new FileInfo(work).LinkTarget).IsEqualTo(target).Because(preconditions);
+        await Assert.That(Directory.Exists(work)).IsTrue().Because(preconditions);
+        await Assert.That(Posix.ExistsNoFollow(work)).IsTrue().Because(preconditions);
+        await Assert.That(opened).IsEqualTo("refused").Because(preconditions);
+
+        IAgentRun? run = null;
+        Exception? thrown = null;
+        try
+        {
+            run = provider.Start(launch);
+        }
+        catch (Exception exception)
+        {
+            thrown = exception;
+        }
+
+        try
+        {
+            var said = $"{preconditions}; Supervisors said: {string.Join(" | ", log.Messages)}";
+            Console.WriteLine($"Workplace_ALink: {(thrown is null ? "no exception" : $"{thrown.GetType().Name}: {thrown.Message}")}; {said}");
+            await Assert.That(thrown).IsTypeOf<InvalidOperationException>().Because(said);
+            await Assert.That(File.GetUnixFileMode(target)).IsEqualTo(privateMode).Because(said);
+        }
+        finally
+        {
+            // A launch that should have failed and didn't started a detached supervisor: end it here.
+            if (run is not null)
+            {
+                run.Kill();
+                await run.Completion.WaitAsync(Guard);
+            }
+        }
     }
 
+    [Test]
+    public async Task StartTime_AZombie_IsNotRunning()
+    {
+        // A child that has ended under a parent that never reaps it (as an orphan is under a pod's pid 1
+        // that doesn't reap): a zombie, whose /proc entry stays.
+        using var parent = Process.Start(new ProcessStartInfo("sh", ["-c", "sleep 0 & echo $!; exec sleep 30"])
+        {
+            RedirectStandardOutput = true, UseShellExecute = false,
+        })!;
+        try
+        {
+            var zombie = int.Parse((await parent.StandardOutput.ReadLineAsync().WaitAsync(Guard))!, System.Globalization.CultureInfo.InvariantCulture);
+            await Until(() => File.ReadAllText($"/proc/{zombie}/stat").Split(") ")[1].StartsWith('Z'));
+
+            await Assert.That(Posix.StartTime(zombie)).IsNull();
+            await Assert.That(Posix.StartTime(parent.Id)).IsNotNull();
+        }
+        finally
+        {
+            parent.Kill();
+            await parent.WaitForExitAsync().WaitAsync(Guard);
+        }
+    }
+
+    [NotInParallel("signals")]
     [Test]
     public async Task KillCommand_KillsTheProcessGroup()
     {
@@ -293,7 +379,7 @@ public class AgentUserTests
         {
             RedirectStandardOutput = true, UseShellExecute = false,
         })!;
-        var child = int.Parse(leader.StandardOutput.ReadLine()!, System.Globalization.CultureInfo.InvariantCulture);
+        var child = int.Parse((await leader.StandardOutput.ReadLineAsync().WaitAsync(Guard))!, System.Globalization.CultureInfo.InvariantCulture);
 
         using var kill = Process.Start(Supervisor, ["kill", leader.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), child.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         await kill.WaitForExitAsync().WaitAsync(Guard);
@@ -319,6 +405,7 @@ public class AgentUserTests
         await Assert.That(error).Contains("kill <process group> <pid>");
     }
 
+    [NotInParallel("signals")]
     [Test]
     public async Task Socket_OnlyTheClientUserMayConnect()
     {
@@ -351,14 +438,17 @@ public class AgentUserTests
         try
         {
             using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath));
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath)).WaitAsync(Guard);
             using var reader = new StreamReader(new NetworkStream(socket, ownsSocket: false));
             var line = await reader.ReadLineAsync().WaitAsync(Guard);
             return line is not null && JsonSerializer.Deserialize(line, SupervisorJsonContext.Default.SupervisorMessage)?.Type == SupervisorMessage.Hello;
         }
         finally
         {
-            Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+            if (info.SupervisorPid > 1)
+            {
+                Posix.Kill(-info.SupervisorPid, Posix.SigKill);
+            }
         }
     }
 
@@ -386,12 +476,12 @@ public class AgentUserTests
     }
 
     /// <summary>A server whose agents run as <paramref name="account"/>, through the sudo stub.</summary>
-    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account, string? sudo = null)
+    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account, string? sudo = null, ILogger<Supervisors>? log = null)
     {
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions
         {
             SocketRoot = Path.Combine(_root, "sockets"), User = account.Name, Sudo = sudo ?? SudoStub(),
-        }), NullLogger<Supervisors>.Instance);
+        }), log ?? NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
         return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, NullLogger<ClaudeProvider>.Instance));
