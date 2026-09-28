@@ -14,6 +14,14 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
 - **Test each engine where it lives.** SQLite in-process pre-deploy; Postgres live via beta.
 - **Test the real artifact once.** The image built in the pipeline is validated against live
   beta — no separate image-build-and-test step pre-deploy.
+- **Nothing hangs the gate.** Every wait in a test is bounded (a `Guard`, `WaitAsync`), a test
+  that starts processes kills what it started even when it fails (supervisors detach and would
+  outlive it: `TestProcesses.KillSupervisors`), and the run has three nets (`mise.toml`
+  `backend:test`): an assembly-level TUnit `[Timeout]` fails a slow test by name; a testhost that
+  is silent for 5 minutes is dumped, naming the tests still running (`--hangdump`, which also
+  catches a test blocking its thread, which TUnit's timeout doesn't end); the session ends after 15
+  minutes (`--timeout`). The gate runs as root in a pod: tests must not assume a login user,
+  a reaping pid 1 (an orphan may stay a zombie) or an exec-able `/tmp` beyond what they check.
 
 ## Pipeline shape (Olve.Pipelines)
 
