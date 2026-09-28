@@ -95,15 +95,23 @@ wait_for_vm() {
   $SSH_VM "cloud-init status --wait >/dev/null; test -d /opt/olve-arm/releases"
 }
 
+# A private folder in the VM to upload to (arm's home, 0700), for what root installs from there:
+# the VM's /tmp is shared with the agent user, who could take those names first.
+vm_stage() {
+  $SSH_VM 'mktemp -d "$HOME/.deploy.XXXXXX"'
+}
+
 ensure_claude() {
   [ -n "$CLAUDE_VERSION" ] || { log "no Claude Code in this bundle"; return; }
   local dir=/opt/olve-arm/claude/$CLAUDE_VERSION
   if $SSH_VM "test -x $dir/claude"; then return; fi
   log "installing Claude Code $CLAUDE_VERSION"
+  local stage
+  stage=$(vm_stage)
   scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    "$CLAUDE_DIR/claude" "arm@$IP:/tmp/claude"
+    "$CLAUDE_DIR/claude" "arm@$IP:$stage/claude"
   $SSH_VM "set -e
-    mkdir -p $dir && install -m 0755 /tmp/claude $dir/claude && rm -f /tmp/claude
+    mkdir -p $dir && install -m 0755 $stage/claude $dir/claude && rm -rf $stage
     $dir/claude --version"
 }
 
@@ -154,21 +162,23 @@ write_env() {
 install_release() {
   log "installing release $VERSION"
   tar -C "$WORK/app" -czf "$WORK/app.tgz" .
+  local stage
+  stage=$(vm_stage)
   scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    "$WORK/app.tgz" "$WORK/env" "$WORK/authentik-ca.crt" "$HERE/olve-arm.service" "arm@$IP:/tmp/"
+    "$WORK/app.tgz" "$WORK/env" "$WORK/authentik-ca.crt" "$HERE/olve-arm.service" "arm@$IP:$stage/"
   $SSH_VM "set -e
     rel=/opt/olve-arm/releases/$VERSION
-    rm -rf \$rel && mkdir -p \$rel && tar -C \$rel -xzf /tmp/app.tgz
+    rm -rf \$rel && mkdir -p \$rel && tar -C \$rel -xzf $stage/app.tgz
     [ -z '$CLAUDE_VERSION' ] || ln -sfn /opt/olve-arm/claude/$CLAUDE_VERSION/claude \$rel/claude
     ln -sfn \$rel /opt/olve-arm/current
-    sudo install -m 0600 -o arm /tmp/env /etc/olve-arm/env
-    sudo install -m 0644 /tmp/authentik-ca.crt /usr/local/share/ca-certificates/authentik-ca.crt
+    sudo install -m 0600 -o arm $stage/env /etc/olve-arm/env
+    sudo install -m 0644 $stage/authentik-ca.crt /usr/local/share/ca-certificates/authentik-ca.crt
     sudo update-ca-certificates >/dev/null
-    sudo install -m 0644 /tmp/olve-arm.service /etc/systemd/system/olve-arm.service
+    sudo install -m 0644 $stage/olve-arm.service /etc/systemd/system/olve-arm.service
     sudo systemctl daemon-reload
     sudo systemctl enable olve-arm >/dev/null 2>&1
     sudo systemctl restart olve-arm
-    rm -f /tmp/app.tgz /tmp/env
+    rm -rf $stage
     ls -1dt /opt/olve-arm/releases/* | tail -n +3 | xargs -r rm -rf   # keep 2 releases: current + previous
     # keep the Claude Code versions the kept releases link to
     used=\$(readlink /opt/olve-arm/releases/*/claude | xargs -r -n1 dirname)
