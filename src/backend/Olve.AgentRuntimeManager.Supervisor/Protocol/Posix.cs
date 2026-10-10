@@ -231,22 +231,165 @@ public static partial class Posix
 
     /// <summary>
     /// When a process started, in clock ticks since boot (<c>/proc/&lt;pid&gt;/stat</c>, field 22);
-    /// null if it isn't running (or this isn't Linux). A pid plus its start time names one process.
+    /// null if it isn't running (or this isn't Linux), or if <paramref name="pid"/> is a thread's id,
+    /// not a process's (see <see cref="Status"/>). A pid plus its start time names one process.
     /// A zombie isn't running: it has ended, and only waits for its parent to reap it (which, for an
     /// orphan in a container whose pid 1 doesn't reap, may never happen).
     /// </summary>
-    public static long? StartTime(int pid)
+    public static long? StartTime(int pid) => Status(pid) is { IsProcess: true, IsRunning: true } status ? status.StartTime : null;
+
+    /// <summary>
+    /// What <c>/proc</c> says of <paramref name="pid"/>; null if there's nothing (or this isn't Linux).
+    /// </summary>
+    /// <remarks>
+    /// A thread's id is in the same number space as a process's, its <c>/proc/&lt;tid&gt;</c> is
+    /// readable (only not listed), and <c>kill(tid)</c> signals the whole process the thread is in:
+    /// a pid from a file that is now one of another process's threads (dense in a test host) must
+    /// never be signalled. <see cref="IsProcess"/> tells them apart (<c>Tgid</c>).
+    /// </remarks>
+    public static ProcessStatus? Status(int pid)
     {
+        if (pid <= 0)
+        {
+            return null;
+        }
+
         try
         {
             var stat = File.ReadAllText($"/proc/{pid}/stat");
             // The command name (field 2) is in parentheses and may contain spaces: count from after it.
             var fields = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
-            return fields[0] is "Z" or "X" ? null : long.Parse(fields[19], CultureInfo.InvariantCulture);
+            int? threadGroup = null, uid = null;
+            foreach (var line in File.ReadLines($"/proc/{pid}/status"))
+            {
+                if (line.StartsWith("Tgid:", StringComparison.Ordinal))
+                {
+                    threadGroup = int.Parse(line[5..].Trim(), CultureInfo.InvariantCulture);
+                }
+                else if (line.StartsWith("Uid:", StringComparison.Ordinal))
+                {
+                    uid = int.Parse(line[4..].Trim().Split('\t', ' ')[0], CultureInfo.InvariantCulture);
+                }
+            }
+
+            return threadGroup is { } tgid && uid is { } owner
+                ? new ProcessStatus(pid, fields[0][0], int.Parse(fields[1], CultureInfo.InvariantCulture),
+                    int.Parse(fields[2], CultureInfo.InvariantCulture), long.Parse(fields[19], CultureInfo.InvariantCulture), tgid, owner)
+                : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="pid"/> is a running process in process group <paramref name="group"/>,
+    /// started at <paramref name="startTime"/>: then <paramref name="pid"/> names that process, and
+    /// <paramref name="group"/> names its group (a group's id isn't given to another while it has a
+    /// member). The check before an orphan's agent and its group are signalled.
+    /// </summary>
+    public static bool IsInGroup(int pid, int group, long? startTime) =>
+        pid > 1 && group > 1 && Status(pid) is { IsProcess: true, IsRunning: true } status
+            && status.Group == group && (startTime is null || status.StartTime == startTime);
+
+    [LibraryImport("libc", EntryPoint = "pidfd_open", SetLastError = true)]
+    private static partial int PidfdOpen(int pid, uint flags);
+
+    [LibraryImport("libc", EntryPoint = "pidfd_send_signal", SetLastError = true)]
+    private static partial int PidfdSendSignal(int pidfd, int signal, IntPtr info, uint flags);
+
+    /// <summary>
+    /// Sends <paramref name="signal"/> to <paramref name="pid"/> only if <paramref name="verify"/>
+    /// holds for the process that has it, race-free: a pidfd is taken first (one process for good;
+    /// a thread's id is refused), then /proc is checked, then the signal goes through the pidfd, so
+    /// it can't reach a process that took the pid after the check. Where pidfds aren't to be had
+    /// (ENOSYS), the check and a plain kill() (<see cref="SignalResult.SentWithoutPidfd"/>).
+    /// </summary>
+    public static SignalResult SignalIf(int pid, int signal, Func<ProcessStatus, bool> verify)
+    {
+        const int noSuchProcess = 3, invalid = 22, notImplemented = 38;
+        if (pid <= 1)
+        {
+            return SignalResult.Refused;
+        }
+
+        var fd = PidfdOpen(pid, 0);
+        if (fd < 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error != notImplemented)
+            {
+                // EINVAL: a thread's id, not a process's.
+                return error is noSuchProcess ? SignalResult.Gone : error is invalid ? SignalResult.Refused : SignalResult.Failed;
+            }
+        }
+
+        using var handle = fd >= 0 ? new SafeFileHandle(fd, ownsHandle: true) : null;
+        if (Status(pid) is not { IsProcess: true, IsRunning: true } status)
+        {
+            return SignalResult.Gone;
+        }
+
+        if (!verify(status))
+        {
+            return SignalResult.Refused;
+        }
+
+        if (handle is null)
+        {
+            return Kill(pid, signal) == 0 ? SignalResult.SentWithoutPidfd : SignalResult.Failed;
+        }
+
+        return PidfdSendSignal(fd, signal, IntPtr.Zero, 0) == 0 ? SignalResult.Sent
+            : Marshal.GetLastPInvokeError() == noSuchProcess ? SignalResult.Gone : SignalResult.Failed;
+    }
+
+    /// <summary>
+    /// A process's command line (<c>/proc/&lt;pid&gt;/cmdline</c>, arguments joined by
+    /// spaces); null if it can't be read.
+    /// </summary>
+    public static string? CommandLine(int pid)
+    {
+        try
+        {
+            return File.ReadAllText($"/proc/{pid}/cmdline").Replace('\0', ' ').Trim();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// A process (or thread) as <c>/proc</c> shows it: state, parent, process group, start time (clock
+/// ticks since boot), thread group (the process a thread belongs to) and real uid.
+/// </summary>
+public sealed record ProcessStatus(int Pid, char State, int Parent, int Group, long StartTime, int ThreadGroup, int Uid)
+{
+    /// <summary>A process, not one of a process's other threads.</summary>
+    public bool IsProcess => ThreadGroup == Pid;
+
+    /// <summary>Not a zombie (ended, waiting to be reaped) nor dead.</summary>
+    public bool IsRunning => State is not ('Z' or 'X');
+}
+
+/// <summary>What <see cref="Posix.SignalIf"/> did.</summary>
+public enum SignalResult
+{
+    /// <summary>Sent, through a pidfd: to exactly the process checked.</summary>
+    Sent,
+
+    /// <summary>Sent with kill() after the check (no pidfds here).</summary>
+    SentWithoutPidfd,
+
+    /// <summary>Nothing (running) has that pid.</summary>
+    Gone,
+
+    /// <summary>What has that pid isn't what was asked for (or is a thread): not signalled.</summary>
+    Refused,
+
+    /// <summary>The signal couldn't be sent (e.g. EPERM).</summary>
+    Failed,
 }

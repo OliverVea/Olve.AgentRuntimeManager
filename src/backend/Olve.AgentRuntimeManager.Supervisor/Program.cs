@@ -25,13 +25,21 @@ if (args is ["kill", ..])
         return 2;
     }
 
-    // Gone already is fine; anything else (EPERM: a process of another user, e.g. an agent from
-    // before the agent user) means it may still run, and ARM must not start a second one.
-    var groupGone = Posix.SignalOrGone(-groupId, Posix.SigKill, out var groupError);
-    var agentGone = Posix.SignalOrGone(agentPid, Posix.SigKill, out var agentError);
-    if (!groupGone || !agentGone)
+    // Only what is proven to be the run's: the agent a process (not some process's thread) in the
+    // group, so the group's id can't name another one. Not so: the agent is gone (its pid names
+    // something else now), nothing is signalled.
+    if (!Posix.IsInGroup(agentPid, groupId, startTime: null))
     {
-        await Console.Error.WriteLineAsync($"olve-arm-supervisor: could not signal process group {groupId} (errno {groupError}) or pid {agentPid} (errno {agentError}).");
+        return 0;
+    }
+
+    // One signal, to the group (the agent is in it): a second one to the agent's pid could, once the
+    // agent is reaped, reach a process that took the pid since. Gone already is fine; anything else
+    // (EPERM: a process of another user, e.g. an agent from before the agent user) means it may
+    // still run, and ARM must not start a second one.
+    if (!Posix.SignalOrGone(-groupId, Posix.SigKill, out var groupError))
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: could not signal process group {groupId} of pid {agentPid} (errno {groupError}).");
         return 1;
     }
 
