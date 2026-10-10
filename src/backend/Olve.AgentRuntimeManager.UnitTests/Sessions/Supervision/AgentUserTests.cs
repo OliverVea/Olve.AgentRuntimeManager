@@ -154,7 +154,7 @@ public class AgentUserTests
         await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null && File.Exists(Path.Combine(Folder(launch), "work", "prompt.jsonl")));
         first.Dispose();
         var info = SupervisorFiles.ReadInfo(Folder(launch))!;
-        Posix.Kill(info.SupervisorPid, Posix.SigKill);
+        TestProcesses.KillSupervisor(info.SupervisorPid);
         var (second, _) = Server(account);
         await Until(() => !second.IsListening(launch.SessionId));
 
@@ -215,7 +215,7 @@ public class AgentUserTests
         await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null && File.Exists(Path.Combine(Folder(launch), "work", "prompt.jsonl")));
         first.Dispose();
         var info = SupervisorFiles.ReadInfo(Folder(launch))!;
-        Posix.Kill(info.SupervisorPid, Posix.SigKill);
+        TestProcesses.KillSupervisor(info.SupervisorPid);
         var (second, recovering) = Server(account, sudo: "/bin/false");
         await Until(() => !second.IsListening(launch.SessionId));
         try
@@ -231,10 +231,7 @@ public class AgentUserTests
         }
         finally
         {
-            if (info.SupervisorPid > 1)
-            {
-                Posix.Kill(-info.SupervisorPid, Posix.SigKill);
-            }
+            TestProcesses.KillRun(info);
         }
     }
 
@@ -244,7 +241,7 @@ public class AgentUserTests
     {
         Skip.When(Posix.GetEUid() == 0, "As root it could signal anything: this would kill a real process.");
         var root = Directory.GetDirectories("/proc").Select(d => int.TryParse(Path.GetFileName(d), out var pid) ? pid : 0)
-            .First(pid => pid > 1 && OwnerUid(pid) == 0);
+            .First(pid => pid > 1 && OwnerUid(pid) == 0 && Posix.Status(pid) is { IsProcess: true } status && status.Group == pid);
 
         using var kill = Process.Start(new ProcessStartInfo(Supervisor, ["kill", root.ToString(System.Globalization.CultureInfo.InvariantCulture), root.ToString(System.Globalization.CultureInfo.InvariantCulture)])
         {
@@ -401,6 +398,133 @@ public class AgentUserTests
         }
     }
 
+    [Test]
+    public async Task Status_AThreadsId_IsNotAProcess()
+    {
+        // A thread's id is a pid too, and kill() on it takes its whole process.
+        var (tid, startTime) = await ThreadOfAsync(System.Environment.ProcessId);
+
+        await Assert.That(Posix.Status(tid)!.IsProcess).IsFalse();
+        await Assert.That(Posix.Status(tid)!.ThreadGroup).IsEqualTo(System.Environment.ProcessId);
+        await Assert.That(Posix.StartTime(tid)).IsNull();
+        await Assert.That(Posix.IsInGroup(tid, Posix.Status(System.Environment.ProcessId)!.Group, startTime)).IsFalse();
+        await Assert.That(Posix.Status(System.Environment.ProcessId)!.IsProcess).IsTrue();
+    }
+
+    [NotInParallel("signals")]
+    [Test]
+    public async Task KillOrphan_ItsAgentPidNowAThread_KillsNothing()
+    {
+        // As if a run's agent were gone and its pid now named a thread of another process (here a
+        // supervisor's, in that supervisor's group, with the thread's own start time): kill(tid) would
+        // take that whole process.
+        var (info, _) = await StartSupervisorAsync(Posix.GetEUid());
+        try
+        {
+            var (tid, startTime) = await ThreadOfAsync(info.SupervisorPid);
+            var stale = info with { AgentPid = tid, AgentStartTime = startTime };
+            var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            _servers.Add(supervisors);
+
+            var gone = supervisors.KillOrphan(stale);
+
+            await Task.Delay(200);
+            await Assert.That(gone).IsTrue();
+            await Assert.That(Posix.Status(info.SupervisorPid) is { IsRunning: true }).IsTrue();
+        }
+        finally
+        {
+            TestProcesses.KillRun(info);
+        }
+    }
+
+    [NotInParallel("signals")]
+    [Test]
+    public async Task KillCommand_AThreadsId_KillsNothing()
+    {
+        var (info, _) = await StartSupervisorAsync(Posix.GetEUid());
+        try
+        {
+            var (tid, _) = await ThreadOfAsync(info.SupervisorPid);
+            using var kill = Process.Start(new ProcessStartInfo(Supervisor,
+                ["kill", info.SupervisorPid.ToString(System.Globalization.CultureInfo.InvariantCulture), tid.ToString(System.Globalization.CultureInfo.InvariantCulture)])
+            {
+                RedirectStandardInput = true, UseShellExecute = false,
+            })!;
+            kill.StandardInput.Close();
+            await kill.WaitForExitAsync().WaitAsync(Guard);
+
+            await Task.Delay(200);
+            await Assert.That(kill.ExitCode).IsEqualTo(0);
+            await Assert.That(Posix.Status(info.SupervisorPid) is { IsRunning: true }).IsTrue();
+        }
+        finally
+        {
+            TestProcesses.KillRun(info);
+        }
+    }
+
+    [NotInParallel("signals")]
+    [Test]
+    public async Task SignalIf_OnlyWhatPassesTheCheck_NeverAThread()
+    {
+        using var sleeper = Sleeper();
+        await Until(() => Posix.Status(sleeper.Id) is { IsRunning: true });
+        var (info, _) = await StartSupervisorAsync(Posix.GetEUid());
+        try
+        {
+            var (tid, _) = await ThreadOfAsync(info.SupervisorPid);
+
+            var refused = Posix.SignalIf(sleeper.Id, Posix.SigKill, _ => false);
+            var thread = Posix.SignalIf(tid, Posix.SigKill, _ => true);
+            await Task.Delay(200);
+            await Assert.That(refused).IsEqualTo(SignalResult.Refused);
+            await Assert.That(sleeper.HasExited).IsFalse();
+            await Assert.That(thread).IsEqualTo(SignalResult.Refused);
+            await Assert.That(Posix.Status(info.SupervisorPid) is { IsRunning: true }).IsTrue();
+
+            var sent = Posix.SignalIf(sleeper.Id, Posix.SigKill, status => status.Parent == System.Environment.ProcessId);
+            await Assert.That(sent).IsIn(SignalResult.Sent, SignalResult.SentWithoutPidfd);
+            await Until(() => sleeper.HasExited);
+            await Assert.That(Posix.SignalIf(sleeper.Id, Posix.SigKill, _ => true)).IsIn(SignalResult.Gone, SignalResult.Refused);
+        }
+        finally
+        {
+            TestProcesses.KillRun(info);
+        }
+    }
+
+    [NotInParallel("signals")]
+    [Test]
+    public async Task TestProcesses_RefuseWhatIsntOurSupervisor()
+    {
+        // Our child, but not a supervisor: the helper the tests kill with won't touch it.
+        using var sleeper = Sleeper();
+
+        await Assert.That(() => TestProcesses.KillSupervisor(sleeper.Id)).Throws<InvalidOperationException>();
+        await Assert.That(() => TestProcesses.KillSupervisor(System.Environment.ProcessId)).Throws<InvalidOperationException>();
+        await Task.Delay(200);
+        await Assert.That(sleeper.HasExited).IsFalse();
+    }
+
+    [Test]
+    public async Task StartTimes_TellProcessesApart()
+    {
+        // The pid identity checks lean on /proc's start times (field 22); under gVisor they may not
+        // mean the same. Shown, not required: the checks don't rely on them alone.
+        var own = Posix.StartTime(System.Environment.ProcessId);
+        await Task.Delay(100);
+        using var sleeper = Sleeper();
+        await Until(() => Posix.StartTime(sleeper.Id) is not null);
+        var later = Posix.StartTime(sleeper.Id);
+        Console.WriteLine($"start times: this test host {own}, a process started now {later}; uptime {File.ReadAllText("/proc/uptime").Trim()}");
+
+        await Assert.That(own).IsNotNull();
+        await Assert.That(later).IsNotNull();
+        Skip.When(later!.Value <= own!.Value, $"start times don't tell processes apart here (this host {own}, one started later {later}): pid checks rest on thread group, process group and parent");
+        await Assert.That(later.Value).IsGreaterThan(own.Value);
+    }
+
     [NotInParallel("signals")]
     [Test]
     public async Task KillCommand_KillsTheProcessGroup()
@@ -448,7 +572,8 @@ public class AgentUserTests
     }
 
     /// <summary>Whether a supervisor whose launch allows <paramref name="clientUid"/> says hello to this process.</summary>
-    private async Task<bool> HelloAsync(int clientUid)
+    /// <summary>A supervisor started directly (its agent <c>sleep 60</c>), once it runs; its info and socket.</summary>
+    private async Task<(SupervisorInfo Info, string SocketPath)> StartSupervisorAsync(int clientUid)
     {
         var folder = Directory.CreateDirectory(Path.Combine(_root, Guid.NewGuid().ToString())).FullName;
         var socketPath = Path.Combine(_root, "sockets", $"{Guid.NewGuid()}.sock");
@@ -465,7 +590,24 @@ public class AgentUserTests
         }
 
         await Until(() => SupervisorFiles.ReadInfo(folder) is not null && File.Exists(socketPath));
-        var info = SupervisorFiles.ReadInfo(folder)!;
+        return (SupervisorFiles.ReadInfo(folder)!, socketPath);
+    }
+
+    /// <summary>
+    /// A thread of <paramref name="pid"/> that isn't its main one, and its own start time read straight
+    /// from /proc (as a file holding a stale pid would have it, if that pid is now this thread).
+    /// </summary>
+    private static async Task<(int Tid, long StartTime)> ThreadOfAsync(int pid)
+    {
+        int tid = 0;
+        await Until(() => (tid = Directory.GetDirectories($"/proc/{pid}/task").Select(d => int.Parse(Path.GetFileName(d), System.Globalization.CultureInfo.InvariantCulture)).FirstOrDefault(t => t != pid)) != 0);
+        var stat = File.ReadAllText($"/proc/{tid}/stat");
+        return (tid, long.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[19], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private async Task<bool> HelloAsync(int clientUid)
+    {
+        var (info, socketPath) = await StartSupervisorAsync(clientUid);
         try
         {
             using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -476,10 +618,7 @@ public class AgentUserTests
         }
         finally
         {
-            if (info.SupervisorPid > 1)
-            {
-                Posix.Kill(-info.SupervisorPid, Posix.SigKill);
-            }
+            TestProcesses.KillRun(info);
         }
     }
 

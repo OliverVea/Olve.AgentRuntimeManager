@@ -121,7 +121,7 @@ public class ClaudeRecoveryTests
         var (before, launch) = await StartAsync("stub:gate");
         before.Dispose();
         var info = SupervisorFiles.ReadInfo(Folder(launch))!;
-        Posix.Kill(info.SupervisorPid, Posix.SigKill);
+        TestProcesses.KillSupervisor(info.SupervisorPid);
         var server = Server();
         await Until(() => !server.Supervisors.IsListening(launch.SessionId));
 
@@ -145,7 +145,7 @@ public class ClaudeRecoveryTests
         Release(launch);
         await Until(() => ClaudeStreamJson.TurnSucceeded(File.ReadAllLines(Path.Combine(Folder(launch), SupervisorFiles.Output))));
         var info = SupervisorFiles.ReadInfo(Folder(launch))!;
-        Posix.Kill(info.SupervisorPid, Posix.SigKill);
+        TestProcesses.KillSupervisor(info.SupervisorPid);
         var server = Server();
         await Until(() => !server.Supervisors.IsListening(launch.SessionId));
 
