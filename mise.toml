@@ -27,7 +27,25 @@ dir = "src/backend"
 # Nothing may hang CI: a test taking over a minute fails by name (assembly [Timeout]); a testhost
 # silent for 5 minutes is dumped, with the tests still running named (--hangdump), and the whole
 # session ends after 15 (--timeout; a normal run takes about 3).
-run = ["dotnet build", "dotnet test --no-build --timeout 15m --hangdump --hangdump-timeout 5m"]
+# The test projects run one after the other (--max-parallel-test-modules 1): the unit tests start
+# and kill processes, as root in the gate, and nothing of theirs may reach the API tests' host.
+# Every signal they send is logged (TestProcesses); a failed run shows that log.
+run = [
+  "dotnet build",
+  """
+#!/usr/bin/env bash
+set -uo pipefail
+kills="${TMPDIR:-/tmp}/olve-arm-test-kills.log"
+rm -f "$kills"
+dotnet test --no-build --max-parallel-test-modules 1 --timeout 15m --hangdump --hangdump-timeout 5m
+status=$?
+if [ "$status" -ne 0 ] && [ -s "$kills" ]; then
+  echo "--- the signals the unit tests sent ($kills) ---"
+  cat "$kills"
+fi
+exit "$status"
+""",
+]
 
 [tasks."api:image"]
 description = "API tests against the real Docker image: builds and starts it, runs the suite in base-URL mode (needs Docker)"

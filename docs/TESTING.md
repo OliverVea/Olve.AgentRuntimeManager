@@ -22,6 +22,14 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
   catches a test blocking its thread, which TUnit's timeout doesn't end); the session ends after 15
   minutes (`--timeout`). The gate runs as root in a pod: tests must not assume a login user,
   a reaping pid 1 (an orphan may stay a zombie) or an exec-able `/tmp` beyond what they check.
+- **Tests signal only what they prove is theirs** (`TestProcesses`; as root nothing else stops a
+  stray signal, and the pids in a pod are small and dense). A pid from a file may name something
+  else by now, even one of another process's threads (`kill(tid)` takes that whole process). So a
+  supervisor must be a running process, not a thread, of this user, this test host's child, running
+  `olve-arm-supervisor`, and is signalled through a pidfd taken before that check; a group only
+  when a member was just found in it; one signal per run. Every signal (and every one refused) is
+  logged to `$TMPDIR/olve-arm-test-kills.log`, which `backend:test` prints when a run fails. The
+  test projects run one after the other (`--max-parallel-test-modules 1`).
 
 ## Pipeline shape (Olve.Pipelines)
 
