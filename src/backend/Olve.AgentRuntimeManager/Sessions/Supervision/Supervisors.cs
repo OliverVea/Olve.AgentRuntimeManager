@@ -217,7 +217,10 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             return false;
         }
 
-        if (Posix.StartTime(info.AgentPid) is not { } startTime || startTime != info.AgentStartTime)
+        // The agent, proven: a running process (not some process's thread: kill(tid) hits the whole
+        // process), started when recorded, in the supervisor's process group (whose id no other
+        // group can have while the agent is in it). Not so: whatever has that pid now isn't the run.
+        if (!Posix.IsInGroup(info.AgentPid, info.SupervisorPid, info.AgentStartTime))
         {
             return true;
         }
@@ -229,8 +232,9 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             return KillAsAgentUser(account, info);
         }
 
+        // One signal, to the group the agent was just found in (it's the agent's too): a second one
+        // to the agent's pid could, once the agent is reaped, reach a process that took the pid since.
         Posix.Kill(-info.SupervisorPid, Posix.SigKill);
-        Posix.Kill(info.AgentPid, Posix.SigKill);
         return true;
     }
 
