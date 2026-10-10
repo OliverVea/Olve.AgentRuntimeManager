@@ -77,6 +77,13 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   only changes what its own session says it did, which is no more than the agent could make its
   real output say; acceptable. `supervisor.json` is trusted for nothing that reaches beyond the
   agent user (below).
+- **`O_NOFOLLOW` isn't trusted alone** (`Posix.OpenNoFollow`): under gVisor, where the pipeline's
+  check runs, `O_NOFOLLOW|O_DIRECTORY` on a link to a directory opens the target. So after the
+  open, the path is `statx`ed without following (it must be a directory, or a regular file, and
+  not a link) and so is the descriptor (`AT_EMPTY_PATH`), and both must be the same device and
+  inode; anything else closes it and counts as missing. That is race-free: a swap between the
+  open and the check shows as another inode. `statx` because its struct has one layout on every
+  architecture (`struct stat` differs between x64 and arm64).
 - **Sockets:** under `/run/olve-arm/supervisors`, which the unit makes `2770 arm:arm-agent`
   (`ExecStartPre=+install …`, on every start: `/run` is cleared on reboot). The supervisor makes
   its socket `0660`, and **accepts connections only from ARM's uid** (`ClientUid` in the launch,
