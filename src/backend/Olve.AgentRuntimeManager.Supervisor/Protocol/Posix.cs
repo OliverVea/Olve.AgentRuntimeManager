@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -40,12 +41,18 @@ public static partial class Posix
     private static partial int Open(string path, int flags);
 
     /// <summary>
-    /// Opens <paramref name="path"/> for reading without following a link in its last component
-    /// (<c>O_NOFOLLOW</c>), without blocking on a FIFO, and only if it's a directory when
-    /// <paramref name="directory"/> is set. Null if it's missing or is a link (or, for a directory,
-    /// isn't one). For files in a folder an agent can write (docs/AGENT-USER.md): ARM must not be
-    /// made to read or change what a link points to.
+    /// Opens <paramref name="path"/> for reading without following a link in its last component,
+    /// without blocking on a FIFO, and only if it's a directory (<paramref name="directory"/>) or
+    /// else a regular file. Null if it's missing, a link, or of another kind. For files in a folder
+    /// an agent can write (docs/AGENT-USER.md): ARM must not be made to read or change what a link
+    /// points to.
     /// </summary>
+    /// <remarks>
+    /// <c>O_NOFOLLOW</c> isn't trusted alone: under gVisor (the pipeline's pods) <c>O_NOFOLLOW |
+    /// O_DIRECTORY</c> on a link to a directory opens the target. So what was opened is verified
+    /// (<see cref="IsAt"/>): the path, not followed, must be of the asked kind and the very inode the
+    /// descriptor holds. A swap between the open and the check shows as another inode.
+    /// </remarks>
     public static SafeFileHandle? OpenNoFollow(string path, bool directory = false)
     {
         if (!OperatingSystem.IsLinux())
@@ -66,19 +73,57 @@ public static partial class Posix
         var onlyDirectory = arm64 ? 0x4000 : 0x10000;
         const int readOnly = 0, nonBlocking = 0x800, closeOnExec = 0x80000;
         var fd = Open(path, readOnly | nonBlocking | closeOnExec | noFollow | (directory ? onlyDirectory : 0));
-        if (fd >= 0)
+        if (fd < 0)
         {
-            return new SafeFileHandle(fd, ownsHandle: true);
+            var error = Marshal.GetLastPInvokeError();
+            // ENOENT, ENXIO (a socket), ENOTDIR, ELOOP (a link).
+            return error is 2 or 6 or 20 or 40 ? null : throw new IOException($"Could not open '{path}' (errno {error}).");
         }
 
-        var error = Marshal.GetLastPInvokeError();
-        // ENOENT, ENXIO (a socket), ENOTDIR, ELOOP (a link).
-        return error is 2 or 6 or 20 or 40 ? null : throw new IOException($"Could not open '{path}' (errno {error}).");
+        var handle = new SafeFileHandle(fd, ownsHandle: true);
+        if (IsAt(handle, path, directory))
+        {
+            return handle;
+        }
+
+        handle.Dispose();
+        return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="handle"/> holds what is at <paramref name="path"/> itself, not
+    /// followed: the path is a directory (<paramref name="directory"/>) or a regular file, not a
+    /// link, and it and the descriptor are the same inode on the same device. Linux only (statx).
+    /// </summary>
+    public static bool IsAt(SafeFileHandle handle, string path, bool directory)
+    {
+        var expected = directory ? TypeDirectory : TypeRegular;
+        if (Lstat(path) is not { } atPath || atPath.Type != expected)
+        {
+            return false;
+        }
+
+        var added = false;
+        try
+        {
+            handle.DangerousAddRef(ref added);
+            return Fstat((int)handle.DangerousGetHandle()) is { } opened
+                && opened.Type == expected && opened.Device == atPath.Device && opened.Inode == atPath.Inode;
+        }
+        finally
+        {
+            if (added)
+            {
+                handle.DangerousRelease();
+            }
+        }
     }
 
     /// <summary>Whether anything is at <paramref name="path"/>, a link (even a dangling one) included: not followed.</summary>
     public static bool ExistsNoFollow(string path) =>
-        new FileInfo(path) is var info && (info.LinkTarget is not null || info.Exists || Directory.Exists(path));
+        OperatingSystem.IsLinux()
+            ? Lstat(path) is not null
+            : new FileInfo(path) is var info && (info.LinkTarget is not null || info.Exists || Directory.Exists(path));
 
     /// <summary>
     /// A session file opened for reading (<see cref="OpenNoFollow"/>); null if it's missing, a link,
@@ -91,26 +136,67 @@ public static partial class Posix
             return null;
         }
 
-        FileStream? file = null;
         try
         {
-            if ((File.GetAttributes(handle) & FileAttributes.Directory) == 0)
-            {
-                file = new FileStream(handle, FileAccess.Read);
-                if (file.CanSeek)
-                {
-                    return file;
-                }
-            }
+            return new FileStream(handle, FileAccess.Read);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            handle.Dispose();
+            return null;
+        }
+    }
+
+    /// <summary>What <c>statx</c> says of a file: its type (<c>S_IFMT</c> bits of the mode), device and inode.</summary>
+    private readonly record struct FileIdentity(int Type, ulong Device, ulong Inode);
+
+    private const int TypeMask = 0xF000; // S_IFMT
+    private const int TypeDirectory = 0x4000; // S_IFDIR
+    private const int TypeRegular = 0x8000; // S_IFREG
+
+    /// <summary>The file at <paramref name="path"/> itself (a link is a link); null if there's nothing there.</summary>
+    private static FileIdentity? Lstat(string path)
+    {
+        const int currentDirectory = -100, symlinkNoFollow = 0x100; // AT_FDCWD, AT_SYMLINK_NOFOLLOW
+        return Statx(currentDirectory, path, symlinkNoFollow);
+    }
+
+    /// <summary>The file a descriptor holds.</summary>
+    private static FileIdentity? Fstat(int fd)
+    {
+        const int emptyPath = 0x1000, symlinkNoFollow = 0x100; // AT_EMPTY_PATH
+        return Statx(fd, "", emptyPath | symlinkNoFollow);
+    }
+
+    /// <summary>
+    /// <c>statx(2)</c>: its <c>struct statx</c> has one layout on every architecture (unlike
+    /// <c>struct stat</c>): <c>stx_mask</c> at 0 (u32), <c>stx_mode</c> at 28 (u16), <c>stx_ino</c>
+    /// at 32 (u64), <c>stx_dev_major</c>/<c>stx_dev_minor</c> at 136/140 (u32); 256 bytes in all.
+    /// </summary>
+    private static FileIdentity? Statx(int directoryFd, string path, int flags)
+    {
+        const uint wanted = 0x1 | 0x100; // STATX_TYPE | STATX_INO
+        Span<byte> buffer = stackalloc byte[256];
+        buffer.Clear();
+        if (StatxCall(directoryFd, path, flags, wanted, ref MemoryMarshal.GetReference(buffer)) != 0)
+        {
+            return null;
         }
 
-        file?.Dispose();
-        handle.Dispose();
-        return null;
+        var mask = BinaryPrimitives.ReadUInt32LittleEndian(buffer[0..]);
+        if ((mask & wanted) != wanted)
+        {
+            return null;
+        }
+
+        var mode = BinaryPrimitives.ReadUInt16LittleEndian(buffer[28..]);
+        var inode = BinaryPrimitives.ReadUInt64LittleEndian(buffer[32..]);
+        var device = ((ulong)BinaryPrimitives.ReadUInt32LittleEndian(buffer[136..]) << 32) | BinaryPrimitives.ReadUInt32LittleEndian(buffer[140..]);
+        return new FileIdentity(mode & TypeMask, device, inode);
     }
+
+    [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int StatxCall(int directoryFd, string path, int flags, uint mask, ref byte buffer);
 
     [LibraryImport("libc", EntryPoint = "geteuid")]
     public static partial int GetEUid();

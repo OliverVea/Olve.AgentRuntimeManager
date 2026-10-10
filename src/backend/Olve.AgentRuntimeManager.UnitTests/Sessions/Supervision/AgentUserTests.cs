@@ -305,17 +305,25 @@ public class AgentUserTests
             opened = handle is null ? "refused" : "OPENED";
         }
 
+        // The verification on its own, as if open() had followed the link (gVisor does).
+        string verified;
+        using (var targetHandle = Posix.OpenNoFollow(target, directory: true))
+        {
+            verified = targetHandle is null ? "target not opened" : Posix.IsAt(targetHandle, work, directory: true) ? "ACCEPTED" : "refused";
+        }
+
         var preconditions = string.Join("; ",
             $"euid {Posix.GetEUid()}", $"Environment.UserName '{System.Environment.UserName}'", $"account {account}",
             $"Supervisor:User '{account.Name}'", $"arch {RuntimeInformation.ProcessArchitecture}/{RuntimeInformation.OSArchitecture}",
             $"os {RuntimeInformation.OSDescription}", $"work links to '{new FileInfo(work).LinkTarget}'",
             $"Directory.Exists(work) {Directory.Exists(work)}", $"ExistsNoFollow(work) {Posix.ExistsNoFollow(work)}",
-            $"OpenNoFollow(work, directory) {opened}");
+            $"OpenNoFollow(work, directory) {opened}", $"IsAt(target's handle, work) {verified}");
         Console.WriteLine($"Workplace_ALink preconditions: {preconditions}");
         await Assert.That(new FileInfo(work).LinkTarget).IsEqualTo(target).Because(preconditions);
         await Assert.That(Directory.Exists(work)).IsTrue().Because(preconditions);
         await Assert.That(Posix.ExistsNoFollow(work)).IsTrue().Because(preconditions);
         await Assert.That(opened).IsEqualTo("refused").Because(preconditions);
+        await Assert.That(verified).IsEqualTo("refused").Because(preconditions);
 
         IAgentRun? run = null;
         Exception? thrown = null;
