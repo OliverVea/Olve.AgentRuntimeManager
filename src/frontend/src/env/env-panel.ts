@@ -10,7 +10,7 @@ type Fold = "own" | "registered" | "defaults";
 type Focus = { selector: string; start: number | null; end: number | null };
 
 /**
- * The composer's env (approved mock: mocks/env.html): the `env` button in the settings row and
+ * The composer's env: the `env` button in the settings row and
  * the panel under the row, in the page's light DOM so the page's styles apply. The panel holds
  * the session's own NAME = VALUE rows, the registered non-default variables to pick (`useEnv`)
  * and, folded, the default ones every agent gets.

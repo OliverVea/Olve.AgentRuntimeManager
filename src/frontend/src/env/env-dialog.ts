@@ -8,7 +8,7 @@ import type { EnvRegistry } from "./env-registry.js";
 const icon = (name: string) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 /**
- * The Environment variables dialog (approved mock: mocks/env.html), opened from Options: the
+ * The Environment variables dialog, opened from Options: the
  * registered variables (name, value, an "every agent" switch that saves at once, when it was
  * updated, edit in place, delete with a confirm in the row) and a folding form to add one. In the
  * page's light DOM, next to the other dialogs. The list is re-rendered when it changes; typing in

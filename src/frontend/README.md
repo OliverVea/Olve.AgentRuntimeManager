@@ -28,7 +28,6 @@ src/frontend/
 ├─ index.html                 the page: header, composer, views, dialogs (static markup)
 ├─ vite.config.ts             dev server + API proxy + the `@arm/client` alias
 ├─ mocks/sessions.html        the approved target (fake data; kept until the screen is done)
-├─ mocks/env.html             the approved target for environment variables
 ├─ src/
 │  ├─ main.ts                 entry: wires the page (auth, header, composer, dialogs, options, routes)
 │  ├─ styles.css              the page's styles and the colour tokens (light + dark)
@@ -40,7 +39,7 @@ src/frontend/
 │  │  ├─ session-store.ts     the sessions, from a snapshot + the event stream (see Live updates)
 │  │  ├─ new-session.ts       the composer's fields → a create request (validation)
 │  │  └─ format.ts            durations, times, ids, provider/model
-│  ├─ env/                     environment variables (M5d; mock: mocks/env.html)
+│  ├─ env/                     environment variables (M5d)
 │  │  ├─ env-names.ts         the name rules, as the server's; the composer's rows → a session's env
 │  │  ├─ env-registry.ts      the registered variables (list, set, delete), shared by the two below
 │  │  ├─ env-panel.ts         the composer's env button and panel (light DOM)

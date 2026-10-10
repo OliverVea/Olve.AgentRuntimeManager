@@ -578,7 +578,7 @@ section.opt .field select {
   color: var(--warn);
 }
 
-/* ---- environment variables (approved mock: mocks/env.html) ---- */
+/* ---- environment variables ---- */
 /* The composer's env: a field in the settings row, and a panel under the row when it's open. */
 .env-toggle {
   display: inline-flex;
