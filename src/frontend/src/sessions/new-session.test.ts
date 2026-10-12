@@ -54,6 +54,7 @@ describe("newSession", () => {
       value: { repos: [{ url: "git@github.com:o/a.git" }, { url: "https://host/b", ref: "v1" }] },
     });
     const bare = newSession({ ...fields, repos: [{ url: " ", ref: "" }] }, "oliver");
+    expect(bare.ok).toBe(true);
     expect(bare.ok && "repos" in bare.value).toBe(false);
   });
 
