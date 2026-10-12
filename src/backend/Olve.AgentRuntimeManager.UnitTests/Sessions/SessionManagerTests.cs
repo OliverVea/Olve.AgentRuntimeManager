@@ -356,7 +356,7 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
-    public async Task Repos_AreReturnedWithTheFolderAndBranchTheCheckoutUses()
+    public async Task Repos_AreStoredAndReturnedWithTheirFolderAndBranch()
     {
         var request = Request() with { Repos = [new CreateSessionRepo { Url = "git@github.com:o/a.git" }, new CreateSessionRepo { Url = "https://x/b/", Ref = "v1" }] };
 
