@@ -3,8 +3,9 @@
 # ARM runs in a libvirt VM on the homelab host (docs/OPEN-QUESTIONS.md A4). This step copies the
 # built image tarball + src/deploy/vm to the host and runs vm-deploy.sh there, which ensures the
 # VM exists (first run creates it), installs the release as a systemd service, and ensures the
-# host relay the Olve.Homelab route targets, then confirms the `claude` provider with one real
-# session through ARM (src/deploy/vm/claude-check.sh). Idempotent; a failure stops the chain.
+# host relay the Olve.Homelab route targets, then runs ARM's beta checks: real sessions through ARM
+# that prove its main paths end to end (src/deploy/vm/beta-check.py). Idempotent; a failure stops
+# the chain, so prod never deploys.
 set -e
 
 mkdir -p /tmp
@@ -49,13 +50,20 @@ for i in 1 2 3 4 5; do
 done
 [ "$healthy" = 1 ] || { echo "beta health check failed" >&2; exit 1; }
 
-# One real claude session through ARM per bundle (a Haiku joke; it shows in beta's history), run
-# in the VM. The machine client's secret travels inside the script on stdin, never on a command
-# line. Bundles from before Claude Code was deployed have no check (and no Claude Code).
-if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/claude-check.sh" ]; then
-  echo "Confirming the claude provider on beta..."
-  { printf 'VERSION=%s\nCLIENT_SECRET_B64=%s\n' "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
-    cat "$INPUT_DIR/vm/claude-check.sh"; } |
+# ARM's beta checks, in the VM as arm (src/deploy/vm/beta-check.py): real sessions through ARM,
+# three Haiku turns per bundle (none when a retried deploy's version already passed), each check
+# saying what it proved or what failed. The machine client's secret travels inside the script on
+# stdin (a PRESET in front of it), never on a command line or in an environment; the VM's
+# `timeout` bounds the whole run (the checks' own waits are bounded too). Bundles from before
+# Claude Code was deployed have no checks (and no Claude Code).
+if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
+  case "$VERSION" in
+    ''|*[!0-9A-Za-z._-]*) echo "unexpected version '$VERSION': not checking beta" >&2; exit 1 ;;
+  esac
+  echo "Running the beta checks..."
+  { printf 'PRESET = {"BETA_CHECK_VERSION": "%s", "BETA_CHECK_CLIENT_SECRET_B64": "%s"}\n' \
+      "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
+    cat "$INPUT_DIR/vm/beta-check.py"; } |
     ssh -o StrictHostKeyChecking=no "$HOST" \
-      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 bash -s"
+      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 timeout -k 15 330 python3 -u -"
 fi

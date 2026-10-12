@@ -22,6 +22,14 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     /// <summary>Guards the attached connection, the output's end and the exit, so output is sent in order, once.</summary>
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _input = new(1, 1);
+
+    /// <summary>
+    /// Held while the agent's process tree is being killed. The supervisor doesn't end before such a
+    /// kill does: the agent dies first, and exiting then would end the kill halfway, leaving the rest
+    /// of the tree (a tool's command) running, or stopped for good (the kill stops each process
+    /// before it kills it).
+    /// </summary>
+    private readonly Lock _killing = new();
     private readonly SupervisorLog _log = new(Path.Combine(launch.Folder, SupervisorFiles.Log));
     private readonly string _outputPath = Path.Combine(launch.Folder, SupervisorFiles.Output);
 
@@ -82,6 +90,11 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
         await Task.WhenAll(stdoutPump, stderrPump, input);
         await _agent.WaitForExitAsync();
+        lock (_killing)
+        {
+            // A kill under way has finished.
+        }
+
         var exitCode = _agent.ExitCode;
         WriteExit(exitCode, error: null);
         _log.Write($"run {launch.RunId}: agent exited with {exitCode}");
@@ -355,13 +368,16 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     private void Kill()
     {
         _log.Write($"run {launch.RunId}: killing the agent");
-        try
+        lock (_killing)
         {
-            _agent.Kill(entireProcessTree: true);
-        }
-        catch (InvalidOperationException)
-        {
-            // Already exited.
+            try
+            {
+                _agent.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // Already exited.
+            }
         }
     }
 

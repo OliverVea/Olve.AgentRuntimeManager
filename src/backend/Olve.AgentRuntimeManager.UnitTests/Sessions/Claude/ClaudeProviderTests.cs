@@ -245,6 +245,21 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task Kill_InAToolCall_LeavesNothingOfItRunning()
+    {
+        // Seen on the beta check: the supervisor exited as soon as the agent died, ending its
+        // kill of the agent's process tree halfway, and the rest stayed behind, stopped.
+        var marker = Guid.NewGuid().ToString();
+        var run = Provider().Start(Launch($"stub:tree {marker}"));
+        await Until(() => Running(marker) == 2);
+
+        run.Kill();
+        await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(10))).IsTypeOf<AgentOutcome.Killed>();
+
+        await Until(() => Running(marker) == 0);
+    }
+
+    [Test]
     public async Task Agent_ThatLingersAfterItsTurn_IsStoppedAndStillCompletes()
     {
         var run = Provider(o => o.ExitGrace = TimeSpan.FromMilliseconds(200)).Start(Launch("stub:linger"));
@@ -378,6 +393,22 @@ public class ClaudeProviderTests
     /// <summary>How many turns the agent ended (<c>result</c> events in its output).</summary>
     private int Results(AgentLaunch launch) =>
         File.ReadAllLines(Path.Combine(Folder(launch), "output.jsonl")).Count(l => ClaudeStreamJson.ParseResult(l) is not null);
+
+    /// <summary>How many live processes (not zombies) have <paramref name="marker"/> in their command line.</summary>
+    private static int Running(string marker) =>
+        Directory.EnumerateDirectories("/proc").Count(folder =>
+        {
+            try
+            {
+                return int.TryParse(Path.GetFileName(folder), out var pid)
+                    && File.ReadAllText(Path.Combine(folder, "cmdline")).Contains(marker, StringComparison.Ordinal)
+                    && Posix.StartTime(pid) is not null;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        });
 
     private static async Task Until(Func<bool> condition)
     {

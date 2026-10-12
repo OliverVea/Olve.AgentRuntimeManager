@@ -1,0 +1,128 @@
+using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Runtime.Versioning;
+using System.Text.Json;
+
+namespace Olve.AgentRuntimeManager.ApiTests.BetaCheck;
+
+/// <summary>
+/// The beta check (<c>src/deploy/vm/beta-check.py</c>, run by the pipeline's deploy-beta in the VM)
+/// against a local ARM with a stub Claude Code (<see cref="LocalArm"/>): on a working ARM every
+/// check passes, once per version; each failure the stub can bring about fails the check and says
+/// what failed, and leaves nothing running. What a working ARM can't be made to do (a wrong
+/// conversation, activity or event) is tested on the check's own logic (<c>beta_check_test.py</c>).
+/// Starts ARM itself, so not against a base-URL target. Needs <c>python3</c> (mise.toml pins it).
+/// </summary>
+[UnsupportedOSPlatform("windows")]
+public class BetaCheckTests
+{
+    private static readonly string[] Checks =
+    [
+        "health", "server info", "auth", "provider health", "earlier runs", "event stream", "tool session",
+        "conversation", "activity", "continue", "kill", "delete", "lifecycle events", "record",
+    ];
+
+    [Before(Test)]
+    public void LocalOnly() =>
+        Skip.When(Environment.GetEnvironmentVariable(ApiTarget.BaseUrlVariable) is { Length: > 0 },
+            $"Starts an ARM of its own; not with {ApiTarget.BaseUrlVariable} set.");
+
+    [Test]
+    public async Task Check_OnAWorkingArm_PassesEveryCheck_OncePerVersion()
+    {
+        await using var arm = await LocalArm.StartAsync();
+        // As an earlier run that failed left it: still working.
+        var leftover = await CreateCheckSessionAsync(arm, "```sh\nsleep 60\n```");
+
+        var first = await arm.RunCheckAsync();
+
+        await Assert.That(first.ExitCode).IsEqualTo(0).Because(first.ToString());
+        foreach (var check in Checks)
+        {
+            await Assert.That(first.Output).Contains($"ok   {check}:");
+        }
+
+        await Assert.That(first.Output).Contains($"killed session {leftover}");
+        await Assert.That(first.Output).Contains($"Beta check passed for {LocalArm.Version} (3 model turns)");
+        var sessions = await arm.CheckSessionsAsync();
+        // The leftover (killed by the check) and the continued one; the killed one was deleted.
+        await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "killed"]);
+        await Assert.That(await arm.EnvAsync()).IsEquivalentTo(new Dictionary<string, string> { ["BETA_CHECK_PASSED"] = LocalArm.Version });
+
+        // A retried deploy of the same version starts nothing.
+        var again = await arm.RunCheckAsync();
+
+        await Assert.That(again.ExitCode).IsEqualTo(0).Because(again.ToString());
+        await Assert.That(again.Output).Contains($"{LocalArm.Version} already passed");
+        await Assert.That(again.Output).DoesNotContain("ok   tool session");
+        await Assert.That(again.Output).Contains("(0 model turns)");
+        await Assert.That(await arm.CheckSessionsAsync()).IsEquivalentTo(sessions);
+    }
+
+    [Test]
+    [Arguments("no-env", "", "FAIL tool session: the registered default variable BETA_CHECK_NONCE didn't reach the agent (it saw '')")]
+    [Arguments("leak-env", "", "FAIL tool session: ARM's own configuration (Auth__Authority) reached the agent's environment")]
+    [Arguments("no-tool", "", "FAIL tool session: the agent made no Bash tool call (tool calls: none)")]
+    [Arguments("ok", "BETA_CHECK_AGENT_USER=nobody", "', expected 'nobody'")]
+    [Arguments("ok", "BETA_CHECK_SAME_USER=0", "the user ARM (and this check) runs as")]
+    [Arguments("leak", "BETA_CHECK_KILL_SECONDS=2", "FAIL kill: 2 processes of killed session")]
+    [Arguments("logged-out", "", "FAIL provider health: the claude provider is unauthorized")]
+    [Arguments("ok", "BETA_CHECK_VERSION=2026.1.1.1", "FAIL server info: ARM says it is version '2026.10.12.1' in 'beta', expected '2026.1.1.1' in 'beta'")]
+    public async Task Check_WhenSomethingIsWrong_FailsSayingWhat_AndLeavesNothingRunning(string mode, string setting, string expected)
+    {
+        await using var arm = await LocalArm.StartAsync(mode);
+
+        var run = await arm.RunCheckAsync(setting.Length > 0 ? [setting] : []);
+
+        await Assert.That(run.ExitCode).IsEqualTo(1).Because(run.ToString());
+        await Assert.That(run.Output).Contains(expected);
+        await Assert.That(run.Output).Contains("Beta check FAILED");
+        await Assert.That(run.Output).DoesNotContain("Traceback");
+        await Assert.That((await arm.CheckSessionsAsync()).Where(s => s.Status is "queued" or "working")).IsEmpty();
+        await Assert.That(await arm.EnvAsync()).IsEmpty();
+    }
+
+    [Test]
+    public async Task Check_WhenAnAgentIsStillWorking_KillsItBeforeItEnds()
+    {
+        await using var arm = await LocalArm.StartAsync("hang");
+
+        var run = await arm.RunCheckAsync("BETA_CHECK_TURN_SECONDS=3");
+
+        await Assert.That(run.Output).Contains("cleanup: killed session");
+        await Assert.That((await arm.CheckSessionsAsync()).Select(s => s.Status)).IsEquivalentTo(["killed"]);
+    }
+
+    [Test]
+    public async Task CheckLogic_PassesItsOwnTests()
+    {
+        var info = new ProcessStartInfo("python3")
+        {
+            WorkingDirectory = Path.Combine(AppContext.BaseDirectory, "BetaCheck"),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        info.ArgumentList.Add("beta_check_test.py");
+        using var process = Process.Start(info)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var errors = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        await Assert.That(process.ExitCode).IsEqualTo(0).Because(await output + await errors);
+    }
+
+    /// <summary>A session as the check creates them (its caller, its tag).</summary>
+    private static async Task<string> CreateCheckSessionAsync(LocalArm arm, string prompt)
+    {
+        using var client = arm.Client();
+        using var response = await client.PostAsJsonAsync("/api/sessions", new
+        {
+            prompt, provider = "claude", model = "haiku", caller = "deploy-beta",
+            env = new Dictionary<string, string> { ["BETA_CHECK_VERSION"] = "2026.1.1.0" },
+        });
+        response.EnsureSuccessStatusCode();
+        using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return created.RootElement.GetProperty("id").GetString()!;
+    }
+}
