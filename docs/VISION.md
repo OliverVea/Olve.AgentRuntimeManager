@@ -9,7 +9,34 @@ re-evaluated and scoped when it's picked up.
   (host registry, `--target`/`--cwd` per session). ARM as a dispatcher across your machines.
 - **OS sandbox for local agents**: cgroups + bubblewrap/nsjail for filesystem and resource
   isolation without a container runtime.
-- **Per-session containers**: reproducible toolchains per session, adoption by container id.
+- **A network and Docker of its own per session** (spiked on beta 2026-10-12; scripts in the
+  gitignored `sandbox/isolation-spike/`): so several agents can work on the same service at once
+  (the aim: 5 on one repo, 10–20 in all) without fighting over ports, compose projects or
+  containers. Each session's agent starts in its own network namespace with its own rootless
+  Docker daemon (rootlesskit + slirp4netns, no ports forwarded to the VM), and the agent, the
+  daemon and every container sit in one systemd slice of the agent user (which needs lingering).
+  Proven with two sessions at once: the same published ports, compose projects of the same name,
+  Testcontainers, an ARM image build each, and an ARM restart under both. From inside, ARM is
+  reached at the VM's address or its public URL, not `127.0.0.1`.
+  - **ARM's own code ends a session's slice, never an agent** (a hard requirement): the
+    supervisor stops the slice when the agent exits or is killed, and ARM stops every session
+    slice without a live session at startup. Today's kill doesn't reach into the slice: in the
+    spike a killed session's agent, daemon and containers all kept running.
+  - ARM also removes the session's Docker data (owned by sub-uids, so through rootlesskit, not a
+    plain delete). It's about 4 GB after one ARM image build, since daemons share nothing: the
+    data goes on its own virtual disk (NVMe first; the host's HDD if space runs out, later
+    perhaps an NVMe cache in front of it with LVM), and a shared registry mirror saves the pulls.
+  - The VM needs sizing for it (about 200 MiB per idle session before the agent; builds take the
+    CPU). One VM holds every session; more machines come with the executors above.
+  - Devcontainers fit on top as something an agent uses per repo (`devcontainer up` in its own
+    Docker), not as what a session runs in: a session has zero or several repos.
+- **A user per session**: sessions above still share one agent user, so an agent can reach
+  another session's network, Docker socket, slice and files (the gap in
+  [`AGENT-USER.md`](AGENT-USER.md), a little wider). A user per session or slot, each with its own
+  sub-uid range, closes it; ARM already starts each supervisor as a named user.
+- **Reaching a session's services**: open what a session's agent is running (its web UI, its
+  API) from your browser or CLI, through ARM: a proxy into the session's network, since nothing
+  is published on the VM. The spike only reached in from the VM itself.
 - **Kubernetes Jobs**: agents as Jobs/Pods for scheduling, quotas and isolation (distributed mode).
 - **Multi-tenant isolation**: uid-level separation between tenants' agents.
 - **HA ARM**: multiple stateless replicas over shared state (Postgres `NOTIFY` for approvals and
@@ -44,7 +71,10 @@ re-evaluated and scoped when it's picked up.
   you answer it or wake it by hand, resuming its conversation. Agents (a `sleep` tool) and users
   can also put a session to sleep until a time ("check the deploy in 20 minutes") or an event
   (CI finished, a subagent ended). Timeouts then count active time, not time asleep. The UI lists
-  sleeping sessions with their wake condition; they can be woken or killed.
+  sleeping sessions with their wake condition; they can be woken or killed. Freezing a run by
+  hand is the same thing (2026-10-12): no snapshot of the machine, only what a session already
+  keeps, its workplace (the git worktrees) and the agent's history, from which it continues
+  later. Its containers are gone by then; the agent starts what it needs again.
 - **Subagents**: sessions an agent starts itself. They are child sessions (M5c "Parent
   sessions": same parent link, nesting, and ending with their parent), but not only that: an
   agent may start subagents only from pre-defined arguments (e.g. named agent configs or
@@ -75,6 +105,10 @@ re-evaluated and scoped when it's picked up.
 - **Scheduled restart with drain**: announce, stop accepting, let sessions finish, restart.
 - **Hard restart**.
 - **Composable dynamic configuration**: change config without restart.
+- **VM size from the pipeline** (2026-10-12; while ARM deploys into VMs): each VM's CPUs, memory
+  and disk are numbers in `vm-deploy.sh` today, used only when the VM is first made. Keep them as
+  defaults, let the pipeline's deploy steps override them with variables, and apply a changed size
+  to an existing VM too (CPUs and memory at its next restart, since restarting ends its sessions).
 
 ## Approvals & policies
 
