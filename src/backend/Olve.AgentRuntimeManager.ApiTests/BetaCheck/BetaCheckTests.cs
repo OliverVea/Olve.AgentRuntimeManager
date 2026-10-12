@@ -34,6 +34,10 @@ public class BetaCheckTests
         await using var arm = await LocalArm.StartAsync();
         // As an earlier run that failed left it: still working.
         var leftover = await CreateCheckSessionAsync(arm, "fake:hang");
+        // As an earlier run that couldn't delete its claude session left it: ended, its worktree still there.
+        var withRepo = await CreateCheckSessionAsync(arm, "Reply with one word.", "claude", arm.Repo);
+        await WaitEndedAsync(arm, withRepo);
+        await Assert.That(arm.Worktrees()).Count().IsEqualTo(1);
 
         var first = await arm.RunCheckAsync();
 
@@ -44,11 +48,13 @@ public class BetaCheckTests
         }
 
         await Assert.That(first.Output).Contains($"killed session {leftover}");
+        await Assert.That(first.Output).Contains($"deleted session {withRepo} (and its worktree)");
         await Assert.That(first.Output).Contains("deleting it while it worked was refused (409), the kill ended it killed");
         await Assert.That(first.Output).Contains($"Beta check passed for {LocalArm.Version} (1 model turn)");
         await Assert.That(first.Output).Contains("beta-check-repo (the API's folder) is a work tree of its own on arm/");
         var sessions = await arm.CheckSessionsAsync();
-        // The leftover (killed by the check), the continued fake one and the record; the killed fake one and the claude one are deleted.
+        // The leftover (killed by the check, kept: it has no repository), the continued fake one and the record; the killed fake one
+        // and the claude ones (the earlier run's and this one's) are deleted.
         await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "completed", "killed"]);
         await Assert.That(sessions.Count(s => s.Provider == "claude")).IsEqualTo(0);
         // Deleting the claude session removed its worktree: the shared copy names none but itself.
@@ -148,7 +154,7 @@ public class BetaCheckTests
 
         await Assert.That(step.ExitCode).IsEqualTo(0).Because(step.Output);
         await Assert.That(step.Ssh).Contains("kubectl --request-timeout=20s -n apps-beta get configmap authentik-ca -o jsonpath='{.data.auth-beta-ca\\.crt}'");
-        await Assert.That(step.Check).Contains("-k 30 240 /mise/python3 -u .pipelines/scripts/beta-check.py");
+        await Assert.That(step.Check).Contains("-k 30 300 /mise/python3 -u .pipelines/scripts/beta-check.py");
         await Assert.That(step.Check).Contains("BETA_CHECK_API=http://100.100.117.17:18792\n");
         await Assert.That(step.Check).Contains("BETA_CHECK_VERSION=2026.10.12.4\n");
         await Assert.That(step.Check).Contains("BETA_CHECK_AUTHORITY=https://auth-beta.ovea.pro/application/o/olve-arm/\n");
@@ -315,16 +321,32 @@ public class BetaCheckTests
             : null;
 
     /// <summary>A session as the check creates them (its caller, its tag).</summary>
-    private static async Task<string> CreateCheckSessionAsync(LocalArm arm, string prompt)
+    private static async Task<string> CreateCheckSessionAsync(LocalArm arm, string prompt, string provider = "fake", string? repo = null)
     {
         using var client = arm.Client();
         using var response = await client.PostAsJsonAsync("/api/sessions", new
         {
-            prompt, provider = "fake", model = "fake", caller = "test-after-beta",
+            prompt, provider, model = provider == "fake" ? "fake" : "haiku", caller = "test-after-beta",
             env = new Dictionary<string, string> { ["BETA_CHECK_VERSION"] = "2026.1.1.0" },
+            repos = repo is null ? null : new[] { new { url = repo } },
         });
         response.EnsureSuccessStatusCode();
         using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return created.RootElement.GetProperty("id").GetString()!;
+    }
+
+    /// <summary>Waits (bounded) until the session has ended.</summary>
+    private static async Task WaitEndedAsync(LocalArm arm, string id)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while ((await arm.CheckSessionsAsync()).Single(s => s.Id == id).Status is "queued" or "working")
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Session {id} didn't end within 30 s.");
+            }
+
+            await Task.Delay(200);
+        }
     }
 }

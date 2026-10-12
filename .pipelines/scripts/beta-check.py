@@ -77,16 +77,20 @@ RECORD_PROMPT = "Beta checks passed for {version}: the beta check's record. fake
 # Then, for each folder in its workplace (where ARM checks out the session's repos), the folder as
 # the shell sees it, the top of the git work tree it's in, and its current branch: the check
 # compares these with the folder and branch ARM's API says (it doesn't work them out itself). A
-# folder that's a checkout of its own is the top of its own work tree.
+# folder that's a checkout of its own is the top of its own work tree; one of ARM's (a worktree of
+# its shared copy of the repository) has a git folder apart from the copy's (its common one).
 TOOL_COMMAND = (
     'echo "user=$(id -un) nonce=${BETA_CHECK_NONCE:-} version=${BETA_CHECK_VERSION:-} '
     'withheld=${Auth__Authority:-}"; '
     'for d in */; do d=${d%/}; echo "folder=$d path=$(cd "$d" && pwd -P) '
     'toplevel=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) '
+    'gitdir=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null) '
+    'common=$(cd "$d" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) '
     'branch=$(git -C "$d" branch --show-current 2>/dev/null)"; done'
 )
 TOOL_LINE = re.compile(r"user=(?P<user>\S*) nonce=(?P<nonce>\S*) version=(?P<version>\S*) withheld=(?P<withheld>.*)")
-FOLDER_LINE = re.compile(r"folder=(?P<folder>\S*) path=(?P<path>\S*) toplevel=(?P<toplevel>\S*) branch=(?P<branch>\S*)$")
+FOLDER_LINE = re.compile(r"folder=(?P<folder>\S*) path=(?P<path>\S*) toplevel=(?P<toplevel>\S*) gitdir=(?P<gitdir>\S*) "
+                         r"common=(?P<common>\S*) branch=(?P<branch>\S*)$")
 # The repository the claude session is created with: one the agent user can clone on beta.
 DEFAULT_REPO_URL = "git@github.com:OliverVea/Olve.AgentRuntimeManager.git"
 TOOL_PROMPT = (
@@ -241,8 +245,8 @@ class Api:
         self.base = base
         self.auth = {"Authorization": f"Bearer {token}"}
 
-    def call(self, method, path, body=None, expect=(200,), headers=None, auth=True):
-        status, value = http(method, self.base + path, body, {**(self.auth if auth else {}), **(headers or {})})
+    def call(self, method, path, body=None, expect=(200,), headers=None, auth=True, timeout=None):
+        status, value = http(method, self.base + path, body, {**(self.auth if auth else {}), **(headers or {})}, timeout=timeout)
         if status not in expect:
             raise CheckFailed(f"{method} {path} answered {status}, expected {'/'.join(map(str, expect))}{error_text(value)}")
         return value
@@ -701,12 +705,19 @@ def api_repo(session, url):
     """The session's one repository as ARM's API gives it: (folder, branch); CheckFailed if it doesn't."""
     repos = session.get("repos") or []
     if len(repos) != 1 or repos[0].get("url") != url:
-        raise CheckFailed(f"session {session.get('id')} lists the repos {short(repos)}, expected just {url}")
+        listed = [{**r, "url": shown(str(r.get("url")))} for r in repos if isinstance(r, dict)]
+        raise CheckFailed(f"session {session.get('id')} lists the repos {short(listed)}, expected just {shown(url)}")
     folder, branch = repos[0].get("folder"), repos[0].get("branch")
     missing = [name for name, value in (("folder", folder), ("branch", branch)) if not isinstance(value, str) or not value.strip()]
     if missing:
-        raise CheckFailed(f"session {session.get('id')}'s repo {url} has no {' or '.join(missing)} in ARM's answer: {short(repos[0])}")
+        raise CheckFailed(f"session {session.get('id')}'s repo {shown(url)} has no {' or '.join(missing)} in ARM's answer: "
+                          f"{short({**repos[0], 'url': shown(url)})}")
     return folder, branch
+
+
+def shown(url):
+    """A URL as the log may show it: without credentials (an https URL may carry a token)."""
+    return re.sub(r"(://)[^/@]*@", r"\1…@", url)
 
 
 def checkout_problems(conversation, folder, branch):
@@ -724,6 +735,9 @@ def checkout_problems(conversation, folder, branch):
         problems.append(f"{folder} isn't a git work tree")
     elif line["toplevel"] != line["path"]:
         problems.append(f"{folder} isn't a checkout of its own: it's inside the work tree {line['toplevel']}")
+    elif not line["gitdir"] or not line["common"] or line["gitdir"] == line["common"]:
+        problems.append(f"{folder} isn't a worktree of a shared copy (its git folder is {line['gitdir']!r}, "
+                        f"the common one {line['common']!r})")
     if line["branch"] != branch:
         problems.append(f"{folder} is on the branch {line['branch']!r}, not the session's {branch!r}")
     return problems
@@ -766,7 +780,7 @@ def check_claude_session(ctx):
         raise CheckFailed("ARM's own configuration (Auth__Authority) reached the agent's environment")
     problems = checkout_problems(conversation, folder, branch)
     if problems:
-        raise CheckFailed(f"session {session_id}'s checkout of {settings.repo_url}: " + "; ".join(problems))
+        raise CheckFailed(f"session {session_id}'s checkout of {shown(settings.repo_url)}: " + "; ".join(problems))
     entries = conversation.get("entries") or []
     if not entries or entries[-1].get("kind") != "turn_end" or entries[-1].get("isError"):
         raise CheckFailed(f"session {session_id}'s conversation doesn't end with a turn that succeeded")
@@ -874,7 +888,8 @@ def cleanup(ctx):
                          {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
             say(f"cleanup: killed session {session_id}", stop=False)
         if status == 200 and session.get("repos"):
-            ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204, 404))
+            # A delete waits for the worktree's removal: longer than cleanup's other requests, within the step's grace.
+            ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204, 404), timeout=20)
             say(f"cleanup: deleted session {session_id} (and its worktree)", stop=False)
 
     def find_ours():

@@ -83,7 +83,7 @@ else
   BETA_CHECK_API=$ARM_API_BASE_URL BETA_CHECK_VERSION=$VERSION \
   BETA_CHECK_AUTHORITY=https://auth-beta.ovea.pro/application/o/olve-arm/ BETA_CHECK_CLIENT_ID=olve-arm \
   BETA_CHECK_CLIENT_SECRET=$ARM_BETA_OIDC_CLIENT_SECRET BETA_CHECK_CA_FILE=$CA_FILE BETA_CHECK_REPO_URL=$BETA_CHECK_REPO_URL \
-    timeout -k 30 240 "$PY" -u .pipelines/scripts/beta-check.py
+    timeout -k 30 300 "$PY" -u .pipelines/scripts/beta-check.py
 fi
 
 echo "Beta confirmed"

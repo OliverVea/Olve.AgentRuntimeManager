@@ -101,7 +101,8 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   command lists each folder in the session's workplace with the top of its git work tree and its
   current branch; the API's answer must list the repository with a `folder` and a `branch` (none is
   a failure), and the check compares the command's output with them: that folder exists, is a work
-  tree of its own (not a plain folder, not inside another), and is on the API's branch. The check
+  tree of its own (not a plain folder, not inside another) and a worktree of a shared copy (its git
+  folder apart from the common one), and is on the API's branch. The check
   never works the names out itself. Then the session is deleted (204, then 404), which removes its
   worktree; what is left of it on disk isn't visible through the API, so that part is proved per
   push only (locally, the shared copy lists no worktree afterwards). A run that fails deletes it
@@ -111,7 +112,7 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   fake available), a scripted conversation and its activity checked against each other, a message
   continuing the ended session (M11), a working session refused deletion (409), killed (`killed`,
   by the user) and deleted, and the event stream (the three sessions' lifecycles). About a minute
-  in all, every wait bounded (the whole run by the step's `timeout`, 4 minutes). Idempotent per
+  in all, every wait bounded (the whole run by the step's `timeout`, 5 minutes). Idempotent per
   bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed for
   <version>"), and a retried run for it starts no sessions; a run first kills what a failed one
   left running. Left on beta: the continued fake session and the record (the claude session is

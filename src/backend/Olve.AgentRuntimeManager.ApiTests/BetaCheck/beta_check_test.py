@@ -179,14 +179,19 @@ class RepoTests(unittest.TestCase):
         return "; ".join(check.checkout_problems(self.conversation(*lines), "Olve.AgentRuntimeManager", "arm/1a2b3c4d"))
 
     def test_a_checkout_as_the_api_says_has_none(self):
-        self.assertEqual(self.problems("folder=other path=/w/other toplevel= branch=",
+        self.assertEqual(self.problems("folder=other path=/w/other toplevel= gitdir= common= branch=",
                                        "folder=Olve.AgentRuntimeManager path=/w/Olve.AgentRuntimeManager "
-                                       "toplevel=/w/Olve.AgentRuntimeManager branch=arm/1a2b3c4d"), "")
+                                       "toplevel=/w/Olve.AgentRuntimeManager gitdir=/r/x.git/worktrees/O common=/r/x.git "
+                                       "branch=arm/1a2b3c4d"), "")
 
     def test_each_way_it_differs_is_said(self):
-        good = "folder=Olve.AgentRuntimeManager path=/w/Olve.AgentRuntimeManager toplevel=/w/Olve.AgentRuntimeManager branch="
+        good = ("folder=Olve.AgentRuntimeManager path=/w/Olve.AgentRuntimeManager toplevel=/w/Olve.AgentRuntimeManager "
+                "gitdir=/r/x.git/worktrees/O common=/r/x.git branch=")
         cases = {
-            "its workplace has no folder 'Olve.AgentRuntimeManager' (the command saw ['x'])": ["folder=x path=/w/x toplevel=/w/x branch=arm/1a2b3c4d"],
+            "its workplace has no folder 'Olve.AgentRuntimeManager' (the command saw ['x'])":
+                ["folder=x path=/w/x toplevel=/w/x gitdir=/r/x.git/worktrees/x common=/r/x.git branch=arm/1a2b3c4d"],
+            "isn't a worktree of a shared copy (its git folder is '/w/O/.git', the common one '/w/O/.git')":
+                [good.replace("gitdir=/r/x.git/worktrees/O common=/r/x.git", "gitdir=/w/O/.git common=/w/O/.git") + "arm/1a2b3c4d"],
             "its workplace has no folder 'Olve.AgentRuntimeManager' (the command saw none)": [],
             "isn't a git work tree": [good.replace("toplevel=/w/Olve.AgentRuntimeManager", "toplevel=") + "arm/1a2b3c4d"],
             "isn't a checkout of its own: it's inside the work tree /w": [good.replace("toplevel=/w/Olve.AgentRuntimeManager", "toplevel=/w") + "arm/1a2b3c4d"],
@@ -208,11 +213,24 @@ class RepoTests(unittest.TestCase):
             os.mkdir(workplace)
             subprocess.run([*git, "-C", origin, "worktree", "add", "-q", "-b", "arm/1a2b3c4d", os.path.join(workplace, "repo")], check=True)
             os.mkdir(os.path.join(workplace, "plain"))
+            subprocess.run([*git, "clone", "-q", "-b", "main", origin, os.path.join(workplace, "clone")], check=True)
+            subprocess.run([*git, "-C", os.path.join(workplace, "clone"), "checkout", "-q", "-b", "arm/1a2b3c4d"], check=True)
             ran = subprocess.run(["sh", "-c", check.TOOL_COMMAND], cwd=workplace, capture_output=True, text=True, timeout=30)
             conversation = self.conversation(*ran.stdout.splitlines()[1:])
             self.assertEqual(check.checkout_problems(conversation, "repo", "arm/1a2b3c4d"), [], ran.stdout)
             self.assertIn("isn't a git work tree", "; ".join(check.checkout_problems(conversation, "plain", "arm/1a2b3c4d")))
             self.assertIn("not the session's 'arm/other'", "; ".join(check.checkout_problems(conversation, "repo", "arm/other")))
+            # A clone of its own on the right branch isn't one of ARM's checkouts.
+            self.assertIn("isn't a worktree of a shared copy", "; ".join(check.checkout_problems(conversation, "clone", "arm/1a2b3c4d")))
+
+    def test_a_url_s_credentials_stay_out_of_the_log(self):
+        session = {"id": "s", "repos": [{"url": "https://x-token:s3cret@github.com/o/r.git"}]}
+        with self.assertRaises(check.CheckFailed) as failed:
+            check.api_repo(session, "https://x-token:s3cret@github.com/o/r.git")
+        self.assertNotIn("s3cret", str(failed.exception))
+        with self.assertRaises(check.CheckFailed) as failed:
+            check.api_repo(session, "https://x-token:s3cret@github.com/o/other.git")
+        self.assertNotIn("s3cret", str(failed.exception))
 
 
 class RecordTests(unittest.TestCase):
