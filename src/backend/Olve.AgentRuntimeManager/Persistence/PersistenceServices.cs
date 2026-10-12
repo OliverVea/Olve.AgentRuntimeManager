@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Variables;
 
 namespace Olve.AgentRuntimeManager.Persistence;
@@ -18,6 +19,7 @@ public static class PersistenceServices
         services.AddDbContextFactory<ArmDbContext>(options => options.UseSqlite(connectionString));
         services.AddSingleton<ISessionStore, EfSessionStore>();
         services.AddSingleton<IEnvStore, EfEnvStore>();
+        services.AddSingleton<IWorktreeRemovalStore, EfWorktreeRemovalStore>();
     }
 
     /// <summary>Brings the schema up to date; run before the app serves requests.</summary>

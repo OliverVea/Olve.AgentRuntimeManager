@@ -22,4 +22,5 @@ public sealed record SessionBody(
     string? KillSource,
     string? KillCaller,
     IReadOnlyDictionary<string, string>? Env = null,
-    IReadOnlyList<string>? UseEnv = null);
+    IReadOnlyList<string>? UseEnv = null,
+    IReadOnlyList<RepoBody>? Repos = null);

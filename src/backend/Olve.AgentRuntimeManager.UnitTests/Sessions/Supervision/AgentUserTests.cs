@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
@@ -117,6 +118,27 @@ public class AgentUserTests
 
         await Assert.That(madeBeforeTheSupervisor).IsFalse();
         await Assert.That(File.Exists(Path.Combine(work, "prompt.jsonl"))).IsTrue();
+    }
+
+    [Test]
+    public async Task Repos_AreCheckedOutByTheSupervisor_AndRemovedAsTheAgentUser()
+    {
+        var account = OwnAccount();
+        var (_, provider) = Server(account);
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var launch = Launch("Say READY") with { Repos = [new RepoRecord(origin)] };
+        var worktree = Path.Combine(Folder(launch), "work", "alpha");
+
+        var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);
+        var checkedOut = Directory.Exists(worktree);
+        provider.RemoveRepos(launch.SessionId, launch.Repos!);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(checkedOut).IsTrue();
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
+        var shared = Directory.GetDirectories(Path.Combine(_root, "repos"), "alpha-*.git").Single();
+        await Assert.That(SudoCalls()).IsEquivalentTo(
+            [$"-n -u {account.Name} -- {Supervisor}", $"-n -u {account.Name} -- {Supervisor} remove-worktree {shared} {worktree}"]);
     }
 
     [NotInParallel("signals")]
@@ -492,7 +514,7 @@ public class AgentUserTests
         }), log ?? NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
-        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, NullLogger<ClaudeProvider>.Instance));
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));
     }
 
     /// <summary>A copy of the sudo stub in the test's folder, so its log (<c>sudo.log</c>) is this test's.</summary>
@@ -534,6 +556,10 @@ public class AgentUserTests
             await Task.Delay(20, timeout.Token);
         }
     }
+
+    /// <summary>The sessions' repositories: shared copies under the test's folder.</summary>
+    private RepoCheckouts Repos(Supervisors supervisors) =>
+        new(Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos") }), supervisors, NullLogger<RepoCheckouts>.Instance);
 }
 
 /// <summary>A sleeping process, killed when disposed.</summary>

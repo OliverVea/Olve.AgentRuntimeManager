@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -29,6 +30,9 @@ public sealed record SessionRecord
     /// defaults, the ones it asked for, and its own (winning). Every launch, retry and resume uses it.
     /// </summary>
     public IReadOnlyDictionary<string, string>? AgentEnv { get; init; }
+
+    /// <summary>The git repositories checked out for its agent (M5e), as given.</summary>
+    public IReadOnlyList<RepoRecord>? Repos { get; init; }
 
     /// <summary>
     /// Messages held for its agent (M11), in the order they came: sent while it was queued, or
@@ -65,6 +69,16 @@ public sealed record SessionRecord
     /// server looks for among the traces its provider left (docs/GENTLE-RESTART.md).
     /// </summary>
     public Guid? RunId { get; init; }
+
+    /// <summary>
+    /// The provider session its latest run resumes (a session that continued, M11), or null for a
+    /// run that started one. With <see cref="RunMessages"/>: how that run was launched, so a restarted
+    /// server can launch it again the same way if its agent never started (M5e: lost mid-checkout).
+    /// </summary>
+    public string? RunResume { get; init; }
+
+    /// <summary>The messages its latest run was given at its start (after the prompt, or instead of it when it resumes).</summary>
+    public IReadOnlyList<string>? RunMessages { get; init; }
     public int? ExitCode { get; init; }
     /// <summary>Why it failed, or (queued again) why its last attempt did.</summary>
     public string? Error { get; init; }

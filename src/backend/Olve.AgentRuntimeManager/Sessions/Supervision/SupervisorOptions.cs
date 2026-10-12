@@ -9,7 +9,7 @@ public sealed class SupervisorOptions
     public string Command { get; set; } = "";
 
     /// <summary>
-    /// Where the supervisors' sockets are (<c>&lt;root&gt;/&lt;session id&gt;.sock</c>). Empty:
+    /// Where the supervisors' sockets are (<c>&lt;root&gt;/&lt;session id&gt;.&lt;run&gt;.sock</c>, a socket per run). Empty:
     /// <c>$XDG_RUNTIME_DIR/olve-arm</c>, else <c>olve-arm-&lt;user&gt;</c> in the temp folder.
     /// Keep it short: a socket path has at most 107 bytes.
     /// </summary>

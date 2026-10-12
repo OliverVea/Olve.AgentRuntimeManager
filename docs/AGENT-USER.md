@@ -103,6 +103,20 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   check, **fails the session** ("its agent may still be running … so it was not resumed") instead
   of resuming it: a second agent on the same Claude session must not happen. A run whose turn had
   already succeeded still completes.
+- **Repositories (M5e):** the supervisor checks out a session's repositories before it starts the
+  agent, so as the agent user, with the agent's environment (its `HOME`, so its ssh key and
+  `known_hosts`, and the session's `GIT_SSH_COMMAND` and git identity): the shared bare copies under
+  `Repos:Root` are the agent user's, as are the worktrees in the workplace, so git trusts both
+  without a `safe.directory` entry. ARM never reads them. Deleting a session removes its worktrees
+  as the agent user too, through the same sudoers rule:
+  `sudo -n -u arm-agent -- <supervisor> remove-worktree <shared copy> <worktree>` (ARM couldn't:
+  the files are the agent's, not group-writable), which takes the copy's lock like a checkout. ARM's
+  git runs no hooks (`core.hooksPath=/dev/null`): all agents can write every shared copy, so a hook
+  one planted there would otherwise run in another session's supervisor. The one file ARM itself
+  writes in the session's folder is a kill's mark (`kill-<run id>`, empty), made with
+  `O_CREAT|O_EXCL|O_NOFOLLOW`: a link the agent put at that name is never followed, the mark just
+  isn't made (the kill message still goes). An agent making the mark itself kills its own session's
+  run, which it could anyway.
 
 ## The VM (`vm-deploy.sh` → `agent-user.sh`, every deploy, idempotent)
 
@@ -111,6 +125,8 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
 - `/var/lib/olve-arm` `0711` (passable, not listable), `arm.db*` `0600` (the unit's
   `UMask=0027` keeps new files from others; SQLite gives its WAL and SHM the database's mode);
 - `sessions/` `2750 arm:arm-agent`: only ARM makes session folders, so an agent can't swap one;
+- `repos/` `0700 arm-agent:arm-agent` (M5e, `Repos__Root`): the shared bare copies of the
+  repositories sessions name, cloned, fetched and given worktrees by the supervisors as the agent;
 - on a VM from before, until it has been done (the marker, `sessions/` turning `arm-agent`'s,
   is set last): every existing session folder becomes group `arm-agent`, group-writable, setgid
   (the owner stays `arm`, so an agent still running as `arm` across the deploy keeps writing its
@@ -153,7 +169,8 @@ Can:
 - the releases and Claude Code in `/opt/olve-arm` (read and run, not write);
 - **other sessions: their folders, their agents and supervisors.** All agents are the one user,
   so an agent can read and write another session's workplace and output, kill its agent or
-  supervisor, or replace its socket. What it can't is attach to another supervisor's socket
+  supervisor, or replace its socket, and change the shared copies of their repositories (M5e:
+  e.g. move another session's branch there). What it can't is attach to another supervisor's socket
   (the uid check). Separating sessions from each other needs a user per session (and then a
   shared toolchain elsewhere than one home): not now.
 

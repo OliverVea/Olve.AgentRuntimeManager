@@ -15,7 +15,39 @@ public sealed record SupervisorLaunch
     public required string Command { get; init; }
     public required IReadOnlyList<string> Arguments { get; init; }
     public required IReadOnlyDictionary<string, string> Environment { get; init; }
+    /// <summary>Where the agent starts: the workplace, or a repository's worktree in it.</summary>
     public required string WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// The session's workplace, made (by the supervisor, as the agent's user) if it's new, with the
+    /// <see cref="Repos"/> checked out in it. Unset: <see cref="WorkingDirectory"/> (a launch from before repos).
+    /// </summary>
+    public string? Workplace { get; init; }
+
+    /// <summary>
+    /// Repositories to check out in the workplace before the agent starts (M5e); one that's already
+    /// there is left as it is. A checkout that fails ends the run without an agent (<c>exit.json</c>
+    /// with the error).
+    /// </summary>
+    public IReadOnlyList<SupervisorRepo> Repos { get; init; } = [];
+
+    /// <summary>The longest any one git command of a checkout may take; then it's killed and the checkout fails.</summary>
+    public TimeSpan GitTimeout { get; init; } = DefaultGitTimeout;
+
+    /// <summary>The longest the whole checkout may take; unset: <see cref="CheckoutLimit"/> of the repos and git timeout.</summary>
+    public TimeSpan? CheckoutTimeout { get; init; }
+
+    public static readonly TimeSpan DefaultGitTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The longest a checkout of <paramref name="repos"/> repositories may take, given its
+    /// <paramref name="gitTimeout"/>: per repository, the wait for another session's checkout
+    /// (four git timeouts) and a few slow git commands (the fetch, the default branch, a worktree),
+    /// with a minute to spare. The supervisor stops a checkout that runs longer, and ARM waits this
+    /// long (and a little) for the hello of a run that checks out.
+    /// </summary>
+    public static TimeSpan CheckoutLimit(int repos, TimeSpan gitTimeout) =>
+        repos == 0 ? TimeSpan.Zero : (gitTimeout * 8 * repos) + TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// Lines written to the agent's stdin as soon as it starts (its prompt), so a server that goes

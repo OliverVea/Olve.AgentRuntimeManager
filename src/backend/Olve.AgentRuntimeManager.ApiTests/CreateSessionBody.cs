@@ -10,4 +10,6 @@ public sealed record CreateSessionBody(string Prompt, string Caller = "api-tests
     public IReadOnlyDictionary<string, string>? Env { get; init; }
 
     public IReadOnlyList<string>? UseEnv { get; init; }
+
+    public IReadOnlyList<RepoBody>? Repos { get; init; }
 }

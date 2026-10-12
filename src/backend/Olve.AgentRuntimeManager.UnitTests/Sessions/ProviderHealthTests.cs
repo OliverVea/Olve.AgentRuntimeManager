@@ -327,6 +327,21 @@ public class ProviderHealthTests : IDisposable
     }
 
     [Test]
+    public async Task AProbeWhoseAgentNeverStarted_DidntReachTheProvider()
+    {
+        var session = Create();
+        await End(session.Id, Down(), s => s.Status == SessionStatus.Queued);
+        _time.Advance(Backoff);
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        // Its checkout failed (M5e): no agent, so no word from the provider either way.
+        LastRun(session.Id).AgentStarted = false;
+
+        await End(session.Id, new AgentOutcome.Failed("Checking out x failed."), s => s.Status == SessionStatus.Failed);
+
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Unreachable);
+    }
+
+    [Test]
     public async Task AProbeFailingOnItsOwn_StillReachedTheProvider()
     {
         var session = Create();

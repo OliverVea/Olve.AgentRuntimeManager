@@ -76,6 +76,22 @@ export function keyValues(options: OptionValues, name: string): Record<string, s
   return pairs;
 }
 
+/**
+ * Git repositories from a repeatable `URL[#REF]` option (`--repo git@host:o/r.git#main`), split at
+ * the last `#` (an SSH URL holds `@` and `:`, so `#` marks the ref). Neither part may be empty.
+ */
+export function repos(options: OptionValues, name: string): Array<{ url: string; ref?: string }> | undefined {
+  const entries = repeated(options, name);
+  if (entries === undefined) return undefined;
+  return entries.map((entry) => {
+    const at = entry.lastIndexOf("#");
+    const url = (at < 0 ? entry : entry.slice(0, at)).trim();
+    const ref = at < 0 ? undefined : entry.slice(at + 1).trim();
+    if (url === "" || ref === "") throw new UsageError(`--${name} must be URL or URL#REF, got '${entry}'`);
+    return ref === undefined ? { url } : { url, ref };
+  });
+}
+
 /** A date or date-time (`2026-09-01`, `2026-09-01T12:00:00Z`), sent as an ISO 8601 UTC timestamp. */
 export function dateTime(options: OptionValues, name: string): string | undefined {
   const value = text(options, name);

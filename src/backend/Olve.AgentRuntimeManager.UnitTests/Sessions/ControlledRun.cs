@@ -11,6 +11,9 @@ public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
 
     public bool WasKilled { get; private set; }
 
+    /// <summary>Whether its agent started; a test turns it off to act out a checkout that failed or was killed (M5e).</summary>
+    public bool AgentStarted { get; set; } = true;
+
     public string ProviderSessionId { get; } = launch.Resume ?? $"controlled-{launch.SessionId:N}";
 
     public Task<AgentOutcome> Completion => _outcome.Task;

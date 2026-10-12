@@ -5,6 +5,7 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.UnitTests.Persistence;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
@@ -42,7 +43,8 @@ public class SessionManagerTests : IDisposable
         Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2 }),
         [provider ?? _provider],
         _database.Store(),
-        NullLogger<SessionManager>.Instance);
+        NullLogger<SessionManager>.Instance,
+        _database.Removals());
 
     /// <summary>
     /// The server restarts: the old manager lets go, a new one recovers. Its provider finds the
@@ -339,6 +341,268 @@ public class SessionManagerTests : IDisposable
         await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.Deleted>();
         await Assert.That(_sessions.Get(session.Id)).IsNull();
         await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.NotFound>();
+    }
+
+    [Test]
+    public async Task Repos_AreStoredAsGiven_AndGoToEveryLaunch()
+    {
+        var request = Request() with { Repos = [new CreateSessionRepo { Url = "git@github.com:o/a.git" }, new CreateSessionRepo { Url = "https://x/b", Ref = "v1" }] };
+        RepoRecord[] expected = [new("git@github.com:o/a.git"), new("https://x/b", "v1")];
+
+        var session = Record(_sessions.Create(request));
+
+        await Assert.That(_database.Store().Get(session.Id)!.Repos).IsEquivalentTo(expected);
+        await Assert.That(_provider.RunOf(session.Id).Launch.Repos).IsEquivalentTo(expected);
+        await Assert.That(session.ToDto(2).Repos!.Select(r => (r.Url, r.Ref))).IsEquivalentTo([("git@github.com:o/a.git", (string?)null), ("https://x/b", "v1")]);
+    }
+
+    [Test]
+    public async Task Repos_GoToARecoveredSession()
+    {
+        var request = Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] };
+        var working = Record(_sessions.Create(request));
+
+        var provider = Restart((p, r) => p.Reattach(r, resumed: true));
+
+        await Assert.That(provider.Recoveries.Single(r => r.SessionId == working.Id).Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+    }
+
+    [Test]
+    public async Task Delete_RemovesTheSessionsWorktrees_ThroughItsProvider()
+    {
+        var withRepos = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        var without = Create();
+        _sessions.Kill(withRepos.Id, null, KillSource.User);
+        _sessions.Kill(without.Id, null, KillSource.User);
+
+        _sessions.Delete(withRepos.Id);
+        _sessions.Delete(without.Id);
+
+        await Assert.That(_provider.RemovedRepos.Select(r => r.SessionId)).IsEquivalentTo([withRepos.Id]);
+        await Assert.That(_provider.RemovedRepos.Single().Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+    }
+
+    [Test]
+    public async Task AnAgentThatNeverStarted_LeavesNothingToResume_AndAMessageStartsItAfresh()
+    {
+        var session = Create("the task");
+        var run = _provider.RunOf(session.Id);
+        run.AgentStarted = false;
+        run.End(new AgentOutcome.Failed("Checking out x failed."));
+        var failed = await Eventually(session.Id, s => s.Status == SessionStatus.Failed);
+
+        var sent = _sessions.Send(session.Id, "try again", "tests");
+        var again = await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        await Assert.That(failed.ProviderSessionId).IsNull();
+        await Assert.That(sent).IsTypeOf<MessageOutcome.Continued>();
+        var launch = _provider.Runs.Last(r => r.Launch.SessionId == session.Id).Launch;
+        await Assert.That(launch.Resume).IsNull();
+        await Assert.That(launch.Input).IsEquivalentTo(["the task", "try again"]);
+        await Assert.That(again.Attempts).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task KilledBeforeItsAgentStarted_LeavesNothingToResume()
+    {
+        var session = Create("the task");
+        _provider.RunOf(session.Id).AgentStarted = false;
+
+        var killed = ((KillOutcome.Stopped)_sessions.Kill(session.Id, null, KillSource.User)).Session;
+        _sessions.Send(session.Id, "go on", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        await Assert.That(killed.ProviderSessionId).IsNull();
+        await Assert.That(_database.Store().Get(session.Id)!.ProviderSessionId).IsNotNull();
+        await Assert.That(_provider.Runs.Last(r => r.Launch.SessionId == session.Id).Launch.Resume).IsNull();
+    }
+
+    [Test]
+    public async Task AContinuedRunWhoseAgentNeverStarted_KeepsTheProviderSessionItResumes()
+    {
+        var session = Create();
+        var first = _provider.RunOf(session.Id);
+        first.End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "more", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        var continued = _provider.Runs.Last(r => r.Launch.SessionId == session.Id);
+        continued.AgentStarted = false;
+
+        continued.End(new AgentOutcome.Failed("Checking out x failed."));
+        var failed = await Eventually(session.Id, s => s.Status == SessionStatus.Failed);
+
+        await Assert.That(continued.Launch.Resume).IsEqualTo(first.ProviderSessionId);
+        await Assert.That(failed.ProviderSessionId).IsEqualTo(first.ProviderSessionId);
+    }
+
+    [Test]
+    public async Task Delete_RemovesTheWorktrees_BeforeTheRecord_AndMeanwhileItCantContinue()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        var storedMeanwhile = false;
+        MessageOutcome? sentMeanwhile = null;
+        _provider.Removing = id =>
+        {
+            storedMeanwhile = _database.Store().Get(id) is not null;
+            sentMeanwhile = _sessions.Send(id, "wait", "tests");
+        };
+
+        var deleted = _sessions.Delete(session.Id);
+
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(storedMeanwhile).IsTrue();
+        await Assert.That(sentMeanwhile).IsTypeOf<MessageOutcome.NotFound>();
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+    }
+
+    [Test]
+    public async Task Delete_WorktreesThatStay_AreTriedAgainLater_UntilRemoved()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        _provider.RemovalFails = true;
+
+        await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.Deleted>();
+        _sessions.RetryWorktreeRemovals();
+        var triedTooEarly = _provider.RemovedRepos.Count;
+        _time.Advance(SessionManager.WorktreeRemovalBackoff);
+        _sessions.RetryWorktreeRemovals();
+        var keptAfterAFailure = _database.Removals().Due(_time.GetUtcNow().AddDays(1)).Single();
+        _provider.RemovalFails = false;
+        _time.Advance(TimeSpan.FromMinutes(1));
+        _sessions.RetryWorktreeRemovals();
+
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+        await Assert.That(triedTooEarly).IsEqualTo(1);
+        await Assert.That(keptAfterAFailure.Attempts).IsEqualTo(2);
+        await Assert.That(keptAfterAFailure.Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+        await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(3);
+        await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+    }
+
+    [Test]
+    public async Task Delete_WhoseWorktreesCantBeKept_FailsWithTheRecordKept_AndCanBeDoneAgain()
+    {
+        var removals = new FailingRemovalStore(_database.Removals());
+        var provider = new ControlledProvider("failing-store") { RemovalFails = true };
+        using var sessions = new SessionManager(_bus, _time, Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2 }),
+            [provider], _database.Store(), NullLogger<SessionManager>.Instance, removals);
+        var session = Record(sessions.Create(Request() with { Provider = provider.Name, Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        sessions.Kill(session.Id, null, KillSource.User);
+
+        var failed = Assert.Throws<InvalidOperationException>(() => sessions.Delete(session.Id));
+        var kept = _database.Store().Get(session.Id);
+        // Not stuck as "being deleted": it takes a message (and continues), and can be deleted later.
+        var sent = sessions.Send(session.Id, "still here?", "tests");
+        provider.Runs.Last(r => r.Launch.SessionId == session.Id).End(new AgentOutcome.Completed(0));
+        using (var timeout = new CancellationTokenSource(Guard))
+        {
+            while (sessions.Get(session.Id)?.Status != SessionStatus.Completed)
+            {
+                await Task.Delay(20, timeout.Token);
+            }
+        }
+
+        removals.Fails = false;
+        var deleted = sessions.Delete(session.Id);
+
+        await Assert.That(failed.Message).IsEqualTo("The database refused the write.");
+        await Assert.That(kept).IsNotNull();
+        await Assert.That(sent).IsTypeOf<MessageOutcome.Continued>();
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+        await Assert.That(_database.Removals().Due(DateTimeOffset.MaxValue).Select(r => r.SessionId)).IsEquivalentTo([session.Id]);
+    }
+
+    [Test]
+    public async Task WorktreeRemovalRetries_StopPromptly_InThePassBetweenEntries()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        foreach (var _ in Enumerable.Range(0, 3))
+        {
+            var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+            _sessions.Kill(session.Id, null, KillSource.User);
+            _provider.RemovalFails = true;
+            _sessions.Delete(session.Id);
+        }
+
+        var removedAtDelete = _provider.RemovedRepos.Count;
+        _provider.Removing = _ =>
+        {
+            entered.TrySetResult();
+            // A removal that takes long (bounded, so a failing test can't hang).
+            release.Wait(TimeSpan.FromSeconds(20));
+        };
+        var retries = new Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries(_sessions, _time,
+            NullLogger<Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries>.Instance);
+        await retries.StartAsync(CancellationToken.None);
+        // Its timer is made once it runs: time goes on until a pass has begun.
+        using (var starting = new CancellationTokenSource(Guard))
+        {
+            while (!entered.Task.IsCompleted)
+            {
+                _time.Advance(Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries.Period);
+                await Task.Delay(20, starting.Token);
+            }
+        }
+
+        var stopping = System.Diagnostics.Stopwatch.StartNew();
+        await retries.StopAsync(CancellationToken.None).WaitAsync(Guard);
+        stopping.Stop();
+        release.Set();
+        // The one in progress finishes on its own; give the pass a moment to (not) go on after it.
+        using (var finishing = new CancellationTokenSource(Guard))
+        {
+            while (_provider.RemovedRepos.Count == removedAtDelete)
+            {
+                await Task.Delay(20, finishing.Token);
+            }
+        }
+
+        await Task.Delay(300);
+
+        await Assert.That(stopping.Elapsed).IsLessThan(TimeSpan.FromSeconds(2));
+        // The one in progress ran out; the pass didn't go on to the others.
+        await Assert.That(_provider.RemovedRepos.Count - removedAtDelete).IsEqualTo(1);
+        retries.Dispose();
+    }
+
+    [Test]
+    public async Task Delete_WorktreesThatNeverGo_AreGivenUp_AfterTheirAttempts()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        _provider.RemovalFails = true;
+        _sessions.Delete(session.Id);
+
+        for (var i = 0; i < SessionManager.WorktreeRemovalAttempts + 5; i++)
+        {
+            _time.Advance(TimeSpan.FromHours(1));
+            _sessions.RetryWorktreeRemovals();
+        }
+
+        await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(SessionManager.WorktreeRemovalAttempts);
+        await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+    }
+
+    [Test]
+    public async Task Restart_ARunIsRecoveredAsItWasLaunched_ItsResumeAndMessages()
+    {
+        var session = Create();
+        var first = _provider.RunOf(session.Id);
+        first.End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "more", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        var provider = Restart();
+
+        var recovery = provider.Recoveries.Single(r => r.SessionId == session.Id);
+        await Assert.That(recovery.Resume).IsEqualTo(first.ProviderSessionId);
+        await Assert.That(recovery.Messages).IsEquivalentTo(["more"]);
     }
 
     [Test]

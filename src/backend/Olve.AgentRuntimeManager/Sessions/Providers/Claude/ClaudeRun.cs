@@ -51,6 +51,8 @@ internal sealed class ClaudeRun : IAgentRun
 
     public string ProviderSessionId { get; }
 
+    public bool AgentStarted => _agent.AgentStarted;
+
     public Task<AgentOutcome> Completion { get; }
 
     public void Kill()
@@ -120,7 +122,10 @@ internal sealed class ClaudeRun : IAgentRun
 
             // An agent stopped only for lingering after a good turn still finished its work.
             exitCode = _stoppedLingering && result is { IsError: false } ? 0 : exitCode;
-            return _killed ? new AgentOutcome.Killed() : Outcome(result, exitCode, _agent.StderrTail(StderrTailLength), signals);
+            return _killed ? new AgentOutcome.Killed()
+                // Claude Code never started (its repositories couldn't be checked out, M5e): why not.
+                : _agent.StartError is { } startError ? new AgentOutcome.Failed(startError)
+                : Outcome(result, exitCode, _agent.StderrTail(StderrTailLength), signals);
         }
         catch (Exception exception) when (!_killed)
         {

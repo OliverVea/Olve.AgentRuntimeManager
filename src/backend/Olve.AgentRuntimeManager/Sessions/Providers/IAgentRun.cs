@@ -6,6 +6,13 @@ public interface IAgentRun
     /// <summary>The provider's own id for the agent.</summary>
     string ProviderSessionId { get; }
 
+    /// <summary>
+    /// Whether the agent itself started (so its provider session exists): false for one that never
+    /// got that far, e.g. its repositories' checkout failed or was killed (M5e). A session whose
+    /// agent never started doesn't resume it later; it starts afresh.
+    /// </summary>
+    bool AgentStarted => true;
+
     /// <summary>Completes when the agent ends, however it ends (never faults).</summary>
     Task<AgentOutcome> Completion { get; }
 

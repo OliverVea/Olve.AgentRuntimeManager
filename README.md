@@ -136,6 +136,32 @@ names them (`useEnv`), plus the session's own `env` on top. A session takes them
 `ARM_*`, …) are refused. None of it is secret: anyone with API access reads it back (secrets are
 in VISION).
 
+A session can name git repositories (`repos: [{ url, ref? }]`, `arm session create --repo
+URL[#REF]`, M5e; `Sessions/Repos/`, the supervisor's `RepoCheckout`). ARM's own code checks them out
+before the agent starts, as the agent's user with the session's environment (so its
+`GIT_SSH_COMMAND` and git identity apply): one shared bare copy per URL under `Repos:Root` (cloned
+on first use, fetched when a session needs a new worktree; one clone or fetch per repository at a
+time, through a lock file next to it), and a worktree per session in its workplace
+(`work/<repo name>`, the URL's last segment without `.git`) on a new branch `arm/<first 8
+characters of the session id>`, from `ref` (a branch of the remote, a tag or a commit; unset: the
+remote's default branch; a `ref` is only ever one of the remote's branches, a tag or a commit id,
+never a branch of the shared copy, which holds other sessions' `arm/…`). The agent starts in the
+workplace, as without repos, with each repo in its own folder there. Every git command is bounded
+(`Repos:GitTimeout`, its output too), never prompts and runs no hooks; a checkout that fails (no
+access, unknown ref, a timeout) fails the session before its agent runs, with git's error, and a kill
+or timeout during it stops it at once (the agent never starts). A worktree only appears complete (made
+aside, then moved into place); a half-made one is removed on the next attempt. A session whose agent
+never started (a failed or killed checkout) starts it afresh, with its prompt, when a message
+continues it. An `arm/<id>` branch is only checked out again for the session that made it. A session
+that continues, retries or resumes keeps its worktrees as they are (nothing is fetched or reset);
+deleting a session removes its worktrees from the shared copies first (as the agent user, through the
+supervisor, holding the copy's lock; bounded), then the record, keeping their branches; worktrees
+that can't be removed then (the repository busy past the wait) are kept in the database
+(`WorktreeRemovals`) and tried again in the background, every half minute at first and less often
+after each failure, until removed (after 20 attempts they're given up, logged as an error). Two repos that would share a folder, a blank `url` or a
+`ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
+provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
+
 A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
 429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)
 says why and until when: `limited` until the limit resets, `unreachable` for a wait that doubles
@@ -296,6 +322,9 @@ Sources in priority order (highest wins):
 | `Providers:Claude:WorkRoot` | `olve-arm/sessions` in the user's local data folder | Each session's folder: working directory (`work/`) and raw output |
 | `Providers:Claude:ConfigDirectory` | *(Claude Code's default, `~/.claude`)* | `CLAUDE_CONFIG_DIR` for the agents |
 | `Providers:Claude:ExitGrace` | `00:00:10` | How long an agent may take to exit after its turn before it's stopped |
+| `Repos:Root` | `olve-arm/repos` in the user's local data folder | The shared bare copy of each repository sessions name (M5e); written by the agents' user. `/var/lib/olve-arm/repos` on the VMs |
+| `Repos:GitTimeout` | `00:05:00` | The longest one git command of a checkout may take; a session waits up to four times this for another one's checkout of the same repository, and a whole checkout takes at most eight times this per repository (and a minute). A first clone that takes longer than this never succeeds: raise it for a large repository |
+| `Repos:CheckoutTimeout` | *(eight `Repos:GitTimeout`s per repository, and a minute)* | The longest a session's whole checkout may take; then it's stopped and the session fails |
 | `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
 | `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
 

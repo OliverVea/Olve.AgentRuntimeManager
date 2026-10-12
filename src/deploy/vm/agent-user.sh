@@ -10,6 +10,7 @@ cd /
 agent=arm-agent
 state=/var/lib/olve-arm
 sessions=$state/sessions
+repos=$state/repos
 
 id -u $agent >/dev/null 2>&1 || useradd --create-home --user-group --shell /bin/bash $agent
 # ARM reads the agents' output and connects to their supervisors through the group (after its restart).
@@ -54,6 +55,11 @@ if [ -d $sessions ] && [ "$(stat -c %G $sessions)" != $agent ]; then
   find $sessions -mindepth 1 -type d -exec chmod g+s {} +
 fi
 install -d -o arm -g $agent -m 2750 $sessions
+
+# The shared bare copy of each repository sessions name (M5e, Repos__Root): cloned, fetched and
+# given worktrees by the supervisors, as the agent user; ARM itself never reads it (it removes a
+# deleted session's worktrees through the supervisor, as the agent). The agent's alone.
+install -d -o $agent -g $agent -m 0700 $repos
 
 # What agents still running as arm (from before the agent user) keep making, carried over to the
 # agent user on every deploy. Best effort: run as `f || warn`, where set -e doesn't stop them.

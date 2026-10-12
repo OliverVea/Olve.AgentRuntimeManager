@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
@@ -44,4 +45,12 @@ public interface IAgentProvider
     /// it's enumerated.
     /// </summary>
     IEnumerable<ConversationEntryRecord> ConversationNewestFirst(Guid sessionId) => Conversation(sessionId).Reverse();
+
+    /// <summary>
+    /// A session that named <paramref name="repos"/> was deleted (M5e): remove its worktrees from the
+    /// shared copies (their branches stay), each bounded; never for a session still running. The
+    /// repositories whose worktrees are still there (to be tried again later). The default has no
+    /// workplace, so nothing to remove.
+    /// </summary>
+    IReadOnlyList<RepoRecord> RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos) => [];
 }

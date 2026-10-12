@@ -30,13 +30,17 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// Starts a supervisor running <paramref name="command"/> for a run in <paramref name="workingDirectory"/>
     /// (made here if it's new, or with an agent user by the supervisor, so it's that user's), with <paramref name="input"/>
     /// as the agent's first input. Doesn't wait for it: the launch goes to its stdin (a small pipe
-    /// write), and the returned agent connects in the background.
+    /// write), and the returned agent connects in the background. The supervisor checks out
+    /// <paramref name="repos"/> in the workplace first (M5e), each git command bounded by
+    /// <paramref name="gitTimeout"/> and the whole of it by <paramref name="checkoutTimeout"/>; the agent
+    /// starts in the workplace, whatever the number of repositories (each in its own folder there).
     /// </summary>
     public SupervisedAgent Launch(Guid sessionId, Guid runId, string folder, string workingDirectory,
-        string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input)
+        string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input,
+        IReadOnlyList<SupervisorRepo>? repos = null, TimeSpan? gitTimeout = null, TimeSpan? checkoutTimeout = null)
     {
         var settings = options.Value;
-        var socketPath = SocketPath(sessionId);
+        var socketPath = SupervisorSockets.Run(SocketRoot(settings), sessionId, runId);
         var account = _account.Value;
         if (account is null)
         {
@@ -70,6 +74,10 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             Arguments = arguments,
             Environment = account is null ? environment : account.Identify(environment),
             WorkingDirectory = workingDirectory,
+            Workplace = workingDirectory,
+            Repos = repos ?? [],
+            GitTimeout = gitTimeout ?? SupervisorLaunch.DefaultGitTimeout,
+            CheckoutTimeout = checkoutTimeout,
             Input = input,
             Folder = folder,
             SocketPath = socketPath,
@@ -102,12 +110,23 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         // Kept until it exits, so it's reaped; it outlives this server if need be.
         _ = process.WaitForExitAsync().ContinueWith(_ => process.Dispose(), TaskScheduler.Default);
         logger.LogInformation("Session {SessionId}: supervisor {Pid} started for run {RunId}", sessionId, process.Id, runId);
-        return Follow(new SupervisedAgent(socketPath, folder, runId, settings.ConnectTimeout));
+        return Follow(new SupervisedAgent(socketPath, folder, runId, settings.ConnectTimeout, HelloTimeout(launch.Repos.Count, launch.GitTimeout, launch.CheckoutTimeout)));
     }
 
-    /// <summary>Follows a run whose supervisor was started earlier (by this server or the one before).</summary>
-    public SupervisedAgent Attach(Guid sessionId, Guid runId, string folder) =>
-        Follow(new SupervisedAgent(SocketPath(sessionId), folder, runId, options.Value.ConnectTimeout));
+    /// <summary>
+    /// Follows a run whose supervisor was started earlier (by this server or the one before), which
+    /// may still be checking out <paramref name="repos"/> repositories with <paramref name="gitTimeout"/>.
+    /// </summary>
+    public SupervisedAgent Attach(Guid sessionId, Guid runId, string folder, int repos = 0, TimeSpan? gitTimeout = null, TimeSpan? checkoutTimeout = null) =>
+        Follow(new SupervisedAgent(SocketOf(sessionId, runId), folder, runId, options.Value.ConnectTimeout,
+            HelloTimeout(repos, gitTimeout ?? SupervisorLaunch.DefaultGitTimeout, checkoutTimeout)));
+
+    /// <summary>
+    /// How long a supervisor may take to greet: the checkout's limit (it stops the checkout there),
+    /// and time for it to clean up after one stopped (git's grace, a removal) and start the agent.
+    /// </summary>
+    private static TimeSpan HelloTimeout(int repos, TimeSpan gitTimeout, TimeSpan? checkoutTimeout) =>
+        repos == 0 ? TimeSpan.Zero : (checkoutTimeout ?? SupervisorLaunch.CheckoutLimit(repos, gitTimeout)) + TimeSpan.FromMinutes(1);
 
     public void Dispose()
     {
@@ -140,18 +159,40 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     }
 
     /// <summary>Whether a supervisor answers on the session's socket.</summary>
-    public bool IsListening(Guid sessionId)
+    /// <remarks>
+    /// Of the run <paramref name="runId"/> (its socket, or a supervisor from before per-run sockets),
+    /// or, without one, of any run of the session.
+    /// </remarks>
+    public bool IsListening(Guid sessionId, Guid? runId = null)
+    {
+        var root = SocketRoot(options.Value);
+        string[] candidates = runId is { } run
+            ? [SupervisorSockets.Run(root, sessionId, run), SupervisorSockets.Legacy(root, sessionId)]
+            : Directory.Exists(root) ? Directory.GetFiles(root, $"{sessionId}*.sock") : [];
+        return candidates.Any(Answers);
+    }
+
+    private static bool Answers(string path)
     {
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         try
         {
-            socket.Connect(new UnixDomainSocketEndPoint(SocketPath(sessionId)));
+            socket.Connect(new UnixDomainSocketEndPoint(path));
             return true;
         }
         catch (SocketException)
         {
             return false;
         }
+    }
+
+    /// <summary>The run's socket; one from before per-run sockets (a supervisor of an earlier release) if only that answers.</summary>
+    private string SocketOf(Guid sessionId, Guid runId)
+    {
+        var root = SocketRoot(options.Value);
+        var run = SupervisorSockets.Run(root, sessionId, runId);
+        var legacy = SupervisorSockets.Legacy(root, sessionId);
+        return !File.Exists(run) && Answers(legacy) ? legacy : run;
     }
 
     /// <summary>
@@ -228,6 +269,48 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     }
 
     /// <summary>
+    /// Removes a deleted session's worktree from the shared copy of its repository (M5e), as the
+    /// user whose it is (the agent user's, like the checkout): the supervisor's <c>remove-worktree</c>.
+    /// The error if it couldn't (bounded: a stuck git mustn't hold the request).
+    /// </summary>
+    public string? RemoveWorktree(string shared, string worktree)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, _account.Value, [Command(settings), "remove-worktree", shared, worktree]);
+        start.RedirectStandardError = true;
+        start.Environment.Clear();
+        foreach (var name in SupervisorEnvironment)
+        {
+            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
+            {
+                start.Environment[name] = value;
+            }
+        }
+
+        try
+        {
+            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(RemoveTimeout))
+            {
+                process.Kill(entireProcessTree: true);
+                return $"removing it took more than {RemoveTimeout.TotalSeconds:0} s";
+            }
+
+            return process.ExitCode == 0 ? null
+                : error.Wait(settings.ConnectTimeout) && error.Result.Trim() is { Length: > 0 } message ? message
+                : $"exit code {process.ExitCode}";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    /// <summary>The supervisor's <c>remove-worktree</c> bounds itself at 20 s; this leaves it room to say so.</summary>
+    public static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(25);
+
+    /// <summary>
     /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):
     /// directly, or as the agent user through <c>sudo -n -u &lt;user&gt; --</c> (non-interactive:
     /// a missing sudoers rule fails at once instead of waiting for a password).
@@ -282,7 +365,6 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         }
     }
 
-    public string SocketPath(Guid sessionId) => Path.Combine(SocketRoot(options.Value), $"{sessionId}.sock");
 
     private static string Command(SupervisorOptions settings) =>
         settings.Command is { Length: > 0 } command ? command : Path.Combine(AppContext.BaseDirectory, "olve-arm-supervisor");

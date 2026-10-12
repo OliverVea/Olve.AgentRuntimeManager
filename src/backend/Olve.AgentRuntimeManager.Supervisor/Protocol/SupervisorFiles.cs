@@ -16,6 +16,13 @@ public static class SupervisorFiles
     public const string Exit = "exit.json";
     public const string Log = "supervisor.log";
 
+    /// <summary>
+    /// The mark ARM leaves when it kills a run (M5e): checked by the supervisor before it starts the
+    /// agent and while it checks out, so a kill given before the agent started stops it even when
+    /// ARM isn't connected yet to say so.
+    /// </summary>
+    public static string KillMark(Guid runId) => $"kill-{runId:N}";
+
     public static SupervisorInfo? ReadInfo(string folder) => Read(Path.Combine(folder, Info), SupervisorJsonContext.Default.SupervisorInfo);
 
     public static SupervisorExit? ReadExit(string folder) => Read(Path.Combine(folder, Exit), SupervisorJsonContext.Default.SupervisorExit);

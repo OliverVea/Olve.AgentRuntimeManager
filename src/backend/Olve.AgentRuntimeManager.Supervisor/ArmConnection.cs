@@ -23,9 +23,9 @@ internal sealed class ArmConnection(Socket socket, AgentSupervisor supervisor, S
     /// <summary>Attached: gets the output as it comes. Set under the supervisor's lock.</summary>
     public bool Live { get; set; }
 
-    public void Start(SupervisorMessage hello)
+    /// <summary>Starts reading ARM's messages and writing what's sent; nothing is sent before the hello.</summary>
+    public void Start()
     {
-        Send(hello);
         _writing = WriteAsync();
         _ = ReadAsync();
     }

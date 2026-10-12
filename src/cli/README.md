@@ -11,6 +11,7 @@ arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
+                   [--repo URL[#REF]]...
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
@@ -108,6 +109,18 @@ conversation, its agent resuming where it left off with the message. With `--jso
 `{ "delivery": "delivered" | "pending" | "continued" }`. A session that never started (cancelled
 while queued) can't continue: 409, exit 4. `arm session conversation <id>` shows the messages as
 prompts.
+
+## Repositories
+
+`arm session create --repo URL[#REF]` (repeatable) names a git repository ARM checks out for the
+agent before it starts: in its workplace, in a folder named after the repository (the URL's last
+segment without `.git`), on a new branch `arm/<first 8 characters of the session id>`. `#REF` starts
+it from a branch, tag or commit instead of the repository's default branch; the value is split at
+its last `#`, since SSH URLs hold `@` and `:` (`--repo git@github.com:o/r.git#release/1.0`). The
+agent starts in the workplace, as without repositories, each in its own folder there. A checkout that fails (no access, an unknown
+ref) fails the session with git's error. `arm session get` shows them as given (`repos` row,
+`URL#REF`). An empty URL or ref (`--repo '#main'`, `--repo url#`) is a usage error; two
+repositories that would land in one folder are the server's 400.
 
 ## Environment variables
 

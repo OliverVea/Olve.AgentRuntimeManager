@@ -3,6 +3,7 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Providers;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -46,6 +47,18 @@ public sealed class SessionManager : IDisposable
     private readonly Dictionary<Guid, SessionRecord> _sessions = [];
     private readonly List<Guid> _queue = [];
     private readonly Dictionary<Guid, RunningAgent> _running = [];
+
+    /// <summary>Ended sessions being deleted: their worktrees go first, then the record.</summary>
+    private readonly HashSet<Guid> _deleting = [];
+
+    /// <summary>Deleted sessions' worktrees that couldn't be removed yet; null: they're only logged.</summary>
+    private readonly IWorktreeRemovalStore? _removals;
+
+    /// <summary>How often a deleted session's worktrees are tried again before they're given up (logged as an error).</summary>
+    public const int WorktreeRemovalAttempts = 20;
+
+    /// <summary>The wait before the first retry; it doubles per failure, up to an hour.</summary>
+    public static readonly TimeSpan WorktreeRemovalBackoff = TimeSpan.FromSeconds(30);
     private readonly IReadOnlyDictionary<string, ProviderState> _health;
 
     public SessionManager(
@@ -54,9 +67,11 @@ public sealed class SessionManager : IDisposable
         IOptions<SessionOptions> options,
         IEnumerable<IAgentProvider> providers,
         ISessionStore store,
-        ILogger<SessionManager> logger)
+        ILogger<SessionManager> logger,
+        IWorktreeRemovalStore? removals = null)
     {
         _store = store;
+        _removals = removals;
         _events = events;
         _time = time;
         _options = options.Value;
@@ -190,6 +205,7 @@ public sealed class SessionManager : IDisposable
                 Env = request.Env,
                 UseEnv = request.UseEnv,
                 AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
+                Repos = request.Repos?.Select(r => new RepoRecord(r.Url, r.Ref)).ToList(),
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);
@@ -286,6 +302,11 @@ public sealed class SessionManager : IDisposable
                 running.Timeout?.Dispose();
                 run = running.Run;
                 _health[session.Provider].Ended(id);
+                if (!run.AgentStarted)
+                {
+                    // Killed during its checkout: no agent, so nothing to resume later.
+                    session = session with { ProviderSessionId = running.PreviousProviderSessionId };
+                }
             }
 
             var now = _time.GetUtcNow();
@@ -349,7 +370,14 @@ public sealed class SessionManager : IDisposable
                 return new MessageOutcome.NotFound();
             }
 
-            if (ended.ProviderSessionId is null)
+            if (_deleting.Contains(id))
+            {
+                return new MessageOutcome.NotFound();
+            }
+
+            // Never launched (cancelled while queued). One whose agent never started (its checkout
+            // failed, M5e) continues: its agent starts afresh, with the prompt.
+            if (ended.ProviderSessionId is null && ended.Attempts == 0)
             {
                 return new MessageOutcome.NeverStarted(ended);
             }
@@ -365,9 +393,20 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    /// <summary>Deletes a session that has ended.</summary>
+    /// <summary>
+    /// Deletes a session that has ended, and then its worktrees (M5e; through its provider, not under
+    /// the lock: that runs git).
+    /// </summary>
+    /// <remarks>
+    /// The worktrees first (bounded), then the record: a crash in between leaves the session, to be
+    /// deleted again. Worktrees that couldn't be removed (their repository busy past the wait, git
+    /// failing) don't stop the delete: they're kept (<see cref="IWorktreeRemovalStore"/>, before the
+    /// record goes) and tried again by <see cref="RetryWorktreeRemovals"/>. Meanwhile the session
+    /// can't be continued (a message finds no session).
+    /// </remarks>
     public DeleteOutcome Delete(Guid id)
     {
+        SessionRecord ended;
         lock (_gate)
         {
             if (_sessions.TryGetValue(id, out var active))
@@ -375,14 +414,134 @@ public sealed class SessionManager : IDisposable
                 return new DeleteOutcome.NotEnded(active);
             }
 
-            if (_store.Get(id) is null)
+            if (_deleting.Contains(id))
+            {
+                return new DeleteOutcome.Deleted();
+            }
+
+            if (_store.Get(id) is not { } found)
             {
                 return new DeleteOutcome.NotFound();
             }
 
-            _store.Delete(id);
-            return new DeleteOutcome.Deleted();
+            ended = found;
+            _deleting.Add(id);
         }
+
+        IReadOnlyList<RepoRecord> left = [];
+        try
+        {
+            if (ended.Repos is { Count: > 0 } repos && _providers.TryGetValue(ended.Provider, out var provider))
+            {
+                left = RemoveWorktrees(provider, id, repos);
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    // The worktrees left must be kept before the record goes: if that fails, so does
+                    // the delete (the record stays, to be deleted again), rather than leak them unnoticed.
+                    if (left.Count > 0)
+                    {
+                        KeepWorktreeRemoval(new WorktreeRemovalRecord
+                        {
+                            SessionId = id, Provider = ended.Provider, Repos = left, Attempts = 1,
+                            NextAttemptAt = _time.GetUtcNow() + WorktreeRemovalBackoff,
+                        });
+                    }
+
+                    _store.Delete(id);
+                }
+                finally
+                {
+                    // Whatever happened: the session isn't being deleted any more (it's gone, or it stays as it was).
+                    _deleting.Remove(id);
+                }
+            }
+        }
+
+        return new DeleteOutcome.Deleted();
+    }
+
+    /// <summary>
+    /// Tries again to remove deleted sessions' worktrees that are due (<see cref="IWorktreeRemovalStore"/>):
+    /// what's removed is forgotten, what isn't waits twice as long (up to an hour), and after
+    /// <see cref="WorktreeRemovalAttempts"/> it's given up, logged as an error. Not under the lock: it runs git.
+    /// </summary>
+    /// <param name="cancellationToken">Stops the pass between entries (the server stopping); one in progress finishes.</param>
+    public void RetryWorktreeRemovals(CancellationToken cancellationToken = default)
+    {
+        if (_removals is null)
+        {
+            return;
+        }
+
+        foreach (var removal in _removals.Due(_time.GetUtcNow()))
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!_providers.TryGetValue(removal.Provider, out var provider))
+            {
+                _logger.LogError("Deleted session {SessionId}: provider {Provider} is gone; its worktrees of {Repos} stay", removal.SessionId, removal.Provider,
+                    string.Join(", ", removal.Repos.Select(r => r.Url)));
+                _removals.Delete(removal.SessionId);
+                continue;
+            }
+
+            var left = RemoveWorktrees(provider, removal.SessionId, removal.Repos);
+            if (left.Count == 0)
+            {
+                _logger.LogInformation("Deleted session {SessionId}: its worktrees are removed (attempt {Attempt})", removal.SessionId, removal.Attempts + 1);
+                _removals.Delete(removal.SessionId);
+                continue;
+            }
+
+            var attempts = removal.Attempts + 1;
+            if (attempts >= WorktreeRemovalAttempts)
+            {
+                _logger.LogError("Deleted session {SessionId}: gave up removing its worktrees of {Repos} after {Attempts} attempts; they stay",
+                    removal.SessionId, string.Join(", ", left.Select(r => r.Url)), attempts);
+                _removals.Delete(removal.SessionId);
+                continue;
+            }
+
+            var wait = TimeSpan.FromTicks(Math.Min(WorktreeRemovalBackoff.Ticks << Math.Min(attempts - 1, 20), TimeSpan.FromHours(1).Ticks));
+            _removals.Save(removal with { Repos = left, Attempts = attempts, NextAttemptAt = _time.GetUtcNow() + wait });
+        }
+    }
+
+    /// <summary>The repositories whose worktrees are still there; all of them if removing failed outright.</summary>
+    private IReadOnlyList<RepoRecord> RemoveWorktrees(IAgentProvider provider, Guid id, IReadOnlyList<RepoRecord> repos)
+    {
+        try
+        {
+            return provider.RemoveRepos(id, repos);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Session {SessionId}: could not remove its worktrees", id);
+            return repos;
+        }
+    }
+
+    private void KeepWorktreeRemoval(WorktreeRemovalRecord removal)
+    {
+        if (_removals is null)
+        {
+            _logger.LogError("Session {SessionId}: its worktrees of {Repos} couldn't be removed and stay", removal.SessionId,
+                string.Join(", ", removal.Repos.Select(r => r.Url)));
+            return;
+        }
+
+        _logger.LogWarning("Session {SessionId}: its worktrees of {Repos} couldn't be removed; trying again later", removal.SessionId,
+            string.Join(", ", removal.Repos.Select(r => r.Url)));
+        _removals.Save(removal);
     }
 
     /// <summary>Stops the timeouts and provider wake-ups; the agents themselves are left running (gentle restart, M5a).</summary>
@@ -413,7 +572,8 @@ public sealed class SessionManager : IDisposable
         var resumeRunId = Guid.NewGuid();
         try
         {
-            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv)) is { } agent
+            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv, session.Repos,
+                session.RunResume, session.RunMessages)) is { } agent
                 ? (agent, agent.Resumed ? resumeRunId : runId)
                 : null;
         }
@@ -439,7 +599,8 @@ public sealed class SessionManager : IDisposable
         TimeSpan? remaining = session is { TimeoutSeconds: { } seconds, StartedAt: { } startedAt }
             ? startedAt + TimeSpan.FromSeconds(seconds) - _time.GetUtcNow()
             : null;
-        TrackLocked(session.Id, agent.Run, remaining > TimeSpan.Zero ? remaining : null);
+        // The provider session it had before this run: the one the run resumes, if it does.
+        TrackLocked(session.Id, agent.Run, remaining > TimeSpan.Zero ? remaining : null, previousProviderSessionId: session.RunResume);
         return remaining is not { } left || left > TimeSpan.Zero;
     }
 
@@ -458,7 +619,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             run = _providers[session.Provider].Start(new AgentLaunch(
-                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume));
+                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos));
         }
         catch (Exception exception)
         {
@@ -477,11 +638,13 @@ public sealed class SessionManager : IDisposable
             StartedAt = now,
             ProviderSessionId = run.ProviderSessionId,
             RunId = runId,
+            RunResume = resume,
+            RunMessages = messages,
             Error = null,
             // The agent has them now (a failed start keeps them held).
             Messages = null,
         });
-        TrackLocked(id, run, session.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, messages);
+        TrackLocked(id, run, session.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, messages, session.ProviderSessionId);
         _events.Publish(new SessionStarted { At = now, SessionId = id, Previous = session.Status, ProviderSessionId = run.ProviderSessionId });
         return started;
     }
@@ -491,7 +654,7 @@ public sealed class SessionManager : IDisposable
     /// <paramref name="timeout"/> (none: runs until it ends or is killed), finished when it ends.
     /// <paramref name="given"/>: the messages it got at its start.
     /// </summary>
-    private void TrackLocked(Guid id, IAgentRun run, TimeSpan? timeout, IReadOnlyList<string>? given = null)
+    private void TrackLocked(Guid id, IAgentRun run, TimeSpan? timeout, IReadOnlyList<string>? given = null, string? previousProviderSessionId = null)
     {
         var session = _sessions[id];
         var provider = _health[session.Provider];
@@ -503,7 +666,7 @@ public sealed class SessionManager : IDisposable
                 due,
                 Timeout.InfiniteTimeSpan)
             : null;
-        _running[id] = new RunningAgent(run, timer, provider.Generation, [.. given ?? []]);
+        _running[id] = new RunningAgent(run, timer, provider.Generation, [.. given ?? []], previousProviderSessionId);
 
         // Not awaited inline: the run may already be complete, and Finish takes the lock.
         _ = Task.Run(async () => Finish(id, run, await run.Completion));
@@ -523,11 +686,18 @@ public sealed class SessionManager : IDisposable
             _running.Remove(id);
             running.Timeout?.Dispose();
             var session = _sessions[id];
+            if (!run.AgentStarted)
+            {
+                // No agent ran (its checkout failed, M5e): nothing to resume later.
+                session = session with { ProviderSessionId = running.PreviousProviderSessionId };
+            }
+
             var provider = _health[session.Provider];
             var current = running.Generation == provider.Generation;
             var probe = provider.Ended(id);
             // The probe got through to the provider (a failure of its own still reached it): it's back.
-            if (probe && outcome is AgentOutcome.Completed or AgentOutcome.Failed && provider.Status == ProviderStatus.Unreachable)
+            // A run whose agent never started never reached it.
+            if (probe && run.AgentStarted && outcome is AgentOutcome.Completed or AgentOutcome.Failed && provider.Status == ProviderStatus.Unreachable)
             {
                 RecoverLocked(provider);
             }
