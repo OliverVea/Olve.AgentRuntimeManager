@@ -52,6 +52,20 @@ re-evaluated and scoped when it's picked up.
   `rateLimitType` such as `five_hour`, `isUsingOverage`, `resetsAt`): a status rather than an
   amount left, so a first cut is the last status per provider. A real "X% left" needs a source
   that reports it. The scheduler could then hold low-priority sessions near a limit.
+- **Message queue** (2026-10-12; Oliver: "show me the queue at the bottom … that'd also allow me
+  to cancel messages"): today a message to a working session goes to the agent at once and shows
+  in the conversation only when the agent reads it, after its current step, so on the session
+  page "sent, not yet read" looks like "never sent", and nothing can be taken back. Instead ARM
+  keeps every message itself (in its database, in order, so they survive a restart) and hands
+  the waiting ones to the agent when its current step ends (a tool call returning, a turn
+  ending: ARM sees both in the agent's output). A message is `waiting` (cancellable) and then
+  handed over (in the conversation as a prompt, as today). A queued session's messages follow
+  its prompt and an ended session is continued, both as today. Sending returns the message's
+  id; a read lists a session's waiting messages and a delete cancels one (refused once handed
+  over). Web UI: the queue at the bottom of the session page, above the message box, each
+  message with its text, when it was sent and a cancel button (mock first); CLI: list and
+  cancel. Open: what a kill does to waiting messages (drop them, keep them undelivered, or let
+  the first one continue the session).
 - **Session profile** (2026-10-12): where a session's time went, as its own read next to the
   conversation and activity (`arm session profile <id>`, a breakdown on the session page): time
   in the model (thinking and writing, taken from the gaps between steps), in each tool, in builds
