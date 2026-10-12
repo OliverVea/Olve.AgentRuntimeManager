@@ -34,8 +34,9 @@ production (parallel — a red step blocks ALL processing → no deploy):
                         (WebApplicationFactory on SQLite + FakeProvider)
 
 processing (sequential — beta gates prod):
-  deploy-beta           deploy ARM + its private Postgres to apps-beta; rollout + health gate
-  test-after-beta       the HTTP suite against the LIVE beta Service; LLM-free; gates prod
+  deploy-beta           deploy the release into the beta VM (vm-deploy.sh); health gate
+  test-after-beta       from its own job, over HTTP only: the HTTP suite against LIVE beta (LLM-free),
+                        then the beta checks (one Haiku turn, the rest on `fake`); gates prod
   deploy                prod
 ```
 
@@ -61,7 +62,7 @@ are one suite of behaviour tests over raw HTTP (implemented 2026-09-26):
   - **local dev** → `http://localhost:<port>` (a `dotnet run` instance)
   - **the real image** → `mise run api:image` builds the `Dockerfile` image, starts it with a test
     signing key and runs the suite against it (manual; needs Docker)
-  - **CI after-beta** → the in-cluster beta Service `http://olve-arm.apps-beta.svc.cluster.local`
+  - **CI after-beta** → the beta VM through the host relay, `http://100.100.117.17:18792`
 
 In base-URL mode the suite mints tokens only if given the target's auth settings
 (`ARM_API_SIGNING_KEY`, `ARM_API_ISSUER`, `ARM_API_AUDIENCE`); otherwise tests that need one are
@@ -82,11 +83,45 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   clobbers real beta state.
 - **LLM-free** — control-plane only (session CRUD, approval flow via FakeProvider, policy,
   SSE, health). Never spawn a real Claude/Codex session here.
-- **One exception, in `deploy-beta` (2026-09-26):** each bundle's beta deploy starts one real
-  `claude` session through ARM's API (`src/deploy/vm/claude-check.sh`: Haiku, "Tell me a joke",
-  caller `deploy-beta`, a client-credentials token of the beta `olve-arm` machine client) and fails
-  unless it completed and its Claude Code saw no tools or MCP servers. It confirms the bundle's
-  provider, Claude Code version, login and lockdown before prod; the session stays in beta's history.
+- **One exception: the beta checks (2026-10-12; post-deploy, in `test-after-beta`).** After the API
+  suite, the same job proves ARM's main paths with real sessions through its API
+  (`.pipelines/scripts/beta-check.py`; caller `test-after-beta`), and prod deploys only if every
+  check passes. They are post-deploy checks, so they run where the other post-deploy tests run: in
+  the pipeline's own job, against beta from outside, over HTTP through the host relay like any
+  client. Nothing runs in the VM for testing, and `deploy-beta` only deploys. Both the suite and the
+  checks are the bundle's own commit's (its `commit.txt`), so they match the release. The token is a
+  client-credentials token of the beta `olve-arm` machine client from beta's Authentik (secret
+  `ARM_BETA_OIDC_CLIENT_SECRET`, in the job's environment only; the Authentik CA for that HTTPS is
+  read the way the VM gets it, from the cluster's `authentik-ca` configMap through the host).
+  **One Haiku turn per bundle:** a `claude` session whose agent runs one small command with its
+  Bash tool; the command's own output in the conversation (never the model's wording) proves
+  Claude Code started and is logged in, the command ran as the agent user (not `arm`, not root), a
+  registered default variable and the session's own reached it, and ARM's config didn't.
+  **Everything else on the `fake` provider** (enabled on beta, never on prod; no model): `/health`,
+  server info (the bundle's version), auth (401 without a valid token), provider health (claude and
+  fake available), a scripted conversation and its activity checked against each other, a message
+  continuing the ended session (M11), a working session refused deletion (409), killed (`killed`,
+  by the user) and deleted, and the event stream (the three sessions' lifecycles). About a minute
+  in all, every wait bounded (the whole run by the step's `timeout`, 4 minutes). Idempotent per
+  bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed for
+  <version>"), and a retried run for it starts no sessions; a run first kills what a failed one
+  left running. Left on beta: the claude session, the continued fake session and the record.
+  **Not checked per deploy:** that nothing of a killed *real* agent runs on (the fake kill proves
+  ARM's kill path, not the end of an agent's processes; from outside it would take a second real
+  turn), and Claude Code's lockdown (built-in tools only; no MCP servers, plugins or skills), which
+  ARM's API doesn't expose: it would need, e.g., the provider's init facts on the session or in its
+  conversation. Per push, ClaudeProviderTests kill a stub agent, and the `claude-code` step checks
+  the lockdown flags at build time. If a newer release is deployed while the checks run
+  (deploy-beta doesn't wait for this step), the record step sees the version change and fails, so a
+  run never vouches for a release it didn't check. The checks themselves are tested per push
+  (`BetaCheckTests`, API tests): against this build started locally with a stub Claude Code
+  (`BetaCheck/claude-stub.py`) that runs the command for real and can misbehave (a variable
+  missing, ARM's config leaking, no tool call, a hang, logged out, the wrong version, no fake
+  provider), each failure saying what failed and leaving nothing running; test-after-beta's part
+  that runs them (the secret in the environment only, each missing prerequisite failing the step
+  by name); the check's own logic on what a working ARM never answers (`BetaCheck/beta_check_test.py`).
+  New features add their check to `CHECKS` in `beta-check.py` on the `fake` provider where it can
+  prove the point (the budget is the one real turn) and a case to those tests.
 
 ## Provider (LLM) integration testing
 

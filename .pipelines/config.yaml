@@ -30,7 +30,7 @@ secrets:
   - name: CLAUDE_CODE_OAUTH_TOKEN_PROD
     description: Claude Code OAuth token (`claude setup-token`, one year) for the prod VM's agents.
   - name: ARM_BETA_OIDC_CLIENT_SECRET
-    description: Secret of the beta `olve-arm` confidential client (client credentials); deploy-beta uses it to start its one claude check session through ARM.
+    description: Secret of the beta `olve-arm` confidential client (client credentials); test-after-beta's beta checks use it to get their token from beta's Authentik and start their sessions through ARM.
 
 # Production steps run in parallel and write to bundle/<step-name>/.
 productionSteps:
@@ -61,9 +61,12 @@ processingSteps:
     configuration:
       image: alpine:latest
       scriptFile: scripts/deploy-beta.sh
-  # Beta confirmation: the API test suite against the live beta VM via the host relay (no
-  # ingress dependency). Read/anonymous behaviour runs; token-dependent tests skip (beta
-  # validates Authentik tokens, not a test key). A failure stops prod.
+  # Beta confirmation, from this job against the live beta VM, through the host relay (no ingress
+  # dependency) and only over HTTP: nothing runs in the VM (the host is asked only for beta's
+  # Authentik CA, as the VM gets it). The bundle's own commit's API test suite (read/anonymous
+  # behaviour runs; token-dependent tests skip: beta validates Authentik tokens, not a test key),
+  # then ARM's beta checks (scripts/beta-check.py: sessions through ARM's API with a
+  # client-credentials token, one Haiku turn, the rest on the `fake` provider). A failure stops prod.
   - name: test-after-beta
     configuration:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
