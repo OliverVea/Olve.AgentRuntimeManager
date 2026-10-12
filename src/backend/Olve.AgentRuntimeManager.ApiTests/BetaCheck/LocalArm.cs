@@ -64,8 +64,11 @@ public sealed class LocalArm : IAsyncDisposable
         return client;
     }
 
-    /// <summary>Starts ARM with the stub Claude Code in <paramref name="mode"/> (see claude-stub.py); returns once it's healthy.</summary>
-    public static async Task<LocalArm> StartAsync(string mode = "ok")
+    /// <summary>
+    /// Starts ARM with the stub Claude Code in <paramref name="mode"/> (see claude-stub.py) and
+    /// <paramref name="settings"/> (<c>NAME=value</c>, its environment); returns once it's healthy.
+    /// </summary>
+    public static async Task<LocalArm> StartAsync(string mode = "ok", params string[] settings)
     {
         var root = Directory.CreateTempSubdirectory("arm-beta-check-").FullName;
         var stub = Path.Combine(root, "claude");
@@ -96,6 +99,10 @@ public sealed class LocalArm : IAsyncDisposable
         info.Environment["Arm__Environment"] = "beta";
         info.Environment["OpenTelemetry__Endpoint"] = "";
         info.Environment["CLAUDE_CODE_OAUTH_TOKEN"] = "stub";
+        foreach (var setting in settings)
+        {
+            info.Environment[setting.Split('=', 2)[0]] = setting.Split('=', 2)[1];
+        }
 
         var process = Process.Start(info) ?? throw new InvalidOperationException("ARM did not start.");
         var arm = new LocalArm(root, port, process);

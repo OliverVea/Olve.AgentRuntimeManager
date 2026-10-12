@@ -220,7 +220,7 @@ class ProcessTests(unittest.TestCase):
                     break
                 time.sleep(0.05)
             self.assertIn(process.pid, found)
-            self.assertTrue(any(command.startswith("sleep 30") for (_, _, command) in found.values()), found)
+            self.assertTrue(any(command.startswith("sleep 30") for (*_, command) in found.values()), found)
             self.assertEqual(check.session_processes({"supervisorPid": process.pid}, []).keys(), found.keys())
         finally:
             os.killpg(process.pid, signal.SIGKILL)
@@ -229,6 +229,24 @@ class ProcessTests(unittest.TestCase):
         while check.session_processes({}, [marker]) and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(check.session_processes({}, [marker]), {})
+
+
+    def test_after_a_kill_finds_what_left_the_tree_in_a_session_it_led(self):
+        marker = f"beta-check-test-{os.getpid()}-led"
+        # A session leader naming the marker, and a grandchild naming nothing that left its tree at once.
+        process = subprocess.Popen(["sh", "-c", "sh -c 'sleep 31 & echo $!' & wait; sleep 30", marker],
+                                   start_new_session=True, stdout=subprocess.PIPE, text=True)
+        orphan = int(process.stdout.readline())
+        try:
+            before = check.session_processes({}, [marker])
+            self.assertIn(process.pid, before)
+            os.kill(process.pid, signal.SIGKILL)
+            process.wait()
+            # The leader is gone; the orphan isn't found as before, but is in the session it led.
+            self.assertNotIn(orphan, check.session_processes({}, [marker]))
+            self.assertIn(orphan, check.leftovers(before, {}, [marker]))
+        finally:
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 if __name__ == "__main__":

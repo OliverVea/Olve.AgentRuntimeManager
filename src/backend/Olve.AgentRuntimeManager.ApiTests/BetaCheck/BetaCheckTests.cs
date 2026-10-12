@@ -43,17 +43,18 @@ public class BetaCheckTests
         }
 
         await Assert.That(first.Output).Contains($"killed session {leftover}");
+        await Assert.That(first.Output).Contains("ok   delete: a completed fake session");
         await Assert.That(first.Output).Contains($"Beta check passed for {LocalArm.Version} (3 model turns)");
         var sessions = await arm.CheckSessionsAsync();
-        // The leftover (killed by the check) and the continued one; the killed one was deleted.
-        await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "killed"]);
-        await Assert.That(await arm.EnvAsync()).IsEquivalentTo(new Dictionary<string, string> { ["BETA_CHECK_PASSED"] = LocalArm.Version });
+        // The leftover (killed by the check), the continued one, the killed one and the record; the deleted one is gone.
+        await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "completed", "killed", "killed"]);
+        await Assert.That(await arm.EnvAsync()).IsEmpty();
 
         // A retried deploy of the same version starts nothing.
         var again = await arm.RunCheckAsync();
 
         await Assert.That(again.ExitCode).IsEqualTo(0).Because(again.ToString());
-        await Assert.That(again.Output).Contains($"{LocalArm.Version} already passed");
+        await Assert.That(again.Output).Contains($"{LocalArm.Version} already passed (record ");
         await Assert.That(again.Output).DoesNotContain("ok   tool session");
         await Assert.That(again.Output).Contains("(0 model turns)");
         await Assert.That(await arm.CheckSessionsAsync()).IsEquivalentTo(sessions);
@@ -66,6 +67,7 @@ public class BetaCheckTests
     [Arguments("ok", "BETA_CHECK_AGENT_USER=nobody", "', expected 'nobody'")]
     [Arguments("ok", "BETA_CHECK_SAME_USER=0", "the user ARM (and this check) runs as")]
     [Arguments("leak", "BETA_CHECK_KILL_SECONDS=2", "FAIL kill: 2 processes of killed session")]
+    [Arguments("orphan", "BETA_CHECK_KILL_SECONDS=2", "FAIL kill: 1 processes of killed session")]
     [Arguments("logged-out", "", "FAIL provider health: the claude provider is unauthorized")]
     [Arguments("ok", "BETA_CHECK_VERSION=2026.1.1.1", "FAIL server info: ARM says it is version '2026.10.12.1' in 'beta', expected '2026.1.1.1' in 'beta'")]
     public async Task Check_WhenSomethingIsWrong_FailsSayingWhat_AndLeavesNothingRunning(string mode, string setting, string expected)
@@ -80,6 +82,19 @@ public class BetaCheckTests
         await Assert.That(run.Output).DoesNotContain("Traceback");
         await Assert.That((await arm.CheckSessionsAsync()).Where(s => s.Status is "queued" or "working")).IsEmpty();
         await Assert.That(await arm.EnvAsync()).IsEmpty();
+    }
+
+    [Test]
+    public async Task Check_WithoutAFakeProvider_DeletesTheKilledSession_AndKeepsNoRecord()
+    {
+        await using var arm = await LocalArm.StartAsync("ok", "Providers__Fake__Enabled=false");
+
+        var run = await arm.RunCheckAsync();
+
+        await Assert.That(run.ExitCode).IsEqualTo(0).Because(run.ToString());
+        await Assert.That(run.Output).Contains("ok   delete: the killed session (no fake provider");
+        await Assert.That(run.Output).Contains("ok   record: no fake provider, so no record");
+        await Assert.That((await arm.CheckSessionsAsync()).Select(s => s.Status)).IsEquivalentTo(["completed"]);
     }
 
     [Test]

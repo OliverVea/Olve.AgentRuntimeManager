@@ -6,7 +6,8 @@ stdin), once per bundle; prod deploys only if it passes. Every check either pass
 saying what it proved, or fails the step, saying plainly what failed; the checks after a failed one
 are skipped (they build on it). Costs three model turns (Haiku): one session that runs a command
 with its Bash tool (turn 1), a message that continues it (turn 2), and one killed in the middle of
-a command (turn 3). Every wait is bounded.
+a command (turn 3); sessions of the `fake` provider (no model) are deleted and keep the record.
+Every wait is bounded.
 
 Settings, from the environment, or from a PRESET dict deploy-beta.sh puts in front of this file
 (so the secret never lands on a command line or in a process's environment):
@@ -21,18 +22,21 @@ Settings, from the environment, or from a PRESET dict deploy-beta.sh puts in fro
   BETA_CHECK_AGENT_USER         the user agents must run as (default Supervisor__User); it must
                                 not be the check's own (ARM's), unless BETA_CHECK_SAME_USER=1
                                 (a local ARM without an agent user, in the tests)
-  BETA_CHECK_TURN_SECONDS       how long one turn may take (default 90)
+  BETA_CHECK_TURN_SECONDS       how long one turn may take (default 60)
   BETA_CHECK_KILL_SECONDS       how long a killed session's processes may take to go (default 15)
   BETA_CHECK_PROVIDER / _MODEL  default claude / haiku
 
-Idempotent per bundle: a passing run records its version in ARM (the registered, non-default
-variable BETA_CHECK_PASSED), and a run for a version already recorded starts no sessions. A run
-first kills what an earlier, failed run left running. What it leaves on beta: the continued
-session and (on a failure) what failed, in ARM's history; the killed one is deleted.
+Idempotent per bundle: a passing run leaves a record in ARM's history (a completed `fake` session,
+"Beta checks passed for <version>"), and a run for a version with a record starts no sessions. A
+run first kills what an earlier, failed run left running. What it leaves on beta is ARM's history:
+the continued session, the killed one and the record (and, on a failure, what failed). The session
+it deletes is a `fake` one, which has no folder or transcript (ARM's delete leaves a claude
+session's on disk). Without a `fake` provider it deletes the killed session, and keeps no record.
 
 Adding a check: write `check_<what>(ctx) -> str` (return what it proved; raise CheckFailed with
-what failed), add it to CHECKS with the number of model turns it costs, and test it in the API
-tests' BetaCheckTests (a local ARM with a stub Claude Code).
+what failed), add it to CHECKS with the model turns it costs (fold a new check into an existing
+turn where it can be: the budget is three), and test it in the API tests' BetaCheckTests (a local
+ARM with a stub Claude Code).
 """
 
 import base64
@@ -56,8 +60,9 @@ TAG = "BETA_CHECK_VERSION"
 # registered values when they're created), so it reaches that agent and, at most, a session
 # someone else creates in that moment.
 NONCE_VARIABLE = "BETA_CHECK_NONCE"
-# Registered, not default (it reaches no agent): the last version this check confirmed.
-PASSED_VARIABLE = "BETA_CHECK_PASSED"
+# The record of a passing run (a `fake` session's prompt, with the version).
+RECORD_PROMPT = "Beta checks passed for {version}: the beta check's record. fake:sleep=100ms"
+DELETE_PROMPT = "A session the beta check deletes. fake:sleep=100ms"
 
 # What the first session runs. Its output, not the agent's words, decides: who it ran as, and
 # which variables reached it (ARM's own configuration must not: Auth__Authority is in ARM's
@@ -72,9 +77,10 @@ TOOL_PROMPT = (
     "only once, then reply with one short sentence saying what it printed.\n\n```sh\n{command}\n```"
 )
 CONTINUE_TEXT = "Thanks. Now reply with just the word: done."
-# The killed session's command: long enough to be killed in, marked so that its processes can be
-# found even if they left the agent's process tree.
-KILL_COMMAND = "sh -c 'sleep 240; echo finished' {marker}"
+# The killed session's command: long enough to be killed in (it is, within seconds), shorter than
+# the Bash tool's 2-minute default timeout (so nothing suggests running it in the background),
+# marked so that its processes can be found even if they left the agent's process tree.
+KILL_COMMAND = "sh -c 'sleep 90; echo finished' {marker}"
 KILL_PROMPT = (
     "This is ARM's deploy check. Run the command below with the Bash tool, exactly as written, in "
     "the foreground (not in the background), and wait for it to finish.\n\n```sh\n{command}\n```"
@@ -88,6 +94,26 @@ ENDED = {"completed", "cancelled", "killed", "failed"}
 
 class CheckFailed(Exception):
     """What failed, in words for the pipeline's log."""
+
+
+class Stopped(BaseException):
+    """No one reads the output any more (the step went away): stop, and clean up."""
+
+
+_output_gone = False
+
+
+def say(text, stop=True):
+    """Prints a line for the step's log; once that's gone, stops the run (or, in cleanup, goes on silently)."""
+    global _output_gone
+    if _output_gone:
+        return
+    try:
+        print(text, flush=True)
+    except OSError:
+        _output_gone = True
+        if stop:
+            raise Stopped()
 
 
 def short(value, length=200):
@@ -127,7 +153,7 @@ class Settings:
         self.environment = get("BETA_CHECK_ENVIRONMENT", "beta")
         self.provider = get("BETA_CHECK_PROVIDER", "claude")
         self.model = get("BETA_CHECK_MODEL", "haiku")
-        self.turn_seconds = int(get("BETA_CHECK_TURN_SECONDS", "90"))
+        self.turn_seconds = int(get("BETA_CHECK_TURN_SECONDS", "60"))
         self.kill_seconds = int(get("BETA_CHECK_KILL_SECONDS", "15"))
         self.work_root = self.config.get("Providers__Claude__WorkRoot")
         if not self.work_root:
@@ -291,7 +317,7 @@ def event_problems(events, expected):
 
 
 def processes():
-    """Every live process: pid → (ppid, process group, start time, uid, command line)."""
+    """Every live process: pid → (ppid, process group, session, start time, uid, command line)."""
     found = {}
     for name in os.listdir("/proc"):
         if not name.isdigit():
@@ -308,7 +334,7 @@ def processes():
         fields = stat[stat.rindex(")") + 2:].split()
         if fields[0] in ("Z", "X"):
             continue
-        found[int(name)] = (int(fields[1]), int(fields[2]), int(fields[19]), uid, command)
+        found[int(name)] = (int(fields[1]), int(fields[2]), int(fields[3]), int(fields[19]), uid, command)
     return found
 
 
@@ -316,10 +342,10 @@ def session_processes(supervisor, markers):
     """
     The processes of a session: its supervisor, the process group it leads (its agent's), anything
     whose command line holds one of `markers` (the session's id, its command's marker), and all
-    their descendants. pid → (start time, uid, command line).
+    their descendants. pid → (session, start time, uid, command line).
     """
     table = processes()
-    roots = {pid for pid, (_, group, _, _, command) in table.items()
+    roots = {pid for pid, (_, group, _, _, _, command) in table.items()
              if pid == supervisor.get("supervisorPid") or group == supervisor.get("supervisorPid")
              or pid == supervisor.get("agentPid") or any(marker in command for marker in markers)}
     children = {}
@@ -335,8 +361,23 @@ def session_processes(supervisor, markers):
     return {pid: table[pid][2:] for pid in found}
 
 
+def leftovers(before, supervisor, markers):
+    """
+    What still runs of a killed session whose processes were `before`: any of them (the same pid
+    and start time), whatever is found as before, and anything in a session (setsid) one of them
+    led, even if it left their tree and names no marker (Claude Code runs each Bash call in a
+    session of its own; a command's child outlives it there when its kill ends halfway).
+    """
+    led = {sid for (sid, *_rest) in before.values() if sid in before}
+    left = {pid: row[2:] for pid, row in processes().items()
+            if (pid in before and before[pid][1] == row[3]) or row[2] in led}
+    left.update((pid, p) for pid, p in session_processes(supervisor, markers).items() if pid not in before)
+    left.pop(os.getpid(), None)
+    return left
+
+
 def describe(found):
-    return "; ".join(f"{pid} {short(command, 80)}" for pid, (_, _, command) in sorted(found.items()))
+    return "; ".join(f"{pid} {short(command, 80)}" for pid, (*_, command) in sorted(found.items()))
 
 
 # --- what the checks share --------------------------------------------------------------------
@@ -355,6 +396,7 @@ class Context:
         self.tool_prompt = TOOL_PROMPT.format(command=TOOL_COMMAND)
         self.conversation = None
         self.kill_session = None
+        self.fake = False
 
     def folder(self, session_id):
         return os.path.join(self.settings.work_root, session_id)
@@ -363,6 +405,14 @@ class Context:
         created = self.api.call("POST", "/api/sessions", {
             "prompt": prompt, "provider": self.settings.provider, "model": self.settings.model,
             "caller": CALLER, "timeoutSeconds": timeout_seconds, "env": {TAG: self.settings.version},
+        }, expect=(201, 202))
+        self.created.append(created["id"])
+        return created["id"]
+
+    def create_fake_session(self, prompt):
+        created = self.api.call("POST", "/api/sessions", {
+            "prompt": prompt, "provider": "fake", "model": "fake", "caller": CALLER, "timeoutSeconds": 60,
+            "env": {TAG: self.settings.version},
         }, expect=(201, 202))
         self.created.append(created["id"])
         return created["id"]
@@ -443,13 +493,17 @@ def check_earlier_runs(ctx):
             ctx.api.call("POST", f"/api/sessions/{session['id']}/kill",
                          {"caller": CALLER, "reason": "Left running by an earlier beta check."}, expect=(200, 409))
             done.append(f"killed session {session['id']}")
-    variables = {v["name"]: v for v in ctx.api.call("GET", "/api/env")}
+    variables = {v["name"] for v in ctx.api.call("GET", "/api/env")}
     if NONCE_VARIABLE in variables:
         ctx.api.call("DELETE", f"/api/env/{NONCE_VARIABLE}", expect=(204, 404))
         done.append(f"removed {NONCE_VARIABLE}")
-    if variables.get(PASSED_VARIABLE, {}).get("value") == ctx.settings.version:
+    record = RECORD_PROMPT.format(version=ctx.settings.version)
+    page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "status": ["completed"], "limit": 100})
+    passed = next((s for s in page["items"] if s.get("prompt") == record
+                   and (s.get("env") or {}).get(TAG) == ctx.settings.version), None)
+    if passed is not None:
         ctx.already_passed = True
-        done.append(f"{ctx.settings.version} already passed (an earlier run): no sessions this time")
+        done.append(f"{ctx.settings.version} already passed (record {passed['id']}): no sessions this time")
     return "; ".join(done) or "none left over"
 
 
@@ -726,7 +780,7 @@ def check_kill(ctx):
     deadline = time.monotonic() + 10
     while True:
         before = session_processes(supervisor, markers)
-        if not in_call or any(marker in command for (_, _, command) in before.values()) or time.monotonic() >= deadline:
+        if not in_call or any(marker in command for (*_, command) in before.values()) or time.monotonic() >= deadline:
             break
         time.sleep(0.5)
     # The leftover check below is only as good as this: it must see the running agent.
@@ -734,7 +788,7 @@ def check_kill(ctx):
     if agent not in before:
         raise CheckFailed(f"session {session_id}'s agent (pid {agent}) isn't among its processes in /proc: "
                           f"the leftover check would see nothing")
-    agent_uid = before[agent][1]
+    agent_uid = before[agent][2]
     expected_uid = pwd.getpwnam(ctx.settings.agent_user).pw_uid
     if agent_uid != expected_uid:
         raise CheckFailed(f"session {session_id}'s agent runs as uid {agent_uid}, not {ctx.settings.agent_user} ({expected_uid})")
@@ -748,26 +802,34 @@ def check_kill(ctx):
         raise CheckFailed(f"session {session_id} isn't killed after its kill")
     deadline = time.monotonic() + ctx.settings.kill_seconds
     while True:
-        now = session_processes(supervisor, markers)
-        # Still there: the same process as before (pid and start time), or a new one of the session's.
-        left = {pid: p for pid, p in now.items() if pid not in before or before[pid][0] == p[0]}
+        left = leftovers(before, supervisor, markers)
         if not left:
             break
         if time.monotonic() >= deadline:
             raise CheckFailed(f"{len(left)} processes of killed session {session_id} still run after {ctx.settings.kill_seconds}s: {describe(left)}")
         time.sleep(0.5)
     what = "in its Bash call" if in_call else "before it called a tool"
-    command_seen = sum(marker in command for (_, _, command) in before.values())
+    command_seen = sum(marker in command for (*_, command) in before.values())
     return (f"session {session_id} (agent as {ctx.settings.agent_user}) refused deletion while working, then killed {what}; "
             f"its {len(before)} processes ({command_seen} of them the command's) are gone")
 
 
 def check_delete(ctx):
-    session_id = ctx.kill_session
+    """An ended session is deleted: a `fake` one (no folder or transcript to leave), else the killed one."""
+    health = ctx.api.call("GET", "/api/providers/health")
+    ctx.fake = any(h.get("provider") == "fake" for h in health)
+    if ctx.fake:
+        session_id = ctx.create_fake_session(DELETE_PROMPT)
+        ended = ctx.wait_ended(session_id, 30)
+        if ended["status"] != "completed":
+            raise CheckFailed(f"fake session {session_id} ended {ended['status']}: {ended.get('error') or ''}")
+        what = "a completed fake session"
+    else:
+        session_id, what = ctx.kill_session, "the killed session (no fake provider: its folder stays on disk)"
     ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204,))
     ctx.api.call("GET", f"/api/sessions/{session_id}", expect=(404,))
     ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(404,))
-    return f"killed session {session_id} deleted (then 404)"
+    return f"{what} ({session_id}) deleted (then 404)"
 
 
 def check_events(ctx):
@@ -795,8 +857,13 @@ def check_events(ctx):
 
 
 def check_record(ctx):
-    ctx.api.call("PUT", f"/api/env/{PASSED_VARIABLE}", {"value": ctx.settings.version, "default": False})
-    return f"{PASSED_VARIABLE}={ctx.settings.version} (a retried deploy of it starts no sessions)"
+    if not ctx.fake:
+        return "no fake provider, so no record: a retried deploy of this version checks again"
+    session_id = ctx.create_fake_session(RECORD_PROMPT.format(version=ctx.settings.version))
+    ended = ctx.wait_ended(session_id, 30)
+    if ended["status"] != "completed":
+        raise CheckFailed(f"the record, fake session {session_id}, ended {ended['status']}: {ended.get('error') or ''}")
+    return f"session {session_id} records it in ARM's history (a retried deploy of {ctx.settings.version} starts no sessions)"
 
 
 class Check:
@@ -818,8 +885,9 @@ CHECKS = [
     Check("continue", check_continue, turns=1, sessions=True),
     Check("kill", check_kill, turns=1, sessions=True),
     Check("delete", check_delete, sessions=True),
-    # Next: the repository checkout (a session that clones a repo into its workplace) goes here,
-    # with its own session and turn; add its lifecycle to check_events.
+    # Next: the repository checkout (a session that clones a repo into its workplace) goes here.
+    # Within the budget of three turns: give the tool session (or the continue message) the
+    # checkout to do, rather than a session of its own, and check its workplace here.
     Check("lifecycle events", check_events, sessions=True),
     Check("record", check_record, sessions=True),
 ]
@@ -839,7 +907,7 @@ def cleanup(ctx):
             if status == 200 and session["status"] not in ENDED:
                 ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
                              {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
-                print(f"cleanup: killed session {session_id}", flush=True)
+                say(f"cleanup: killed session {session_id}", stop=False)
         except CheckFailed as error:
             problems.append(f"could not stop session {session_id}: {error}")
     return problems
@@ -852,26 +920,26 @@ def run(ctx, checks):
             if check.sessions and ctx.already_passed:
                 continue
             try:
-                print(f"ok   {check.name}: {check.run(ctx)}", flush=True)
+                say(f"ok   {check.name}: {check.run(ctx)}")
             except CheckFailed as error:
                 failed = (check, str(error))
             except Exception as error:  # a bug here, or ARM answering something unexpected
                 failed = (check, f"unexpected {type(error).__name__}: {error}")
             if failed:
-                print(f"FAIL {check.name}: {failed[1]}", flush=True)
+                say(f"FAIL {check.name}: {failed[1]}")
                 skipped = [c.name for c in checks[index + 1:] if not (c.sessions and ctx.already_passed)]
                 if skipped:
-                    print(f"skipped (they build on it): {', '.join(skipped)}", flush=True)
+                    say(f"skipped (they build on it): {', '.join(skipped)}")
                 break
     finally:
         problems = cleanup(ctx)
     for problem in problems:
-        print(f"FAIL cleanup: {problem}", flush=True)
+        say(f"FAIL cleanup: {problem}", stop=False)
     if failed or problems:
-        print("Beta check FAILED", flush=True)
+        say("Beta check FAILED", stop=False)
         return 1
     turns = 0 if ctx.already_passed else sum(c.turns for c in checks)
-    print(f"Beta check passed for {ctx.settings.version} ({turns} model turns)", flush=True)
+    say(f"Beta check passed for {ctx.settings.version} ({turns} model turns)", stop=False)
     return 0
 
 
@@ -882,9 +950,12 @@ def main():
         settings = Settings({**os.environ, **globals().get("PRESET", {})})
         token = settings.token or client_credentials_token(settings)
     except CheckFailed as error:
-        print(f"FAIL setup: {error}\nBeta check FAILED", flush=True)
+        say(f"FAIL setup: {error}\nBeta check FAILED", stop=False)
         return 1
-    return run(Context(settings, Api(settings.api, token)), CHECKS)
+    try:
+        return run(Context(settings, Api(settings.api, token)), CHECKS)
+    except Stopped:
+        return 1
 
 
 if __name__ == "__main__":

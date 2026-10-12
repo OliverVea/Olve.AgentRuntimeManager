@@ -90,14 +90,18 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   user, a registered default variable and the session's own reached it, ARM's own config didn't;
   Claude Code is locked down), its conversation and activity are checked against each other, a
   message continues it (M11), and a second session is killed in the middle of a command (it ends
-  `killed`, none of its processes run on) and deleted. Also `/health`, server info (the bundle's
-  version), auth, provider health and the event stream (both sessions' lifecycles). The command's
-  output and ARM's answers decide, never the model's wording. Idempotent per bundle: a passing run
-  records its version (`BETA_CHECK_PASSED`, a registered non-default variable), and a retried
-  deploy of it starts no sessions; a run first kills what a failed one left running. The checks
+  `killed`, and nothing of it runs on: its processes, their descendants, and anything left in a
+  process session one of them led). A `fake` session (no model) is deleted. Also `/health`, server
+  info (the bundle's version), auth, provider health and the event stream (both sessions'
+  lifecycles). The command's output and ARM's answers decide, never the model's wording; about a
+  minute in all, every wait bounded (the whole run by the VM's `timeout`, 4.5 minutes). Idempotent
+  per bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed
+  for <version>"), and a retried deploy of it starts no sessions; a run first kills what a failed
+  one left running. Left on beta: those sessions, in ARM's history (ARM's delete would leave a
+  `claude` session's folder and transcript on disk, so the deleted one is a `fake` one). The checks
   themselves are tested per push (`BetaCheckTests`, API tests): against this build started locally
   with a stub Claude Code (`BetaCheck/claude-stub.py`) that runs the commands for real and can
-  misbehave (a variable missing, ARM's config leaking, no tool call, a hang, a process escaping a
+  misbehave (a variable missing, ARM's config leaking, no tool call, a hang, processes outliving a
   kill, logged out, the wrong version), each failure saying what failed; the check's own logic on
   what a working ARM never answers (`BetaCheck/beta_check_test.py`). New features add their check
   to `CHECKS` in `beta-check.py` (with the turns it costs) and a case to those tests.

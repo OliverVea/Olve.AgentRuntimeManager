@@ -11,6 +11,8 @@ How it misbehaves is chosen by a `stub-mode` file next to it (one word, default 
   hang        takes up the first message and never answers
   leak        a `sleep` command escapes: double-forked into its own session, while the agent
               pretends to wait for it
+  orphan      a `sleep` command leaves behind a child of its own (no marker, out of its process
+              tree and group, but in its session), as a kill that ends halfway would
   logged-out  `claude auth status` says it isn't logged in
 """
 
@@ -91,6 +93,8 @@ def main(args):
             if MODE == "leak" and "sleep" in command:
                 leak(command)
                 time.sleep(3600)
+            if MODE == "orphan" and "sleep" in command:
+                subprocess.run(["bash", "-c", "sleep 97 >/dev/null 2>&1 &"], process_group=0)
             ran = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
             output = (ran.stdout + ran.stderr).strip()
             emit({"type": "user", "message": {"role": "user", "content": [

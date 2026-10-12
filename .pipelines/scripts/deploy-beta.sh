@@ -65,5 +65,5 @@ if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
       "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
     cat "$INPUT_DIR/vm/beta-check.py"; } |
     ssh -o StrictHostKeyChecking=no "$HOST" \
-      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 timeout -k 15 330 python3 -u -"
+      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 timeout -k 15 270 python3 -u -"
 fi
