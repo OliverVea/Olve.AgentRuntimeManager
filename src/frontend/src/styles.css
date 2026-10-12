@@ -1056,3 +1056,56 @@ dialog.env-dialog {
   font-size: 12px;
   margin: 0;
 }
+
+/* ---- repos (M5e; approved mock: mocks/repos.html) ---- */
+/* The composer's repos: a second button in the settings row, styled as the env one (.env-toggle),
+   and a panel under the row, styled as the env one (.env-panel, details.fold, .x-btn, .link-btn). */
+.repo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(8em, 14em) auto;
+  align-items: center;
+  gap: 6px;
+}
+.repo-row .hash {
+  color: var(--faint);
+  font: 13px var(--mono);
+}
+.repo-row input {
+  font: 13px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--field);
+  color: var(--text);
+  height: 32px;
+  min-width: 0;
+}
+.repo-row input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.repo-row input.bad {
+  border-color: var(--danger);
+}
+.repo-row .err {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: -2px;
+}
+@media (max-width: 720px) {
+  .repo-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .repo-row .hash {
+    display: none;
+  }
+  .repo-row input:nth-of-type(2) {
+    grid-column: 1;
+  }
+  .repo-row .x-btn {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+}

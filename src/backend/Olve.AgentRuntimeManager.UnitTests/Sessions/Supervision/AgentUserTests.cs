@@ -126,7 +126,8 @@ public class AgentUserTests
         var account = OwnAccount();
         var (_, provider) = Server(account);
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
-        var launch = Launch("Say READY") with { Repos = [new RepoRecord(origin)] };
+        var unnamed = Launch("Say READY");
+        var launch = unnamed with { Repos = [RepoNames.Record(unnamed.SessionId, origin)] };
         var worktree = Path.Combine(Folder(launch), "work", "alpha");
 
         var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);

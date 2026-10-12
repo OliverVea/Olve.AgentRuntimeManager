@@ -1,0 +1,1552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOCK · ARM repos (M5e web UI)</title>
+<style>
+/* ======== The real UI's stylesheet, verbatim (src/frontend/src/styles.css) ======== */
+/* The sessions screen (approved mock: mocks/sessions.html). The cards' own styles are in
+   components/session-card.ts (shadow DOM); they share these tokens. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --card: #ffffff;
+  --line: #e4e4e0;
+  --text: #1d1d1b;
+  --dim: #6b6b66;
+  --faint: #9a9a94;
+  --field: #ffffff;
+  --chip: #f1f1ed;
+  --hover: #f1f1ed;
+  --backdrop: rgba(0, 0, 0, 0.25);
+  --accent: #2563eb;
+  --accent-fill: #2563eb;
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --danger-fill: #dc2626;
+  --danger-soft: #fee2e2;
+  --working: #15803d;
+  --working-bg: #dcfce7;
+  --queued: #52525b;
+  --queued-bg: #f1f1f4;
+  --completed: #15803d;
+  --completed-bg: #dcfce7;
+  --killed: #b45309;
+  --killed-bg: #fef3c7;
+  --failed: #dc2626;
+  --failed-bg: #fee2e2;
+  --beta: #7c3aed;
+  --beta-bg: #ede9fe;
+  --warn: #b45309;
+  --warn-bg: #fef3c7;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --row: 22px;
+}
+/* Dark: set by main.ts from the system preference, or the Options override. */
+:root.dark {
+  color-scheme: dark;
+  --bg: #131312;
+  --card: #1c1c1a;
+  --line: #33332f;
+  --text: #ececea;
+  --dim: #a1a19a;
+  --faint: #75756f;
+  --field: #232321;
+  --chip: #2a2a27;
+  --hover: #2a2a27;
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --accent: #7aa7ff;
+  --accent-fill: #3563d4;
+  --on-accent: #ffffff;
+  --danger: #f87171;
+  --danger-fill: #b83232;
+  --danger-soft: #3a1818;
+  --working: #4ade80;
+  --working-bg: #143020;
+  --queued: #b4b4bc;
+  --queued-bg: #2a2a2e;
+  --completed: #4ade80;
+  --completed-bg: #143020;
+  --killed: #fbbf24;
+  --killed-bg: #372b0c;
+  --failed: #f87171;
+  --failed-bg: #3a1818;
+  --beta: #c4b5fd;
+  --beta-bg: #2e2250;
+  --warn: #fbbf24;
+  --warn-bg: #372b0c;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px / 1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: hidden must beat every display rule */
+  display: none !important;
+}
+svg.i {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* ---- header ---- */
+header {
+  position: relative; /* anchors the providers popover */
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  font-weight: 750;
+  font-size: 19px;
+  letter-spacing: 0.02em;
+}
+.env {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--beta);
+  background: var(--beta-bg);
+  border-radius: 4px;
+  padding: 1px 7px;
+}
+.version {
+  color: var(--dim);
+  font: 12px var(--mono);
+}
+.spacer {
+  flex: 1;
+}
+.live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--working);
+}
+.dot.connecting,
+.dot.reconnecting {
+  background: var(--killed);
+  animation: pulse 1s infinite;
+}
+.dot.down {
+  background: var(--danger);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.user {
+  color: var(--dim);
+  font-size: 13px;
+}
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+}
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+main {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+}
+
+/* ---- signed out ---- */
+.signin {
+  text-align: center;
+  color: var(--dim);
+  padding: 48px 16px;
+}
+.signin p {
+  margin: 0 0 14px;
+}
+
+/* ---- composer ---- */
+.composer {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+/* One line to start; grows with the prompt. The resize grip only appears once it's multi-line. */
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  max-height: 50vh;
+  resize: none;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  background: var(--field);
+  line-height: 20px;
+}
+.composer textarea.multiline {
+  resize: vertical;
+  overflow-y: auto;
+}
+.composer textarea:focus,
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.composer .row {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+/* Labels sit left of their inputs here, to keep the composer short. */
+.composer .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.field input,
+.field select {
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--field);
+  color: var(--text);
+  height: 32px;
+}
+.field .num {
+  width: 6.5em;
+  font-family: var(--mono);
+}
+.field .caller {
+  width: 10em;
+}
+.field .model {
+  width: 12em;
+  font-family: var(--mono);
+}
+.hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+.composer .settings {
+  display: contents;
+}
+/* Phones: the settings fold behind a light "Advanced" toggle. */
+.advanced-toggle {
+  display: none;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font-size: 13px;
+  padding: 0;
+}
+.advanced-toggle:hover {
+  color: var(--dim);
+}
+.primary {
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 16px;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.primary.danger {
+  background: var(--danger-fill);
+}
+.toast {
+  font-size: 13px;
+  color: var(--dim);
+  margin-top: 6px;
+}
+.toast.error {
+  color: var(--danger);
+}
+.toast:empty {
+  display: none;
+}
+
+/* ---- views ---- */
+nav.views {
+  display: flex;
+  gap: 2px;
+  margin: 22px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+nav.views button {
+  border: 0;
+  background: none;
+  padding: 6px 12px;
+  color: var(--dim);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+nav.views button.on {
+  color: var(--text);
+  border-bottom-color: var(--text);
+  font-weight: 650;
+}
+
+/* ---- the session page (<session-page> styles itself; M5b) ---- */
+.back {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+/* ---- dialogs ---- */
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  width: min(460px, 92vw);
+  background: var(--card);
+  color: var(--text);
+}
+dialog::backdrop {
+  background: var(--backdrop);
+}
+dialog h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+dialog p {
+  color: var(--dim);
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+dialog .buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+dialog .problem {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+dialog .problem:empty {
+  display: none;
+}
+.ghost {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 14px;
+  background: transparent;
+}
+.ghost:hover {
+  background: var(--hover);
+}
+section.opt {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+section.opt h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+}
+section.opt .field input,
+section.opt .field select {
+  width: 100%;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .user,
+  .version {
+    display: none;
+  }
+  main {
+    padding: 12px;
+  }
+  .field .caller {
+    width: 8em;
+  }
+  .advanced-toggle {
+    display: inline;
+  }
+  .hint {
+    display: none;
+  }
+  .composer .settings {
+    display: none;
+    order: 10;
+    width: 100%;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .composer .settings.open {
+    display: flex;
+  }
+  .composer .settings .field {
+    justify-content: space-between;
+  }
+  .composer .settings .field input {
+    flex: 1;
+    max-width: 70%;
+    width: auto;
+  }
+}
+
+/* ---- provider health (approved mock: mocks/provider-health.html) ---- */
+/* A pill per paused provider, before the live status. */
+#provider-pills {
+  display: contents;
+}
+.provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  border: 0;
+  border-radius: 13px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.provider-pill.limited,
+.provider-pill.unreachable {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.provider-pill.unauthorized {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.provider-pill .dot {
+  background: currentColor;
+}
+.provider-pill.unreachable .dot {
+  animation: pulse 1s infinite;
+}
+.provider-pill .until {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+/* Its popover: every provider. */
+.providers {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 24px;
+  z-index: 5;
+  width: min(440px, calc(100vw - 24px));
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  padding: 4px 0;
+}
+.providers[hidden] {
+  display: none;
+}
+.providers .prov {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  justify-items: start;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 8px 14px;
+}
+.providers .prov + .prov {
+  border-top: 1px solid var(--line);
+}
+.providers .name {
+  font: 13px var(--mono);
+}
+.providers .reason {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: 13px;
+}
+.providers .times {
+  grid-column: 2;
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.providers .badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0 7px;
+  line-height: 18px;
+}
+.badge.available {
+  background: var(--working-bg);
+  color: var(--working);
+}
+.badge.limited,
+.badge.unreachable {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.badge.unauthorized {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* A banner under the header, only for unauthorized (the state that needs a person). */
+.alert {
+  display: flex;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 8px 24px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.alert b {
+  font-weight: 650;
+}
+.alert .fix {
+  color: var(--text);
+  opacity: 0.8;
+}
+/* The composer's hint: the model's provider is paused. */
+.will-queue {
+  font-size: 13px;
+  color: var(--warn);
+}
+
+/* ---- environment variables ---- */
+/* The composer's env: a field in the settings row, and a panel under the row when it's open. */
+.env-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--field);
+  font-size: 13px;
+  color: var(--dim);
+}
+.env-toggle:hover {
+  background: var(--hover);
+}
+.env-toggle .count {
+  font: 600 11px var(--mono);
+  background: var(--chip);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 0 6px;
+  line-height: 17px;
+}
+.env-toggle[aria-expanded="true"] {
+  color: var(--text);
+  border-color: var(--faint);
+}
+.env-panel {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.env-panel h5 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+  font-weight: 700;
+}
+.env-rows {
+  display: grid;
+  gap: 6px;
+}
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(8em, 14em) auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.env-row .eq {
+  color: var(--faint);
+  font: 13px var(--mono);
+}
+.env-row input {
+  font: 13px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--field);
+  color: var(--text);
+  height: 32px;
+  min-width: 0;
+}
+.env-row input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.env-row input.bad {
+  border-color: var(--danger);
+}
+.env-row .err {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: -2px;
+}
+.x-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  padding: 0;
+}
+.x-btn:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.x-btn svg.i {
+  width: 14px;
+  height: 14px;
+}
+.link-btn {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  font-size: 13px;
+  justify-self: start;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 2px 10px 2px 7px;
+  font: 12px var(--mono);
+  background: var(--field);
+  cursor: pointer;
+}
+.chip input {
+  margin: 0;
+}
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.defaults {
+  color: var(--faint);
+  font-size: 12px;
+}
+.defaults code {
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+.not-secret {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: 6px;
+  padding: 5px 9px;
+}
+
+/* Folds (round 2): every area that opens can be closed again, ▸/▾ like the session page's Details. */
+.env-toggle .caret {
+  font-size: 11px;
+}
+details.fold > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+details.fold > summary::-webkit-details-marker {
+  display: none;
+}
+details.fold > summary::before {
+  content: "▸";
+  font-size: 10px;
+  width: 10px;
+}
+details.fold[open] > summary::before {
+  content: "▾";
+}
+details.fold > summary:hover {
+  color: var(--text);
+}
+details.fold > summary .n {
+  font: 600 11px var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--chip);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 0 6px;
+  line-height: 17px;
+}
+details.fold[open] > summary {
+  margin-bottom: 8px;
+}
+details.fold[open] > summary + * {
+  margin-top: 0;
+}
+details.fold > .env-rows + .link-btn {
+  margin-top: 6px;
+  display: inline-block;
+}
+details.fold > .not-secret {
+  margin-top: 8px;
+}
+.env-panel > details.fold + details.fold {
+  margin-top: 2px;
+}
+details.defaults-fold .defaults {
+  margin: 0;
+}
+details.env-form > summary {
+  font-size: 12px;
+}
+details.env-form:not([open]) {
+  gap: 0;
+}
+details.env-form[open] {
+  display: grid;
+}
+.env-panel[hidden] {
+  display: none;
+}
+
+/* Options gets a "Server" section that opens its own dialog. */
+.opt .server-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.opt .server-row .ghost {
+  flex: none;
+}
+
+/* The environment variables dialog. */
+dialog.env-dialog {
+  width: min(680px, 94vw);
+}
+.env-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.env-item {
+  display: grid;
+  grid-template-columns: minmax(0, 13em) minmax(0, 1fr) auto auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 7px 8px 7px 12px;
+  font-size: 13px;
+}
+.env-item + .env-item {
+  border-top: 1px solid var(--line);
+}
+.env-item .name {
+  font: 600 12.5px var(--mono);
+  overflow-wrap: anywhere;
+}
+.env-item .value {
+  font: 12.5px var(--mono);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.env-item .updated {
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.env-item .acts {
+  display: flex;
+  gap: 2px;
+}
+.env-item .acts button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  padding: 0;
+}
+.env-item .acts button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.env-item .acts button.del:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.env-item .acts svg.i {
+  width: 14px;
+  height: 14px;
+}
+.env-item.confirming {
+  background: var(--danger-soft);
+}
+.env-item .confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--danger);
+  flex-wrap: wrap;
+}
+.env-item .confirm span {
+  flex: 1;
+  min-width: 12em;
+}
+.env-item .confirm .ghost,
+.env-item .confirm .primary {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.switch input {
+  appearance: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--line);
+  position: relative;
+  margin: 0;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--card);
+  transition: left 0.12s;
+}
+.switch input:checked {
+  background: var(--accent-fill);
+}
+.switch input:checked::after {
+  left: 14px;
+}
+.env-empty {
+  color: var(--dim);
+  text-align: center;
+  padding: 22px 12px;
+  font-size: 13px;
+}
+.env-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.env-form h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+}
+.env-form .fields {
+  display: grid;
+  grid-template-columns: minmax(0, 13em) minmax(0, 1fr);
+  gap: 8px;
+}
+.env-form .field input {
+  font-family: var(--mono);
+  width: 100%;
+}
+.env-form .field input.bad {
+  border-color: var(--danger);
+}
+.env-form .foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.env-form .foot .spacer {
+  flex: 1;
+}
+.env-form .err {
+  color: var(--danger);
+  font-size: 12px;
+}
+.env-item.editing {
+  background: var(--hover);
+}
+.env-item .edit-acts {
+  gap: 6px;
+}
+.env-item .acts.edit-acts button.ghost,
+.env-item .acts.edit-acts button.primary {
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.env-item .acts.edit-acts button.primary {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+.env-item.editing .edit-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 13em) minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .env-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .env-row .eq {
+    display: none;
+  }
+  .env-row input:nth-of-type(2) {
+    grid-column: 1;
+  }
+  .env-row .x-btn {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+  .env-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .env-item .value {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .env-item .updated {
+    display: none;
+  }
+  .env-item .switch {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .env-item .acts {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .env-form .fields,
+  .env-item.editing .edit-fields {
+    grid-template-columns: 1fr;
+  }
+}
+/* A problem loading the registered list, in the composer's panel. */
+.env-panel > .err {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+/* ======== The session page's own styles (from components/session-page.ts, where they live in its
+   shadow root): only the card at the top and Details, scoped to .page here. Unchanged. ======== */
+.page .head { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 12px 0; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 9px; padding: 8px 14px; }
+.page .head.working { border-left-color: var(--working); } .page .head.queued { border-left-color: var(--queued); }
+.page .head .r1 { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: var(--row); }
+.page .head .actions { grid-row: 1 / span 3; grid-column: 2; align-self: start; }
+.page .head .task { font-size: 15px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.page .head .info { font: 12px var(--mono); color: var(--dim); line-height: var(--row); }
+.page .head .info > span + span::before { content: "·"; margin: 0 6px; color: var(--faint); }
+.page .head .info .id { cursor: copy; border-bottom: 1px dotted var(--faint); }
+.page .head .info .id:hover { color: var(--accent); }
+.page .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: 4px; padding: 0 7px; line-height: 18px; flex: none; }
+.page .badge.working { background: var(--working-bg); color: var(--working); } .page .badge.queued, .page .badge.cancelled { background: var(--queued-bg); color: var(--queued); }
+.page .badge.completed { background: var(--completed-bg); color: var(--completed); } .page .badge.killed { background: var(--killed-bg); color: var(--killed); }
+.page .badge.failed { background: var(--failed-bg); color: var(--failed); }
+.page .sep { color: var(--faint); flex: none; margin: 0 -2px; }
+.page .note { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.page .note.failed { color: var(--failed); }
+.page button[data-times] { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; font-variant-numeric: tabular-nums; }
+.page button[data-times]:hover { text-decoration: underline dotted; }
+.page .dur, .page .when { color: var(--dim); flex: none; }
+.page .ghost, .page .danger { height: 32px; border-radius: 6px; padding: 0 14px; font-weight: 600; }
+.page .ghost { border: 1px solid var(--line); background: transparent; } .page .ghost:hover { background: var(--hover); }
+.page .danger { border: 0; background: var(--danger-fill); color: var(--on-accent); }
+.page .more { margin-bottom: 12px; }
+.page .more > summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none; }
+.page .more > summary::before { content: "▸ "; } .page .more[open] > summary::before { content: "▾ "; }
+.page .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 24px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; margin: 6px 0 0; }
+.page .meta > div { display: flex; gap: 10px; min-width: 0; padding: 4px 0; font-size: 13px; }
+.page .meta .wide { grid-column: span 2; }
+.page .meta dt { color: var(--dim); width: 7.5em; flex: none; }
+.page .meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.page .mono { font: 12.5px var(--mono); }
+.page .copy { cursor: copy; border-bottom: 1px dotted var(--faint); }
+.page .err { color: var(--failed); }
+@media (max-width: 720px) { .page .meta .wide { grid-column: auto; } }
+
+/* ======== NEW: repos (M5e's web UI) ======== */
+/* The composer's repos: a second button in the settings row, styled as the env one (.env-toggle),
+   and a panel under the row, styled as the env one (.env-panel, details.fold, .x-btn, .link-btn). */
+.repo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(8em, 14em) auto; align-items: center; gap: 6px; }
+.repo-row .hash { color: var(--faint); font: 13px var(--mono); }
+.repo-row input { font: 13px var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--field); color: var(--text); height: 32px; min-width: 0; }
+.repo-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.repo-row input.bad { border-color: var(--danger); }
+.repo-row .err { grid-column: 1 / -1; color: var(--danger); font-size: 12px; margin-top: -2px; }
+details.fold > .env-rows + .link-btn { margin-top: 6px; display: inline-block; }
+/* The session page's Details: a "repos" row across the whole grid, one block per repo. */
+.page .meta .full { grid-column: 1 / -1; }
+.page .meta .repo + .repo { margin-top: 6px; }
+.page .meta .repo .facts { display: flex; flex-wrap: wrap; gap: 0 16px; color: var(--dim); font-size: 12.5px; }
+.page .meta .repo .facts .mono { color: var(--text); }
+@media (max-width: 720px) {
+  .repo-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .repo-row .hash { display: none; }
+  .repo-row input:nth-of-type(2) { grid-column: 1; }
+  .repo-row .x-btn { grid-row: 1 / span 2; grid-column: 2; }
+}
+
+/* ======== Specimen page scaffolding (not part of the UI) ======== */
+.mock-banner { background: var(--warn-bg); color: var(--warn); font-size: 12px; padding: 4px 16px; text-align: center; }
+.mock-banner button { border: 0; background: none; color: inherit; text-decoration: underline; padding: 0; font-size: 12px; }
+.specimen { max-width: 1320px; margin: 0 auto; padding: 16px 24px 40px; } /* the app's main width */
+.specimen > section { margin: 0 0 34px; }
+.specimen > section > h2 { font-size: 15px; margin: 0 0 2px; }
+.specimen > section > .what { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+.mock-notes { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 16px; margin: 0 0 28px; font-size: 13px; color: var(--dim); }
+.mock-notes h2 { font-size: 13px; margin: 0 0 4px; color: var(--text); }
+.mock-notes ul { margin: 0; padding-left: 18px; }
+.mock-case { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; color: var(--faint); margin: 18px 0 -6px; }
+.mock-case:first-of-type { margin-top: 0; }
+.phones { display: flex; gap: 24px; flex-wrap: wrap; }
+.phones iframe { width: 390px; height: 760px; border: 1px solid var(--line); border-radius: 18px; background: var(--bg); }
+body.solo .specimen { padding: 0; }
+body.solo .specimen > section > h2, body.solo .specimen > section > .what, body.solo .mock-banner, body.solo .mock-notes { display: none; }
+body.solo .specimen > section { margin: 0; padding: 12px; }
+@media (max-width: 720px) { .specimen { padding: 12px; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+</svg>
+
+<div class="mock-banner">MOCK — repos in the web UI (M5e's leftover). Specimen page: only the parts that change, copied from the real UI; the new CSS is one block marked NEW. Fake data; nothing is sent. · <button id="theme-toggle">light / dark</button></div>
+
+<header>
+  <span class="brand">ARM</span>
+  <span id="env"><span class="env">BETA</span> <span class="version">20261012-091530</span></span>
+  <span class="spacer"></span>
+  <span id="provider-pills"></span>
+  <span class="live" id="live"><span class="dot connected"></span>1 working · 0 queued</span>
+  <span class="user" id="user">oliver</span>
+  <button type="button" class="icon-btn" id="theme" title="Light / dark" aria-label="Light / dark"><svg class="i" aria-hidden="true"><use href="#i-moon" /></svg></button>
+  <button type="button" class="icon-btn" title="Options" aria-label="Options"><svg class="i" aria-hidden="true"><use href="#i-cog" /></svg></button>
+  <button type="button" class="icon-btn" title="Log out" aria-label="Log out"><svg class="i" aria-hidden="true"><use href="#i-logout" /></svg></button>
+</header>
+
+<div class="specimen">
+
+<aside class="mock-notes">
+  <h2>Notes</h2>
+  <ul>
+    <li><b>The Overview's and History's cards do not change:</b> a session's repos are not shown on its card, only on its page (section 5).</li>
+    <li>The <b>env</b> control is unchanged; <b>repos</b> is a second button next to it, with its own panel. (The env panel's contents are not reproduced here.)</li>
+    <li>The composers here work: open and fold, add and remove rows, type to see the checks. Start sends nothing; it says what would be sent.</li>
+  </ul>
+</aside>
+
+<section data-n="1">
+  <h2>1. Today's composer</h2>
+  <p class="what">Unchanged, to compare against: the settings row ends with the <b>env</b> button.</p>
+  <form class="composer" data-composer='{"prompt":""}'></form>
+</section>
+
+<section data-n="2">
+  <h2>2. The composer with repos</h2>
+  <p class="what">New: a <b>repos</b> button next to env (with a count) opens a panel under the row: one row per repo, its clone URL and an optional ref (a branch, tag or commit; empty is the default branch), add and remove.</p>
+  <form class="composer" data-composer='{"prompt":"Add a --repo example to the CLI README, and check it against how Olve.Trains is laid out.","open":true,"repos":[{"url":"git@github.com:OliverVea/Olve.AgentRuntimeManager.git","ref":""},{"url":"git@github.com:OliverVea/Olve.Trains.git","ref":"main"}]}'></form>
+</section>
+
+<section data-n="3">
+  <h2>3. Errors, inline</h2>
+  <p class="what">New: a bad row is flagged on its field before anything is sent, as env's are (the server's rules: a URL or ref starting with -, a ref with spaces, a ref without a URL, two repos that would land in the same folder); Start stays disabled until they are fixed.</p>
+  <form class="composer" data-composer='{"prompt":"Compare the two checkouts.","open":true,"repos":[{"url":"--upload-pack=evil","ref":""},{"url":"git@github.com:OliverVea/Olve.AgentRuntimeManager.git","ref":"my branch"},{"url":"","ref":"main"},{"url":"git@github.com:OliverVea/Olve.Trains.git","ref":""},{"url":"https://github.com/OliverVea/Olve.Trains","ref":"4c1d9e7"},{"url":"git@github.com:OliverVea/Olve.Utilities.git","ref":"-b"}]}'></form>
+</section>
+
+<section data-n="4">
+  <h2>4. Folded</h2>
+  <p class="what">New: as with env, the panel folds from its button (▸, and the count stays), and the panel's group folds on its own (▸ with a count).</p>
+  <form class="composer" data-composer='{"prompt":"Add a --repo example to the CLI README, and check it against how Olve.Trains is laid out.","open":false,"repos":[{"url":"git@github.com:OliverVea/Olve.AgentRuntimeManager.git","ref":""},{"url":"git@github.com:OliverVea/Olve.Trains.git","ref":"main"}]}'></form>
+  <form class="composer" style="margin-top:14px" data-composer='{"prompt":"Add a --repo example to the CLI README, and check it against how Olve.Trains is laid out.","open":true,"folds":{"own":false},"repos":[{"url":"git@github.com:OliverVea/Olve.AgentRuntimeManager.git","ref":""},{"url":"git@github.com:OliverVea/Olve.Trains.git","ref":"main"}]}'></form>
+</section>
+
+<section data-n="5">
+  <h2>5. The session page</h2>
+  <p class="what">New: Details gets a <b>repos</b> row, per repo its URL, its ref (or "default branch"), its folder in the workplace and the session's branch; URL, folder and branch copy on a click, as the id does. A session without repos has no such row. (Only the page's card and Details are shown; Details is drawn open.)</p>
+  <p class="mock-case">No repos: the row is absent</p>
+  <div class="page" data-page="none"></div>
+  <p class="mock-case">One repo, no ref</p>
+  <div class="page" data-page="one"></div>
+  <p class="mock-case">Two repos</p>
+  <div class="page" data-page="two"></div>
+</section>
+
+<section data-n="6">
+  <h2>6. A failed checkout</h2>
+  <p class="what">Nothing new but the repos row: the session is <b>failed</b> before its agent ran, and its error shows as errors do today (on the card's first line, and whole in Details).</p>
+  <div class="page" data-page="failed"></div>
+</section>
+
+<section data-n="7">
+  <h2>7. Phone width</h2>
+  <p class="what">Sections 2, 3 and 5 at 390 px: the repos button joins the settings behind "Advanced"; a row stacks the URL over the ref; Details is one column.</p>
+  <div class="phones">
+    <iframe title="2 on a phone" src="repos.html?solo=2"></iframe>
+    <iframe title="3 on a phone" src="repos.html?solo=3"></iframe>
+    <iframe title="5 on a phone" src="repos.html?solo=5"></iframe>
+  </div>
+</section>
+
+</div>
+
+<script>
+  const q = new URLSearchParams(location.search);
+  const solo = q.get("solo");
+  const dark = q.get("theme") === "dark" || (q.get("theme") !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const setTheme = (d) => document.documentElement.classList.toggle("dark", d);
+  setTheme(dark);
+  const flipTheme = () => setTheme(!document.documentElement.classList.contains("dark"));
+  document.getElementById("theme-toggle").onclick = flipTheme;
+  document.getElementById("theme").onclick = flipTheme;
+  // The phones embed single sections (?solo=2), inheriting the theme.
+  for (const f of document.querySelectorAll("iframe")) f.src += dark ? "&theme=dark" : "&theme=light";
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const icon = (name) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+  // ---- the rules, as the server checks them (RepoNames.Folder, RepoErrors.Check) ----
+
+  /** The folder a repo is checked out in: the URL's last segment without .git; null if there is none. */
+  function folderOf(url) {
+    const trimmed = url.trim().replace(/\/+$/, "");
+    const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf(":"), trimmed.lastIndexOf("\\"));
+    let name = trimmed.slice(cut + 1);
+    if (/\.git$/i.test(name)) name = name.slice(0, -4);
+    return name === "" || name === "." || name === ".." || /[\u0000-\u001f\u007f]/.test(name) ? null : name;
+  }
+
+  const isBlank = (row) => row.url.trim() === "" && row.ref.trim() === "";
+
+  /** Per row: its problem ({ part, text }) or undefined; and the session's repos, unless a row has a problem. */
+  function checkRepoRows(rows) {
+    const folders = new Set();
+    const repos = [];
+    const problems = rows.map((row) => {
+      if (isBlank(row)) return undefined; // blank rows are ignored
+      const url = row.url.trim();
+      const ref = row.ref.trim();
+      if (!url) return { part: "url", text: "Give this ref a clone URL." };
+      if (url.startsWith("-")) return { part: "url", text: "A clone URL can't start with -." };
+      if (ref && (ref.startsWith("-") || /[\s\u0000-\u001f\u007f]/.test(ref)))
+        return { part: "ref", text: "A ref is a branch, tag or commit: no spaces, not starting with -." };
+      const folder = folderOf(url);
+      if (!folder) return { part: "url", text: "This URL has no repository name to name its folder after." };
+      if (folders.has(folder)) return { part: "url", text: `Another repo above would also go in the folder ${folder}.` };
+      folders.add(folder);
+      repos.push(ref ? { url, ref } : { url });
+      return undefined;
+    });
+    return { problems, repos: problems.some(Boolean) ? undefined : repos };
+  }
+
+  // ---- the composer ----
+
+  function composer(form, config) {
+    const hasRepos = Array.isArray(config.repos);
+    const state = {
+      rows: (config.repos ?? []).map((r) => ({ url: r.url, ref: r.ref ?? "" })),
+      open: !!config.open,
+      folds: { own: true, ...(config.folds ?? {}) },
+    };
+
+    form.innerHTML =
+      `<textarea rows="1" placeholder="What should the agent do?">${esc(config.prompt ?? "")}</textarea>` +
+      `<div class="row">` +
+      `<button type="button" class="advanced-toggle" aria-expanded="false">Advanced ▾</button>` +
+      `<div class="settings${solo ? " open" : ""}">` +
+      `<label class="field">model <input class="model" placeholder="provider/model" spellcheck="false" value="claude/sonnet"></label>` +
+      `<label class="field">caller <input class="caller" spellcheck="false" placeholder="oliver"></label>` +
+      `<label class="field">timeout (s) <input class="num" inputmode="numeric" placeholder="none"></label>` +
+      `<button type="button" class="env-toggle" data-toggle="env" aria-expanded="false" title="Show this session's env">env <span class="caret">▸</span></button>` +
+      (hasRepos ? `<button type="button" class="env-toggle" data-toggle="repos" aria-expanded="false"></button>` : "") +
+      `</div>` +
+      `<span class="spacer"></span><span class="hint">Ctrl+Enter</span>` +
+      `<button class="primary" type="submit" disabled>Start session</button>` +
+      `</div>` +
+      `<div class="env-panel" data-panel="env" hidden><p class="defaults">The env panel, as it is today (not reproduced in this mock).</p></div>` +
+      (hasRepos ? `<div class="env-panel" data-panel="repos" hidden></div>` : "") +
+      `<div class="toast" role="status"></div>`;
+
+    const prompt = form.querySelector("textarea");
+    const start = form.querySelector(".primary");
+    const toast = form.querySelector(".toast");
+    const envToggle = form.querySelector('[data-toggle="env"]');
+    const envPanel = form.querySelector('[data-panel="env"]');
+    const toggle = form.querySelector('[data-toggle="repos"]');
+    const panel = form.querySelector('[data-panel="repos"]');
+    const advanced = form.querySelector(".advanced-toggle");
+    const settings = form.querySelector(".settings");
+
+    const count = () => state.rows.filter((r) => !isBlank(r)).length;
+
+    /** Rebuilds the panel: only when rows come or go (typing never does). */
+    function render() {
+      if (!panel) return refresh();
+      for (const d of panel.querySelectorAll("details[data-fold]")) state.folds[d.dataset.fold] = d.open;
+      const fold = (key, summary, n, body) =>
+        `<details class="fold" data-fold="${key}"${state.folds[key] ? " open" : ""}><summary>${summary} <span class="n">${n}</span></summary>${body}</details>`;
+
+      const rows = state.rows
+        .map(
+          (row, i) =>
+            `<div class="repo-row" data-i="${i}">` +
+            `<input data-part="url" value="${esc(row.url)}" aria-label="clone URL" placeholder="clone URL" spellcheck="false" autocomplete="off">` +
+            `<span class="hash">#</span>` +
+            `<input data-part="ref" value="${esc(row.ref)}" aria-label="ref" title="A branch, tag or commit. Empty: the default branch." placeholder="default branch" spellcheck="false" autocomplete="off">` +
+            `<button type="button" class="x-btn" data-remove title="Remove" aria-label="Remove">${icon("x")}</button>` +
+            `<span class="err" hidden></span></div>`,
+        )
+        .join("");
+      const own = fold(
+        "own",
+        "This session's repos",
+        count(),
+        `<div class="env-rows">${rows}</div><button type="button" class="link-btn" data-add>+ Add a repo</button>`,
+      );
+
+      panel.innerHTML = own;
+      refresh();
+    }
+
+    /** Updates what typing changes, in place: the rows' flags, the counts, the buttons. */
+    function refresh() {
+      const { problems, repos } = checkRepoRows(state.rows);
+      if (panel) {
+        for (const row of panel.querySelectorAll(".repo-row")) {
+          const problem = problems[Number(row.dataset.i)];
+          row.querySelector('[data-part="url"]').classList.toggle("bad", problem?.part === "url");
+          row.querySelector('[data-part="ref"]').classList.toggle("bad", problem?.part === "ref");
+          const err = row.querySelector(".err");
+          err.textContent = problem?.text ?? "";
+          err.hidden = !problem;
+        }
+        const n = panel.querySelector('[data-fold="own"] .n');
+        if (n) n.textContent = String(count());
+        panel.hidden = !state.open;
+        toggle.setAttribute("aria-expanded", String(state.open));
+        toggle.title = state.open ? "Hide this session's repos" : "Show this session's repos";
+        toggle.innerHTML = `repos${count() ? ` <span class="count">${count()}</span>` : ""} <span class="caret">${state.open ? "▾" : "▸"}</span>`;
+      }
+      start.disabled = !prompt.value.trim() || !repos;
+    }
+
+    envToggle.addEventListener("click", () => {
+      const open = envPanel.hidden;
+      envPanel.hidden = !open;
+      envToggle.setAttribute("aria-expanded", String(open));
+      envToggle.title = open ? "Hide this session's env" : "Show this session's env";
+      envToggle.querySelector(".caret").textContent = open ? "▾" : "▸";
+    });
+    advanced.addEventListener("click", () => {
+      const open = settings.classList.toggle("open");
+      advanced.setAttribute("aria-expanded", String(open));
+    });
+    toggle?.addEventListener("click", () => {
+      state.open = !state.open;
+      refresh();
+    });
+    prompt.addEventListener("input", refresh);
+
+    panel?.addEventListener("input", (e) => {
+      const input = e.target;
+      const row = state.rows[Number(input.closest(".repo-row")?.dataset.i)];
+      if (!row) return;
+      row[input.dataset.part] = input.value;
+      refresh();
+    });
+    panel?.addEventListener("click", (e) => {
+      const target = e.target;
+      if (target.closest("[data-add]")) {
+        state.folds.own = true;
+        const own = panel.querySelector('[data-fold="own"]');
+        if (own) own.open = true;
+        state.rows.push({ url: "", ref: "" });
+        render();
+        panel.querySelector(`[data-i="${state.rows.length - 1}"] [data-part="url"]`)?.focus();
+      } else if (target.closest("[data-remove]")) {
+        state.rows.splice(Number(target.closest(".repo-row").dataset.i), 1);
+        render();
+        panel.querySelector("[data-add]")?.focus();
+      }
+    });
+    // Enter in a repos field doesn't start the session; Ctrl+Enter does (as in the env panel).
+    panel?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !(e.target instanceof HTMLInputElement)) return;
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) form.requestSubmit();
+    });
+    prompt.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const { repos } = checkRepoRows(state.rows);
+      if (start.disabled || !repos) return;
+      toast.textContent = `Mock: nothing was sent. The session would be created with ${repos.length ? `repos: ${JSON.stringify(repos)}` : "no repos"}.`;
+      // The composer is cleared, as after a real create.
+      state.rows = [];
+      prompt.value = "";
+      render();
+    });
+
+    render();
+  }
+
+  for (const form of document.querySelectorAll("form[data-composer]")) composer(form, JSON.parse(form.dataset.composer));
+
+  // ---- the session page: its card and Details ----
+
+  const ARM = "git@github.com:OliverVea/Olve.AgentRuntimeManager.git";
+  const TRAINS = "git@github.com:OliverVea/Olve.Trains.git";
+  const sessions = {
+    none: {
+      id: "8a41c07e-2f6b-4d19-b3a5-6e0c9d7f1a24", status: "completed", time: "48s", note: "exit 0",
+      prompt: "In three lines: when is a git worktree better than a second clone?",
+      ended: "3h ago", created: "3h ago", started: "3h ago", runs: "1 (2 retries left)",
+      providerId: "0b7d3e52-91c4-4a8f-a6d0-5f2e8c1b7a93",
+    },
+    one: {
+      id: "3f9c2a1e-7b4d-4c1a-9e52-0d6f8a2b1c47", status: "working", time: "12m", note: "",
+      prompt: "Add a --repo example to the CLI README.",
+      created: "12m ago", started: "12m ago", runs: "1 (2 retries left)",
+      repos: [{ url: ARM }],
+      providerId: "c5e1f8a0-3d27-4b69-8f14-a9b20e6d4c71",
+    },
+    two: {
+      id: "d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", status: "completed", time: "9m", note: "exit 0",
+      prompt: "Add a --repo example to the CLI README, and check it against how Olve.Trains is laid out.",
+      ended: "1h ago", created: "1h ago", started: "1h ago", runs: "1 (2 retries left)",
+      env: "TASK=readme-repo-example",
+      repos: [{ url: ARM, ref: "main" }, { url: TRAINS, ref: "4c1d9e7" }],
+      providerId: "7e90a4c3-5b18-4d62-9c0f-e3a71d8b2f56",
+    },
+    failed: {
+      id: "b60e4d13-9a2c-47f5-8e31-c4d7a0f92b68", status: "failed", time: "4s",
+      error: `Checking out ${ARM} failed: 'no-such-ref' is not a branch, tag or commit of it.`,
+      prompt: "Rebase the M5e branch onto main and fix what breaks.",
+      ended: "2m ago", created: "2m ago", runs: "1 (0 retries left)",
+      repos: [{ url: ARM, ref: "no-such-ref" }],
+    },
+  };
+
+  function page(el, s) {
+    const short = s.id.slice(0, 8);
+    const copy = (text) => `<span class="copy mono" data-copy="${esc(text)}" title="Copy">${esc(text)}</span>`;
+    const ended = !!s.ended;
+    const note =
+      s.status === "failed"
+        ? `<span class="note failed" title="${esc(s.error)}">${esc(s.error)}</span>`
+        : s.note
+          ? `<span class="note">${esc(s.note)}</span>`
+          : "";
+    const r1 = [`<span class="badge ${s.status}">${s.status}</span>`, `<button class="dur" data-times>${s.time}</button>`, note].filter(Boolean);
+    const action = ended ? `<button class="ghost">Delete</button>` : `<button class="danger">Kill</button>`;
+    const head =
+      `<div class="head ${s.status}">` +
+      `<div class="r1">${r1.join(`<span class="sep">·</span>`)}</div>` +
+      `<div class="actions">${action}</div>` +
+      `<div class="task">${esc(s.prompt)}</div>` +
+      `<div class="info"><span class="id" data-copy="${esc(s.id)}" title="Copy the full id (${esc(s.id)})">${short}</span><span title="claude/sonnet">sonnet (claude)</span><span>oliver</span>` +
+      (ended ? `<span><button class="when" data-times>ended ${s.ended}</button></span>` : "") +
+      `</div></div>`;
+
+    const row = (name, value, cls = "", width = "") =>
+      value ? `<div class="${width}"><dt>${name}</dt><dd class="${cls}">${value}</dd></div>` : "";
+    const when = (text) => (text ? `<button class="when" data-times>${text}</button>` : undefined);
+    // NEW: the repos row. Per repo: its URL; its ref (or "default branch"), folder and branch.
+    const repos = (s.repos ?? [])
+      .map(
+        (r) =>
+          `<div class="repo">${copy(r.url)}<div class="facts">` +
+          `<span>ref ${r.ref ? `<span class="mono">${esc(r.ref)}</span>` : "default branch"}</span>` +
+          `<span>folder ${copy(folderOf(r.url))}</span>` +
+          `<span>branch ${copy(`arm/${short}`)}</span>` +
+          `</div></div>`,
+      )
+      .join("");
+    const details =
+      `<details class="more" open><summary>Details</summary><dl class="meta">` +
+      [
+        row("id", copy(s.id), "", "wide"),
+        row("model", "claude/sonnet"),
+        row("created", when(s.created)),
+        row("started", when(s.started)),
+        row("ended", when(s.ended)),
+        row("runs", s.runs),
+        row("env", s.env ? esc(s.env) : undefined, "mono"),
+        row("repos", repos || undefined, "", "full"),
+        row("provider id", s.providerId ? `<span class="mono">${esc(s.providerId)}</span>` : undefined, "", "wide"),
+        row("error", s.error ? esc(s.error) : undefined, "err", "wide"),
+      ].join("") +
+      `</dl></details>`;
+
+    el.innerHTML = head + details + `<div class="toast" role="status"></div>`;
+    // A click on a copyable value copies it; the real page's toast says "Copied …". Here it only says so.
+    let timer;
+    el.addEventListener("click", (e) => {
+      const hit = e.target.closest("[data-copy]");
+      if (!hit) return;
+      const toast = el.querySelector(".toast");
+      toast.textContent = `Copied ${hit.dataset.copy}`;
+      clearTimeout(timer);
+      timer = setTimeout(() => (toast.textContent = ""), 2000);
+    });
+  }
+
+  for (const el of document.querySelectorAll("[data-page]")) page(el, sessions[el.dataset.page]);
+
+  if (solo) {
+    document.body.classList.add("solo");
+    document.querySelector("header").remove();
+    for (const s of document.querySelectorAll(".specimen > section")) if (s.dataset.n !== solo) s.remove();
+  }
+</script>
+</body>
+</html>

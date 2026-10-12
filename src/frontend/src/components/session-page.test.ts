@@ -241,6 +241,95 @@ describe("<session-page>", () => {
     expect(page.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("");
   });
 
+  it("Details has no repos row for a session without repos", async () => {
+    const page = await mount();
+    expect(text(page, ".meta dt")).not.toContain("repos");
+  });
+
+  it("Details shows each repo: its URL, its ref or the default branch, and the folder and branch from the API", async () => {
+    const page = await mount();
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", {
+      repos: [
+        // Folder and branch as the server returned them, unlike what the URL alone would give:
+        // the page shows the API's, it doesn't work them out.
+        {
+          url: "git@github.com:OliverVea/Olve.AgentRuntimeManager.git",
+          folder: "arm-folder",
+          branch: "arm/server01",
+        },
+        {
+          url: "https://github.com/OliverVea/Olve.Trains",
+          ref: "4c1d9e7",
+          folder: "Olve.Trains",
+          branch: "arm/server01",
+        },
+      ],
+    });
+    await Promise.resolve();
+
+    const row = $$(page, ".meta > div").find(
+      (d) => d.querySelector("dt")?.textContent === "repos",
+    )!;
+    expect(row.className).toBe("full");
+    const repos = [...row.querySelectorAll<HTMLElement>(".repo")];
+    expect(repos.map((r) => r.querySelector(":scope > .copy")?.textContent)).toEqual([
+      "git@github.com:OliverVea/Olve.AgentRuntimeManager.git",
+      "https://github.com/OliverVea/Olve.Trains",
+    ]);
+    expect(
+      repos.map((r) => [...r.querySelectorAll(".facts > span")].map((f) => f.textContent)),
+    ).toEqual([
+      ["ref default branch", "folder arm-folder", "branch arm/server01"],
+      ["ref 4c1d9e7", "folder Olve.Trains", "branch arm/server01"],
+    ]);
+    // URL, folder and branch copy on a click (the ref doesn't), as the id does.
+    expect(
+      [...repos[1]!.querySelectorAll<HTMLElement>("[data-copy]")].map((c) => c.dataset.copy),
+    ).toEqual(["https://github.com/OliverVea/Olve.Trains", "Olve.Trains", "arm/server01"]);
+    const copied = vi.fn();
+    page.addEventListener("copy-id", (e) => copied((e as CustomEvent<string>).detail));
+    repos[0]!.querySelectorAll<HTMLElement>("[data-copy]")[1]!.click();
+    expect(copied).toHaveBeenCalledWith("arm-folder");
+  });
+
+  it("escapes a repo's URL, ref, folder and branch, attributes included", async () => {
+    const page = await mount();
+    const evil = '"><img src=x onerror=alert(1)>';
+    page.session = session("x", {
+      repos: [{ url: `https://h/${evil}`, ref: evil, folder: evil, branch: evil }],
+    });
+    await Promise.resolve();
+
+    expect(page.shadowRoot!.querySelector("img")).toBeNull();
+    const copies = $$(page, ".repo [data-copy]").map((c) => c.dataset.copy);
+    expect(copies).toEqual([`https://h/${evil}`, evil, evil]);
+    expect(text(page, ".repo .facts .mono")[0]).toBe(evil);
+  });
+
+  it("a failed checkout shows its error on the card's first line and whole in Details", async () => {
+    const page = await mount();
+    const error =
+      "Checking out git@github.com:OliverVea/Olve.AgentRuntimeManager.git failed: 'no-such-ref' is not a branch, tag or commit of it.";
+    page.session = session("b60e4d13-9a2c-47f5-8e31-c4d7a0f92b68", {
+      status: "failed",
+      error,
+      endedAt: "2026-09-27T15:00:04Z",
+      repos: [
+        {
+          url: "git@github.com:OliverVea/Olve.AgentRuntimeManager.git",
+          ref: "no-such-ref",
+          folder: "Olve.AgentRuntimeManager",
+          branch: "arm/b60e4d13",
+        },
+      ],
+    });
+    await Promise.resolve();
+
+    expect(text(page, ".head .note.failed")).toEqual([error]);
+    expect(text(page, ".meta .err")).toEqual([error]);
+    expect(text(page, ".repo .facts .mono")).toContain("no-such-ref");
+  });
+
   it("an empty conversation says why", async () => {
     const page = await mount();
     page.session = session("x", { status: "queued" });

@@ -50,6 +50,7 @@
               <label class="field">caller <input id="c-caller" class="caller" spellcheck="false" /></label>
               <label class="field">timeout (s) <input id="c-timeout" class="num" inputmode="numeric" placeholder="none" /></label>
               <button type="button" class="env-toggle" id="env-toggle" aria-controls="env-panel" aria-expanded="false">env <span class="caret">▸</span></button>
+              <button type="button" class="env-toggle" id="repos-toggle" aria-controls="repos-panel" aria-expanded="false">repos <span class="caret">▸</span></button>
             </div>
             <span class="spacer"></span>
             <span class="will-queue" id="will-queue" hidden></span>
@@ -57,6 +58,7 @@
             <button class="primary" id="create" type="submit" disabled>Start session</button>
           </div>
           <div class="env-panel" id="env-panel" hidden></div>
+          <div class="env-panel" id="repos-panel" hidden></div>
           <div class="toast" id="toast" role="status"></div>
         </form>
 

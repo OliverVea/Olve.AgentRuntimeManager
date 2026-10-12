@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Variables;
@@ -22,11 +23,13 @@ public static class PersistenceServices
         services.AddSingleton<IWorktreeRemovalStore, EfWorktreeRemovalStore>();
     }
 
-    /// <summary>Brings the schema up to date; run before the app serves requests.</summary>
+    /// <summary>Brings the schema and stored data up to date; run before the app serves requests.</summary>
     public static async Task MigrateDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var db = await services.GetRequiredService<IDbContextFactory<ArmDbContext>>().CreateDbContextAsync(cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(StoredRepoNames)) ?? NullLogger.Instance;
+        await StoredRepoNames.FillAsync(db, logger, cancellationToken);
         // Readers don't wait for the writer (a setting of the file, so once is enough).
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
     }

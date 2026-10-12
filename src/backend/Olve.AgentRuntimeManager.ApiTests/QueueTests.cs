@@ -65,6 +65,21 @@ public class QueueTests(SmallQueueFactory factory)
     }
 
     [Test]
+    public async Task AQueuedSession_HasItsReposFolderAndBranch()
+    {
+        var client = Client();
+        var running = await client.CreateHangingSessionAsync();
+        using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(
+            new CreateSessionBody("fake:hang") { Repos = [new RepoBody("git@github.com:OliverVea/Olve.Trains.git", "main")] }));
+        var queued = await client.GetSessionAsync((await response.Content.ReadFromJsonAsync<CreatedSessionBody>(Wire.JsonOptions))!.Id);
+        (await client.KillSessionAsync(queued.Id)).EnsureSuccessStatusCode();
+        (await client.KillSessionAsync(running.Id)).EnsureSuccessStatusCode();
+
+        await Assert.That(queued.Status).IsEqualTo("queued");
+        await Assert.That(queued.Repos).IsEquivalentTo([new SessionRepoBody("git@github.com:OliverVea/Olve.Trains.git", "main", "Olve.Trains", $"arm/{queued.Id.ToString()[..8]}")]);
+    }
+
+    [Test]
     public async Task MessagesToAQueuedSession_AreHeld_AndGivenToItsAgent_AfterThePrompt()
     {
         var client = Client();

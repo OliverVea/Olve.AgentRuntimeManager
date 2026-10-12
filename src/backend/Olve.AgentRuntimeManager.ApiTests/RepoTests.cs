@@ -17,7 +17,21 @@ public class RepoTests(ApiTarget target)
 
         var session = await target.CreateAuthenticatedClient().CreateSessionAsync(new CreateSessionBody("fake:sleep=0ms") { Repos = repos });
 
-        await Assert.That(session.Repos).IsEquivalentTo(repos);
+        await Assert.That(session.Repos!.Select(r => new RepoBody(r.Url, r.Ref))).IsEquivalentTo(repos);
+    }
+
+    [Test]
+    public async Task Session_ReturnsEachReposFolderAndItsOwnBranch()
+    {
+        RepoBody[] repos = [new("git@github.com:OliverVea/Olve.AgentRuntimeManager.git"), new("https://github.com/OliverVea/Olve.Utilities/", "v1.2.0")];
+
+        var session = await target.CreateAuthenticatedClient().CreateSessionAsync(new CreateSessionBody("fake:sleep=0ms") { Repos = repos });
+
+        var branch = $"arm/{session.Id.ToString()[..8]}";
+        await Assert.That(session.Repos).IsEquivalentTo([
+            new SessionRepoBody("git@github.com:OliverVea/Olve.AgentRuntimeManager.git", null, "Olve.AgentRuntimeManager", branch),
+            new SessionRepoBody("https://github.com/OliverVea/Olve.Utilities/", "v1.2.0", "Olve.Utilities", branch),
+        ]);
     }
 
     [Test]

@@ -161,6 +161,17 @@ that can't be removed then (the repository busy past the wait) are kept in the d
 after each failure, until removed (after 20 attempts they're given up, logged as an error). Two repos that would share a folder, a blank `url` or a
 `ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
 provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
+A session returns its `repos` as given, each with the `folder` and `branch` ARM gives it: named
+once by `RepoNames.Record` when the session is created, stored with it, and used as stored by the
+checkout and the API (present from creation, also while it's queued). Sessions stored before
+these were kept (and deleted sessions' worktrees still to be removed) are named once at startup,
+when the database is brought up to date (`StoredRepoNames`); a corrupt row that can't be named
+is logged and left as it is (the server still starts; the API leaves its unnamed repos out, and
+its checkout is refused). The checkout only uses a stored folder that is one plain folder name in
+the session's workplace, and refuses any other (the session fails; a removal touches nothing). Clients show them and never work them out: `arm session get` (one line per repo),
+and the web UI's session page (Details, a `repos` row). The web UI's composer has a `repos` button
+next to `env`, opening a panel of rows (a clone URL and an optional ref each), checked as the
+server checks them before anything is sent.
 
 A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
 429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)

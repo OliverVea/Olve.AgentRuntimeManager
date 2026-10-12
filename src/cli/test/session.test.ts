@@ -253,11 +253,31 @@ describe("session get", () => {
     expect(r.stdout).toContain("status          working");
   });
 
-  test("shows the session's repos, with their refs", async () => {
-    const repos = [{ url: "git@github.com:o/a.git" }, { url: "https://host/b", ref: "v1" }];
+  test("shows the session's repos one per line, with their refs, folders and branches", async () => {
+    const repos = [
+      { url: "git@github.com:o/a.git", folder: "a", branch: "arm/3fa85f64" },
+      { url: "https://host/b", ref: "v1", folder: "b", branch: "arm/3fa85f64" },
+    ];
     const f = fakeFetch(() => ({ body: { ...session, repos } }));
     const r = await cli(["session", "get", id], f);
-    expect(r.stdout).toContain("repos           git@github.com:o/a.git, https://host/b#v1");
+    const lines = r.stdout.split("\n");
+    const first = lines.findIndex((l) => l.startsWith("repos "));
+    expect(lines[first]).toBe("repos           git@github.com:o/a.git  folder a  branch arm/3fa85f64");
+    expect(lines[first + 1]).toBe("                https://host/b#v1  folder b  branch arm/3fa85f64");
+    expect(lines[first + 2]!.startsWith("attempts ")).toBe(true);
+  });
+
+  test("--json carries each repo's folder and branch", async () => {
+    const repos = [{ url: "https://host/b", ref: "v1", folder: "b", branch: "arm/3fa85f64" }];
+    const f = fakeFetch(() => ({ body: { ...session, repos } }));
+    const r = await cli(["session", "get", id, "--json"], f);
+    expect(JSON.parse(r.stdout).repos).toEqual(repos);
+  });
+
+  test("a session without repos has no repos line", async () => {
+    const f = fakeFetch(() => ({ body: session }));
+    const r = await cli(["session", "get", id], f);
+    expect(r.stdout).not.toContain("repos");
   });
 
   test("escapes the id in the path", async () => {

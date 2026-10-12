@@ -47,7 +47,7 @@ export type SentMessage = {
  * into the conversation (`+1:45`) or clock times; clicking one switches them.
  *
  * It only reports what the user wants, as bubbling events: `kill-session` / `delete-session` /
- * `copy-id` (detail: the id), `toggle-times`, and `view-change` (detail: a {@link TranscriptView}).
+ * `copy-id` (detail: the text to copy: the id, or a repo's URL, folder or branch), `toggle-times`, and `view-change` (detail: a {@link TranscriptView}).
  * Which tool calls are open survives re-renders, so a running session can be re-read under it.
  */
 export class SessionPage extends BaseElement {
@@ -262,10 +262,10 @@ export class SessionPage extends BaseElement {
   }
 
   #details(s: Session, now: number): string {
-    const row = (name: string, value: string | undefined, cls = "", wide = false) =>
-      value
-        ? `<div class="${wide ? "wide" : ""}"><dt>${name}</dt><dd class="${cls}">${value}</dd></div>`
-        : "";
+    const row = (name: string, value: string | undefined, cls = "", width = "") =>
+      value ? `<div class="${width}"><dt>${name}</dt><dd class="${cls}">${value}</dd></div>` : "";
+    const copy = (text: string) =>
+      `<span class="copy mono" data-copy="${escapeHtml(text)}" title="Copy">${escapeHtml(text)}</span>`;
     const times = (iso: string | undefined) =>
       iso
         ? `<button class="when" data-times>${this.#times === "relative" ? relative(iso, now) : clock(iso, now)}</button>`
@@ -273,13 +273,19 @@ export class SessionPage extends BaseElement {
     const env = Object.entries(s.env ?? {})
       .map(([k, v]) => `${k}=${v}`)
       .join(" ");
+    // Per repo: its URL; its ref (or "default branch"), and the folder and branch the server gave it.
+    const repos = (s.repos ?? [])
+      .map(
+        (r) =>
+          `<div class="repo">${copy(r.url)}<div class="facts">` +
+          `<span>ref ${r.ref ? `<span class="mono">${escapeHtml(r.ref)}</span>` : "default branch"}</span>` +
+          `<span>folder ${copy(r.folder)}</span>` +
+          `<span>branch ${copy(r.branch)}</span>` +
+          `</div></div>`,
+      )
+      .join("");
     return `<details class="more"><summary>Details</summary><dl class="meta">${[
-      row(
-        "id",
-        `<span class="copy mono" data-copy="${escapeHtml(s.id)}" title="Copy">${escapeHtml(s.id)}</span>`,
-        "",
-        true,
-      ),
+      row("id", copy(s.id), "", "wide"),
       row("model", escapeHtml(`${s.provider}/${s.model}`)),
       row("created", times(s.createdAt)),
       row("started", times(s.startedAt)),
@@ -288,16 +294,17 @@ export class SessionPage extends BaseElement {
       row("runs", `${s.attempts} (${s.retriesLeft} retries left)`),
       row("env", env ? escapeHtml(env) : undefined, "mono"),
       row("uses env", s.useEnv?.length ? escapeHtml(s.useEnv.join(", ")) : undefined, "mono"),
+      row("repos", repos || undefined, "", "full"),
       row(
         "provider id",
         s.providerSessionId
           ? `<span class="mono">${escapeHtml(s.providerSessionId)}</span>`
           : undefined,
         "",
-        true,
+        "wide",
       ),
-      row("error", s.error ? escapeHtml(s.error) : undefined, "err", true),
-      row("kill reason", s.killReason ? escapeHtml(s.killReason) : undefined, "", true),
+      row("error", s.error ? escapeHtml(s.error) : undefined, "err", "wide"),
+      row("kill reason", s.killReason ? escapeHtml(s.killReason) : undefined, "", "wide"),
     ].join("")}</dl></details>`;
   }
 
@@ -600,6 +607,11 @@ const pageStyles = `
   .mono { font: 12.5px var(--mono); }
   .copy { cursor: copy; border-bottom: 1px dotted var(--faint); }
   .err { color: var(--failed); }
+  /* Details' repos (M5e): a row across the whole grid, one block per repo. */
+  .meta .full { grid-column: 1 / -1; }
+  .meta .repo + .repo { margin-top: 6px; }
+  .meta .repo .facts { display: flex; flex-wrap: wrap; gap: 0 16px; color: var(--dim); font-size: 12.5px; }
+  .meta .repo .facts .mono { color: var(--text); }
 
   /* The transcript. */
   .transcript { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
