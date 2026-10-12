@@ -19,6 +19,22 @@ public static class TestProcesses
             return;
         }
 
+        // Those without a supervisor.json too (their agent never started: a checkout), by where they
+        // run (a session's folder), and until they're gone: one may still be ending (logging, closing
+        // its files) just after ARM had its outcome, and would write into a folder being deleted.
+        var running = WithCommandLine("olve-arm-supervisor").Where(pid => RunsUnder(pid, root)).ToList();
+        foreach (var pid in running)
+        {
+            Posix.Kill(-pid, Posix.SigKill);
+            Posix.Kill(pid, Posix.SigKill);
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (running.Any(StillThere) && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(20);
+        }
+
         foreach (var file in Directory.EnumerateFiles(root, SupervisorFiles.Info, new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3 }))
         {
             if (SupervisorFiles.ReadInfo(Path.GetDirectoryName(file)!) is not { } info)
@@ -73,6 +89,31 @@ public static class TestProcesses
         foreach (var pid in WithCommandLine(fragment))
         {
             Posix.Kill(pid, Posix.SigKill);
+        }
+    }
+
+    /// <summary>Running, or a zombie whose other threads haven't all exited (it may still hold its files).</summary>
+    private static bool StillThere(int pid)
+    {
+        try
+        {
+            return Posix.StartTime(pid) is not null || Directory.GetDirectories($"/proc/{pid}/task").Length > 1;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool RunsUnder(int pid, string root)
+    {
+        try
+        {
+            return new DirectoryInfo($"/proc/{pid}/cwd").LinkTarget is { } cwd && (cwd + "/").StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
