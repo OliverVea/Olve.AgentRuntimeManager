@@ -105,14 +105,26 @@ old one: that's the old ARM being gone).
   with no socket to reconnect to and no exit file within the connect timeout, means it's lost. Both
   sides bound the wait: each git command (its output included) by `gitTimeout`, the whole checkout by
   `CheckoutLimit` (eight git timeouts per repository, and a minute; the supervisor stops a checkout
-  that runs longer), and ARM waits for the hello that long and a minute more, then kills the run and
-  fails it. A `kill` (it carries the run's id; one for another run is ignored) is the one message ARM
-  sends before the hello: it stops the checkout (SIGTERM to git, SIGKILL a few seconds later), and the
-  agent never starts. Before starting the agent, a supervisor also checks that the socket is still its
-  own: if a newer run of the session took it (killed, then continued), it doesn't start; and it only
-  ever removes its own socket. A run that ends without an agent (a failed or killed checkout, a
-  command that didn't start) writes `exit.json` with its `error` and then closes the connection and the
-  socket: ARM finds the exit file, and the error becomes the session's (a kill's: killed).
+  that runs longer), and ARM waits for the hello that long and a minute more, counted from its first
+  connection, then kills the run and fails it (a hello already on its way at that moment gets a
+  second's grace, so a just-started agent isn't killed for being late). A `kill` (it carries the run's
+  id; one for another run is ignored) is the one message ARM sends before the hello: it stops the
+  checkout (SIGTERM to git, SIGKILL a few seconds later), and the agent never starts. As the message
+  needs a connection, ARM first leaves a mark in the session's folder (`kill-<run id>`, made with
+  `O_CREAT|O_EXCL`, which never follows a link): the supervisor polls it during the checkout and checks
+  it right before it starts the agent, so a kill given before the agent started always keeps it from
+  starting.
+- **A socket per run (M5e review):** `<session id>.<first 8 of the run id>.sock`, not one per session.
+  A session killed during its checkout and continued at once has two supervisors for a moment; with a
+  shared name the new one took the old one's socket and the old one, ending, removed the new one's
+  (the inode it checked was reused), so the new run never started. Now each run's ARM reaches only
+  its own supervisor (the kill always reaches the old one), and a supervisor only removes its own
+  socket. A supervisor whose session has a newer run (a run socket made after its own) doesn't start
+  its agent and doesn't write `exit.json` (the newer run's). Recovery also looks for a supervisor of
+  an earlier release at the old `<session id>.sock`. A run that ends without an agent otherwise (a
+  failed or killed checkout, a command that didn't start) writes `exit.json` with its `error` and then
+  closes the connection and the socket: ARM finds the exit file, and the error becomes the session's
+  (a kill's: killed).
 
 ## Recovery (`Recover()`), per working session
 
@@ -169,8 +181,8 @@ providerSessionId), returning a run for cases 1–4 or null for 5. The default r
   `Supervisor:SocketRoot`: on the VMs
   `/run/olve-arm/supervisors` (systemd `RuntimeDirectory=olve-arm` with
   `RuntimeDirectoryPreserve=yes`, else a restart deletes them; `/run` is cleared on reboot, which
-  is right: no supervisor survives one either). Name: `<session id>.sock`, well inside the
-  108-byte limit; the local-dev default is `$XDG_RUNTIME_DIR/olve-arm/` or `/tmp/olve-arm-<uid>/`.
+  is right: no supervisor survives one either). Name: `<session id>.<run>.sock` (a socket per run
+  since M5e; `<session id>.sock` before), well inside the 108-byte limit; the local-dev default is `$XDG_RUNTIME_DIR/olve-arm/` or `/tmp/olve-arm-<uid>/`.
 - **Surviving release pruning.** `vm-deploy.sh` keeps two releases and deletes the rest,
   including Claude Code versions no kept release links to; a supervisor (and its agent) from
   release N can run while N gets deleted. A running single-file binary survives deletion on

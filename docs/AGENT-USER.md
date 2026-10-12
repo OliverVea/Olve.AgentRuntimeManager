@@ -112,7 +112,11 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   `sudo -n -u arm-agent -- <supervisor> remove-worktree <shared copy> <worktree>` (ARM couldn't:
   the files are the agent's, not group-writable), which takes the copy's lock like a checkout. ARM's
   git runs no hooks (`core.hooksPath=/dev/null`): all agents can write every shared copy, so a hook
-  one planted there would otherwise run in another session's supervisor.
+  one planted there would otherwise run in another session's supervisor. The one file ARM itself
+  writes in the session's folder is a kill's mark (`kill-<run id>`, empty), made with
+  `O_CREAT|O_EXCL|O_NOFOLLOW`: a link the agent put at that name is never followed, the mark just
+  isn't made (the kill message still goes). An agent making the mark itself kills its own session's
+  run, which it could anyway.
 
 ## The VM (`vm-deploy.sh` → `agent-user.sh`, every deploy, idempotent)
 

@@ -128,7 +128,7 @@ time, through a lock file next to it), and a worktree per session in its workpla
 characters of the session id>`, from `ref` (a branch of the remote, a tag or a commit; unset: the
 remote's default branch; a `ref` is only ever one of the remote's branches, a tag or a commit id,
 never a branch of the shared copy, which holds other sessions' `arm/…`). The agent starts in the
-repository when there is exactly one, else in the workplace. Every git command is bounded
+workplace, as without repos, with each repo in its own folder there. Every git command is bounded
 (`Repos:GitTimeout`, its output too), never prompts and runs no hooks; a checkout that fails (no
 access, unknown ref, a timeout) fails the session before its agent runs, with git's error, and a kill
 or timeout during it stops it at once (the agent never starts). A worktree only appears complete (made
@@ -137,8 +137,10 @@ never started (a failed or killed checkout) starts it afresh, with its prompt, w
 continues it. An `arm/<id>` branch is only checked out again for the session that made it. A session
 that continues, retries or resumes keeps its worktrees as they are (nothing is fetched or reset);
 deleting a session removes its worktrees from the shared copies first (as the agent user, through the
-supervisor, holding the copy's lock; bounded, and one that can't be removed is logged), then the
-record, keeping their branches. Two repos that would share a folder, a blank `url` or a
+supervisor, holding the copy's lock; bounded), then the record, keeping their branches; worktrees
+that can't be removed then (the repository busy past the wait) are kept in the database
+(`WorktreeRemovals`) and tried again in the background, every half minute at first and less often
+after each failure, until removed (after 20 attempts they're given up, logged as an error). Two repos that would share a folder, a blank `url` or a
 `ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
 provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
 
@@ -304,6 +306,7 @@ Sources in priority order (highest wins):
 | `Providers:Claude:ExitGrace` | `00:00:10` | How long an agent may take to exit after its turn before it's stopped |
 | `Repos:Root` | `olve-arm/repos` in the user's local data folder | The shared bare copy of each repository sessions name (M5e); written by the agents' user. `/var/lib/olve-arm/repos` on the VMs |
 | `Repos:GitTimeout` | `00:05:00` | The longest one git command of a checkout may take; a session waits up to four times this for another one's checkout of the same repository, and a whole checkout takes at most eight times this per repository (and a minute). A first clone that takes longer than this never succeeds: raise it for a large repository |
+| `Repos:CheckoutTimeout` | *(eight `Repos:GitTimeout`s per repository, and a minute)* | The longest a session's whole checkout may take; then it's stopped and the session fails |
 | `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
 | `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
 
