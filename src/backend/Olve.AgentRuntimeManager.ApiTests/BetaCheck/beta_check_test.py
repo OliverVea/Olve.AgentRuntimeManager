@@ -2,7 +2,9 @@
 answers: each way a conversation, an activity or a session's events can be wrong is caught, and
 said; and how it gets its token. Run by BetaCheckTests.CheckLogic_PassesItsOwnTests (python3 beta_check_test.py)."""
 
+import contextlib
 import http.server
+import io
 import importlib.util
 import json
 import os
@@ -267,6 +269,37 @@ class RecordTests(unittest.TestCase):
         api = self.Api("1.2.3")
         self.assertIn("records it", check.check_record(self.context(api)))
         self.assertNotIn("DELETE", [method for method, _ in api.calls])
+
+
+class CleanupTests(unittest.TestCase):
+    """Cleanup stops every session it knows, whatever ARM answers for one of them."""
+
+    class Api:
+        base, auth = "http://arm", {}
+
+        def __init__(self):
+            self.calls = []
+
+        def call(self, method, path, body=None, **_):
+            self.calls.append((method, path))
+            return None if path == "/api/sessions/search" else {}
+
+    def test_an_answer_that_is_not_json_fails_that_step_only(self):
+        settings = check.Settings({"BETA_CHECK_VERSION": "1", "BETA_CHECK_API": "http://arm", "BETA_CHECK_TOKEN": "t"})
+        api = self.Api()
+        ctx = check.Context(settings, api)
+        ctx.created = ["garbled", "working"]
+        answers = {"garbled": (200, None), "working": (200, {"status": "working"})}
+        real_http = check.http
+        check.http = lambda method, url, *a, **k: answers[url.rsplit("/", 1)[1]]
+        self.addCleanup(setattr, check, "http", real_http)
+        with contextlib.redirect_stdout(io.StringIO()):
+            problems = check.cleanup(ctx)
+        self.assertEqual(problems, [
+            "could not search for this run's sessions: POST /api/sessions/search answered without a page of sessions",
+            "could not stop session garbled: GET /api/sessions/garbled answered 200 without a session",
+        ])
+        self.assertIn(("POST", "/api/sessions/working/kill"), api.calls)
 
 
 class Authority(http.server.BaseHTTPRequestHandler):

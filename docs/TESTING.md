@@ -11,7 +11,8 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
   real tokens. Every per-push test path is **LLM-free** (FakeProvider or mock endpoint).
   Real-API calls live only in a small, gated, off-hot-path suite.
 - **Deterministic in the gate.** No network, no real LLM in the production gate.
-- **Test each engine where it lives.** SQLite in-process pre-deploy; Postgres live via beta.
+- **Test the engine where it lives.** SQLite (OPEN-QUESTIONS A5) in-process pre-deploy, and on
+  beta's VM live via `test-after-beta`.
 - **Test the real artifact once.** The image built in the pipeline is validated against live
   beta — no separate image-build-and-test step pre-deploy.
 - **Nothing hangs the gate.** Every wait in a test is bounded (a `Guard`, `WaitAsync`), a test
@@ -45,13 +46,12 @@ role is served once by `test-after-beta`, which tests the very artifact being pr
 Building an image in a production step to test it, then deploying and testing it again, is
 doing the expensive thing twice.
 
-### Persistence engines across the pipeline
+### Persistence across the pipeline
 
-- **SQLite** — embedded, so it runs **in-process in the production gate** for free (no container).
-- **Postgres** — the beta/prod engine, validated **live by `test-after-beta`** (beta gating
-  prod is exactly the canary meant to catch a PG dialect bug).
-- **Optional later:** if earlier PG feedback is wanted, add a Testcontainers-PG **DB-only**
-  lane (spin just the database, app in-process — far lighter than image-building). Not now.
+- **SQLite** is the only engine (OPEN-QUESTIONS A5): embedded, so it runs **in-process in the
+  production gate** for free (no container), and it is what the beta and prod VMs use
+  (`ConnectionStrings__Arm` in `src/deploy/vm/env.{beta,prod}`), validated **live on beta by
+  `test-after-beta`** against the deployed release's own database file.
 
 ### One HTTP suite, two targets
 

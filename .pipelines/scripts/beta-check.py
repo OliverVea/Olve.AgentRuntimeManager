@@ -880,10 +880,14 @@ def cleanup(ctx):
             action()
         except (CheckFailed, TimeUp, Stopped) as error:
             problems.append(f"could not {what}: {error or type(error).__name__}")
+        except Exception as error:  # ARM answering something unexpected: the other steps still run
+            problems.append(f"could not {what}: unexpected {type(error).__name__}: {error}")
 
     def stop(session_id):
         status, session = http("GET", f"{ctx.api.base}/api/sessions/{session_id}", headers=ctx.api.auth)
-        if status == 200 and session["status"] not in ENDED:
+        if status == 200 and not isinstance(session, dict):
+            raise CheckFailed(f"GET /api/sessions/{session_id} answered 200 without a session")
+        if status == 200 and session.get("status") not in ENDED:
             ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
                          {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
             say(f"cleanup: killed session {session_id}", stop=False)
@@ -894,6 +898,8 @@ def cleanup(ctx):
 
     def find_ours():
         page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "limit": 100})
+        if not isinstance(page, dict) or not isinstance(page.get("items"), list):
+            raise CheckFailed("POST /api/sessions/search answered without a page of sessions")
         for session in page["items"]:
             if (session.get("env") or {}).get(RUN_TAG) == ctx.nonce and session["id"] not in ctx.created:
                 ctx.created.append(session["id"])
