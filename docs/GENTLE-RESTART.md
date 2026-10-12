@@ -98,6 +98,12 @@ old one: that's the old ARM being gone).
   signal when a signal ended it).
 - After the agent exits the supervisor writes `exit.json` (temp + rename), sends `exited` if
   someone's attached, and exits. Nothing lingers: the files are the record.
+- **Before the agent (M5e, additive):** the launch may name git repositories to check out first
+  (`workplace`, `repos`, `gitTimeout`), which can take minutes. So the supervisor listens before the
+  checkout and sends `hello` once the agent has started: ARM, connected, just waits for it (each
+  git command is bounded, so the wait is too). A run that ends without an agent (a failed checkout,
+  a command that didn't start) writes `exit.json` with its `error` and then closes the connection
+  and the socket: ARM finds the exit file, and the error becomes the session's.
 
 ## Recovery (`Recover()`), per working session
 
