@@ -7,7 +7,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
 /// <summary>
 /// What a <see cref="FakeProvider"/> agent's conversation shows, from its prompt's directives, in
-/// order (<c>_</c> reads as a space, except in a tool's name):
+/// order (<c>_</c> reads as a space and <c>\n</c> as a line break, except in a tool's name):
 /// <list type="bullet">
 ///   <item><c>fake:say=Hello_there</c>: agent text.</item>
 ///   <item><c>fake:tool=Bash</c>: a tool call and its result; <c>fake:toolerror=Bash</c>: one whose result failed.</item>
@@ -23,7 +23,7 @@ public static partial class FakeTurn
         foreach (Match match in Step().Matches(prompt))
         {
             var raw = match.Groups["value"].Value;
-            var value = raw.Replace('_', ' ');
+            var value = raw.Replace('_', ' ').Replace("\\n", "\n");
             var toolId = $"fake-tool-{entries.Count + 1}";
             switch (match.Groups["name"].Value)
             {
