@@ -6,7 +6,7 @@ import { duration } from "./format.js";
 export const RESULT_LINES = 12;
 
 /** URLs become links; not trailing punctuation or a closing backtick. Runs on escaped HTML. */
-function linkify(html: string): string {
+export function linkify(html: string): string {
   return html.replace(
     /https?:\/\/[^\s<"`]*[^\s<"`.,;:)]/g,
     (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`,
@@ -57,7 +57,12 @@ type Input = Record<string, unknown>;
 const inputOf = (call: ConversationEntry): Input =>
   call.input && typeof call.input === "object" ? (call.input as Input) : {};
 
-/** What a tool call is about, in one line: its description, command, file, pattern or URL. */
+/**
+ * What a tool call is about, in one line: its description, command, file, pattern or URL. The
+ * server picks a session's activity by the same rules (`ToolGist`, M5f); both are tested against
+ * `tool-gist.cases.json`, so every client shows the same line. This copy stays: the conversation
+ * has the input, not a line made from it.
+ */
 export function gist(call: ConversationEntry): string {
   const i = inputOf(call);
   const text = (key: string) => (typeof i[key] === "string" ? (i[key] as string) : undefined);

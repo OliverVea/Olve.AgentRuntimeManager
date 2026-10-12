@@ -1,7 +1,8 @@
 import { BaseElement, escapeHtml } from "../base-element.js";
+import type { ActivityStore } from "../sessions/activity-store.js";
 import { isEnded } from "../sessions/format.js";
 import type { SessionStore } from "../sessions/session-store.js";
-import { cardStyles, sessionCard, type TimesAs, timeOf } from "./session-card.js";
+import { cardStyles, type LogView, sessionCard, type TimesAs, timeOf } from "./session-card.js";
 
 export type View = "overview" | "history";
 
@@ -9,13 +10,24 @@ export type View = "overview" | "history";
 const sprite = `<svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
+  <symbol id="i-wrap" viewBox="0 0 24 24"><path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7"/><path d="m16 16-2 2 2 2"/></symbol>
 </svg>`;
+
+/** Whether logs are wrapped and expanded unless a card says otherwise (Options). */
+export type LogDefaults = { wrap: boolean; expand: boolean };
 
 /**
  * `<session-list>` — the Overview (queued and working, oldest first) or History (ended, newest
  * first) as cards, from a {@link SessionStore}. It re-renders on every store change, and only
  * ticks the running times in between; the composer and dialogs live outside it, so a live update
  * never touches what the user is typing.
+ *
+ * Working sessions' cards show their latest activity from an {@link ActivityStore} (M5f), which it
+ * re-renders on too; each card's expand and wrap buttons flip that card from the defaults
+ * (`logDefaults`, from Options), and new defaults apply to every card again. The log column isn't a
+ * link to the session: its text can be selected and its links followed.
  *
  * It only reports what the user wants, as bubbling events whose `detail` is the session id:
  * `open-session`, `kill-session`, `delete-session`, `copy-id`; plus `toggle-times`.
@@ -27,12 +39,32 @@ export class SessionList extends BaseElement {
   #view: View = "overview";
   #times: TimesAs = "relative";
   #tick: ReturnType<typeof setInterval> | undefined;
+  #activity: ActivityStore | null = null;
+  #logDefaults: LogDefaults = { wrap: false, expand: false };
+  /** Cards whose log is wrapped or expanded unlike the defaults. */
+  readonly #flipped = { wrap: new Set<string>(), expand: new Set<string>() };
   readonly #onChange = () => this.render();
+  readonly #onResize = () => this.#markOverflow();
 
   set store(store: SessionStore) {
     this.#store?.removeEventListener("change", this.#onChange);
     this.#store = store;
     store.addEventListener("change", this.#onChange);
+    this.render();
+  }
+
+  set activity(activity: ActivityStore) {
+    this.#activity?.removeEventListener("change", this.#onChange);
+    this.#activity = activity;
+    activity.addEventListener("change", this.#onChange);
+    this.render();
+  }
+
+  /** New defaults apply to every card, as the Options dialog says. */
+  set logDefaults(defaults: LogDefaults) {
+    this.#logDefaults = defaults;
+    this.#flipped.wrap.clear();
+    this.#flipped.expand.clear();
     this.render();
   }
 
@@ -60,10 +92,12 @@ export class SessionList extends BaseElement {
   connectedCallback(): void {
     this.render();
     this.#tick = setInterval(() => this.#tickTimes(), 1000);
+    window.addEventListener("resize", this.#onResize);
   }
 
   disconnectedCallback(): void {
     clearInterval(this.#tick);
+    window.removeEventListener("resize", this.#onResize);
   }
 
   protected override styles(): string {
@@ -82,7 +116,7 @@ export class SessionList extends BaseElement {
     let body: string;
     if (sessions.length)
       body = sessions
-        .map((s) => sessionCard(s, this.#times, now, store.provider(s.provider)))
+        .map((s) => sessionCard(s, this.#times, now, store.provider(s.provider), this.#log(s.id)))
         .join("");
     else if (state === "loading" || state === "idle") body = `<div class="empty">Loading…</div>`;
     else if (overview) body = `<div class="empty">Nothing running. Start a session above.</div>`;
@@ -103,10 +137,23 @@ export class SessionList extends BaseElement {
     if (focused) this.query<HTMLElement>(`[data-open="${CSS.escape(focused)}"]`)?.focus();
   }
 
-  /** Fade rows that are wider than the card. */
+  #log(id: string): LogView {
+    const flipped = (key: keyof LogDefaults) =>
+      this.#logDefaults[key] !== this.#flipped[key].has(id);
+    return { lines: this.#activity?.lines(id), wrap: flipped("wrap"), open: flipped("expand") };
+  }
+
+  /** Fade rows and log lines that are wider than the card, and the top of wrapped logs that overflow. */
   #markOverflow(): void {
-    for (const row of this.queryAll<HTMLElement>(".info, .r1")) {
+    for (const row of this.queryAll<HTMLElement>(".info, .r1, .log:not(.wrap) > div")) {
       row.classList.toggle("overflows", row.scrollWidth > row.clientWidth + 1);
+    }
+    for (const box of this.queryAll<HTMLElement>(".log.wrap:not(.open)")) {
+      const height = [...box.children].reduce(
+        (sum, l) => sum + l.getBoundingClientRect().height,
+        0,
+      );
+      box.classList.toggle("clipped", height > box.clientHeight + 1);
     }
   }
 
@@ -125,6 +172,8 @@ export class SessionList extends BaseElement {
   #click(e: MouseEvent): void {
     const target = e.target as HTMLElement;
     const control = target.closest<HTMLElement>("button, [data-copy]");
+    // The log column's text can be selected and its links followed: not a click on the card.
+    if (!control && target.closest(".logcol")) return;
     if (!control) {
       // A click anywhere else on a card opens that session (unless it ends a text selection).
       const card = target.closest<HTMLElement>("[data-open]");
@@ -137,6 +186,14 @@ export class SessionList extends BaseElement {
     else if (d.copy) this.#emit("copy-id", d.copy);
     else if ("times" in d) this.#emit("toggle-times");
     else if ("older" in d) void this.#store?.loadHistory(true);
+    else if (d.expand) this.#flip("expand", d.expand);
+    else if (d.wrap) this.#flip("wrap", d.wrap);
+  }
+
+  #flip(key: keyof LogDefaults, id: string): void {
+    const set = this.#flipped[key];
+    if (!set.delete(id)) set.add(id);
+    this.render();
   }
 
   /** Enter opens the focused card; Delete asks to kill (or delete) it. */

@@ -1,4 +1,5 @@
 import type {
+  ActivityLine,
   ArmEventData,
   EnvVariable,
   ProviderHealth,
@@ -35,7 +36,8 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `providers` is what `GET /api/providers/health` answers (every provider available by default).
  * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
  * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
- * DELETEs wait for `releaseEnvWrites`.
+ * DELETEs wait for `releaseEnvWrites`. `activity` is what `GET /api/sessions/{id}/activity`
+ * answers for a session (its lines; 404 when it gives none), read when asked.
  */
 export function fakeApi(
   options: {
@@ -43,6 +45,7 @@ export function fakeApi(
     search?: () => Response;
     providers?: ProviderHealth[];
     env?: EnvVariable[];
+    activity?: (id: string) => ActivityLine[] | undefined;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -80,6 +83,16 @@ export function fakeApi(
     if (request.method === "POST" && url.pathname === "/api/sessions/search") {
       if (held) await new Promise<void>((resolve) => held?.push(resolve));
       return searchResponse(body ?? {});
+    }
+    const activityOf = url.pathname.match(/^\/api\/sessions\/([^/]+)\/activity$/);
+    if (request.method === "GET" && activityOf) {
+      const lines = options.activity?.(activityOf[1] ?? "");
+      return lines
+        ? Response.json({ lines })
+        : Response.json(
+            { error: { code: "SESSION_NOT_FOUND", message: "Not found.", details: {} } },
+            { status: 404 },
+          );
     }
     const byId = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
     if (request.method === "GET" && byId) {
@@ -154,6 +167,11 @@ export function fakeApi(
     },
     streams: () => calls.filter((c) => c.path === "/api/events").length,
     searches: () => calls.filter((c) => c.path === "/api/sessions/search"),
+    /** The activity reads, of one session or of all. */
+    activityReads: (id?: string) =>
+      calls.filter((c) =>
+        id ? c.path === `/api/sessions/${id}/activity` : c.path.endsWith("/activity"),
+      ),
     push(event: ArmEventData) {
       if (!events) throw new Error("event stream not open");
       const id = event.type === "heartbeat" ? "" : `id: ${nextId++}\n`;
