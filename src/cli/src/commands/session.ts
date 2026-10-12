@@ -15,7 +15,7 @@ import {
 } from "@arm/client";
 import { send, unwrap } from "../api";
 import { UsageError } from "../errors";
-import { commaListOf, dateTime, integer, keyValues, repeated, text, textOrDefault } from "../options";
+import { commaListOf, dateTime, integer, keyValues, repeated, repos, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandContext, CommandGroup, OptionValues } from "../registry";
 import { formatConversation } from "./conversation";
@@ -45,6 +45,7 @@ export function formatSession(s: Session): string {
     ["timeoutSeconds", s.timeoutSeconds],
     ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
+    ["repos", s.repos?.length ? s.repos.map((r) => (r.ref ? `${r.url}#${r.ref}` : r.url)).join(", ") : undefined],
     ["attempts", s.attempts],
     ["retriesLeft", s.retriesLeft],
     ["createdAt", s.createdAt],
@@ -97,6 +98,7 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
     timeoutSeconds: integer(options, "timeout-seconds", { min: 1 }),
     env: keyValues(options, "env"),
     useEnv: repeated(options, "use-env"),
+    repos: repos(options, "repo"),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
@@ -156,6 +158,13 @@ export const sessionGroup: CommandGroup = {
           type: "string",
           description: "A registered, non-default environment variable to give the agent (see `arm env list`)",
           valueName: "NAME",
+          multiple: true,
+        },
+        repo: {
+          type: "string",
+          description:
+            "A git repository ARM checks out for the agent, on a branch of the session's own; #REF starts it from a branch, tag or commit (default: the repository's default branch)",
+          valueName: "URL[#REF]",
           multiple: true,
         },
       },

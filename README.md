@@ -118,6 +118,23 @@ names them (`useEnv`), plus the session's own `env` on top. A session takes them
 `ARM_*`, …) are refused. None of it is secret: anyone with API access reads it back (secrets are
 in VISION).
 
+A session can name git repositories (`repos: [{ url, ref? }]`, `arm session create --repo
+URL[#REF]`, M5e; `Sessions/Repos/`, the supervisor's `RepoCheckout`). ARM's own code checks them out
+before the agent starts, as the agent's user with the session's environment (so its
+`GIT_SSH_COMMAND` and git identity apply): one shared bare copy per URL under `Repos:Root` (cloned
+on first use, fetched when a session needs a new worktree; one clone or fetch per repository at a
+time, through a lock file next to it), and a worktree per session in its workplace
+(`work/<repo name>`, the URL's last segment without `.git`) on a new branch `arm/<first 8
+characters of the session id>`, from `ref` (a branch of the remote, a tag or a commit; unset: the
+remote's default branch). The agent starts in the repository when there is exactly one, else in
+the workplace. Every git command is bounded (`Repos:GitTimeout`) and never prompts; a checkout that
+fails (no access, unknown ref, a timeout) fails the session before its agent runs, with git's error.
+A session that continues, retries or resumes keeps its worktrees as they are (nothing is fetched or
+reset); deleting a session removes its worktrees from the shared copies (as the agent user, through
+the supervisor), keeping their branches. Two repos that would share a folder, a blank `url` or a
+`ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
+provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
+
 A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
 429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)
 says why and until when: `limited` until the limit resets, `unreachable` for a wait that doubles
@@ -278,6 +295,8 @@ Sources in priority order (highest wins):
 | `Providers:Claude:WorkRoot` | `olve-arm/sessions` in the user's local data folder | Each session's folder: working directory (`work/`) and raw output |
 | `Providers:Claude:ConfigDirectory` | *(Claude Code's default, `~/.claude`)* | `CLAUDE_CONFIG_DIR` for the agents |
 | `Providers:Claude:ExitGrace` | `00:00:10` | How long an agent may take to exit after its turn before it's stopped |
+| `Repos:Root` | `olve-arm/repos` in the user's local data folder | The shared bare copy of each repository sessions name (M5e); written by the agents' user. `/var/lib/olve-arm/repos` on the VMs |
+| `Repos:GitTimeout` | `00:05:00` | The longest one git command of a checkout may take; a session waits up to four times this for another one's checkout of the same repository |
 | `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
 | `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
 

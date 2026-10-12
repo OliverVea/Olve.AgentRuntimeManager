@@ -96,6 +96,30 @@ describe("session create", () => {
     expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, env: { A: "1", B: "x=y" }, useEnv: ["GH", "EXTRA"] });
   });
 
+  test("--repo repeats into repos, split at the last #", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(
+      ["session", "create", "x", ...required, "--repo", "git@github.com:o/a.git", "--repo", "https://host/b#c#release/1.0", "--repo", "/srv/c#0a1b2c3"],
+      f,
+    );
+    expect(r.code).toBe(0);
+    expect(f.requests[0]!.body).toEqual({
+      prompt: "x",
+      ...requiredBody,
+      repos: [{ url: "git@github.com:o/a.git" }, { url: "https://host/b#c", ref: "release/1.0" }, { url: "/srv/c", ref: "0a1b2c3" }],
+    });
+  });
+
+  for (const value of ["git@github.com:o/a.git#", "#main"]) {
+    test(`--repo ${value} is a usage error`, async () => {
+      const f = fakeFetch(() => ({ status: 201, body: created }));
+      const r = await cli(["session", "create", "x", ...required, "--repo", value], f);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toContain(`--repo must be URL or URL#REF, got '${value}'`);
+      expect(f.requests.length).toBe(0);
+    });
+  }
+
   test("--env without NAME=value is a usage error", async () => {
     const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await cli(["session", "create", "x", ...required, "--env", "NOVALUE"], f);
@@ -227,6 +251,13 @@ describe("session get", () => {
     expect(f.requests[0]!.url).toBe(`${url}/api/sessions/${id}`);
     expect(r.stdout.split("\n")[0]).toBe(`id              ${id}`);
     expect(r.stdout).toContain("status          working");
+  });
+
+  test("shows the session's repos, with their refs", async () => {
+    const repos = [{ url: "git@github.com:o/a.git" }, { url: "https://host/b", ref: "v1" }];
+    const f = fakeFetch(() => ({ body: { ...session, repos } }));
+    const r = await cli(["session", "get", id], f);
+    expect(r.stdout).toContain("repos           git@github.com:o/a.git, https://host/b#v1");
   });
 
   test("escapes the id in the path", async () => {
