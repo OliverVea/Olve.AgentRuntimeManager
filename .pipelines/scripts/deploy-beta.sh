@@ -3,8 +3,9 @@
 # ARM runs in a libvirt VM on the homelab host (docs/OPEN-QUESTIONS.md A4). This step copies the
 # built image tarball + src/deploy/vm to the host and runs vm-deploy.sh there, which ensures the
 # VM exists (first run creates it), installs the release as a systemd service, and ensures the
-# host relay the Olve.Homelab route targets, then confirms the `claude` provider with one real
-# session through ARM (src/deploy/vm/claude-check.sh). Idempotent; a failure stops the chain.
+# host relay the Olve.Homelab route targets. It only deploys: the beta checks run after it, from
+# test-after-beta's own job, through ARM's API. Idempotent; a failure stops the chain, so prod never
+# deploys.
 set -e
 
 mkdir -p /tmp
@@ -38,24 +39,12 @@ printf '%s\n' "${CLAUDE_CODE_OAUTH_TOKEN_BETA:-}" | ssh -o StrictHostKeyChecking
   "cd $REMOTE && bash vm-deploy.sh beta $VERSION image.tar $CLAUDE_ARG --claude-token-stdin && cd && rm -rf $REMOTE"
 
 echo "Verifying /health via the private (Tailscale) route..."
-healthy=0
 for i in 1 2 3 4 5; do
   if ssh -o StrictHostKeyChecking=no "$HOST" "curl -skf -o /dev/null https://arm-beta.ovea.pro/health"; then
     echo "beta health OK"
-    healthy=1
-    break
+    exit 0
   fi
   sleep 5
 done
-[ "$healthy" = 1 ] || { echo "beta health check failed" >&2; exit 1; }
-
-# One real claude session through ARM per bundle (a Haiku joke; it shows in beta's history), run
-# in the VM. The machine client's secret travels inside the script on stdin, never on a command
-# line. Bundles from before Claude Code was deployed have no check (and no Claude Code).
-if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/claude-check.sh" ]; then
-  echo "Confirming the claude provider on beta..."
-  { printf 'VERSION=%s\nCLIENT_SECRET_B64=%s\n' "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
-    cat "$INPUT_DIR/vm/claude-check.sh"; } |
-    ssh -o StrictHostKeyChecking=no "$HOST" \
-      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 bash -s"
-fi
+echo "beta health check failed" >&2
+exit 1

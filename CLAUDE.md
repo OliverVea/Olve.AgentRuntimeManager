@@ -48,7 +48,8 @@ confirm with Oliver that it still holds. When a leaning changes, rewrite the ent
 
 This repo deploys via **Olve.Pipelines** — the `.pipelines/` directory is the live deploy config
 (single source of truth; pushing to `main` redeploys). Build + `check` (`mise run ci`) run in
-parallel, then `deploy-beta` → `test-after-beta` (API tests against beta) → `deploy` (prod).
+parallel, then `deploy-beta` (only deploys) → `test-after-beta` (from its own job, over HTTP: the API
+tests and the beta checks against beta) → `deploy` (prod).
 ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`, `olve-arm-prod`), not in k8s:
 `src/deploy/vm/vm-deploy.sh` (run on the host by the deploy steps) creates the VM on first deploy,
 installs releases as a systemd service, and keeps a host relay (`100.100.117.17:18792` beta /
