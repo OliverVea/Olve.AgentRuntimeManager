@@ -37,6 +37,16 @@ public sealed record SupervisorLaunch
     public static readonly TimeSpan DefaultGitTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
+    /// The longest a checkout of <paramref name="repos"/> repositories may take, given its
+    /// <paramref name="gitTimeout"/>: per repository, the wait for another session's checkout
+    /// (four git timeouts) and a few slow git commands (the fetch, the default branch, a worktree),
+    /// with a minute to spare. The supervisor stops a checkout that runs longer, and ARM waits this
+    /// long (and a little) for the hello of a run that checks out.
+    /// </summary>
+    public static TimeSpan CheckoutLimit(int repos, TimeSpan gitTimeout) =>
+        repos == 0 ? TimeSpan.Zero : (gitTimeout * 8 * repos) + TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Lines written to the agent's stdin as soon as it starts (its prompt), so a server that goes
     /// away right after the launch can't leave the agent without its input.
     /// </summary>

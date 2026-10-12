@@ -25,7 +25,16 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     private readonly SupervisorLog _log = new(Path.Combine(launch.Folder, SupervisorFiles.Log));
     private readonly string _outputPath = Path.Combine(launch.Folder, SupervisorFiles.Output);
 
-    private Process _agent = null!;
+    private Process? _agent;
+
+    /// <summary>ARM asked to kill the run (under <see cref="_gate"/>): an agent not started yet never is.</summary>
+    private bool _killRequested;
+
+    /// <summary>Stops the checkout at a kill.</summary>
+    private readonly CancellationTokenSource _stopCheckout = new();
+
+    /// <summary>The socket this run bound (device, inode): it removes only that, not a newer run's.</summary>
+    private (ulong Device, ulong Inode)? _socket;
     private SupervisorMessage _hello = null!;
     private ArmConnection? _connection;
     private long _outputStart;
@@ -43,20 +52,41 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         await using var stderr = new FileStream(Path.Combine(launch.Folder, SupervisorFiles.Stderr), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         _outputStart = _outputEnd = output.Position;
 
-        // Listening before the checkout, which can take minutes: ARM connects and waits for the hello,
-        // which comes once the agent has started (else ARM would take a slow clone for a lost supervisor).
+        // Listening, and reading what ARM sends, before the checkout, which can take minutes: ARM
+        // connects and waits for the hello, which comes once the agent has started (else ARM would take
+        // a slow clone for a lost supervisor), and a kill meanwhile stops the checkout.
         using var stop = new CancellationTokenSource();
         using var listener = Listen();
         var accepting = AcceptAsync(listener, stop.Token);
+        Process agent;
         try
         {
             CreateWorkplace();
-            if (await CheckoutAsync() is { } checkoutError)
+            var checkoutError = await CheckoutAsync();
+            lock (_gate)
             {
-                return await NotStartedAsync(127, checkoutError, stop, listener, accepting);
+                if (_killRequested)
+                {
+                    checkoutError = Killed;
+                }
+                else if (checkoutError is null && Superseded())
+                {
+                    // Another run of the session took the socket (it was killed, then continued): this one
+                    // must not start a second agent next to it.
+                    checkoutError = SupersededError;
+                }
+                else if (checkoutError is null)
+                {
+                    _agent = Process.Start(StartInfo()) ?? throw new InvalidOperationException($"'{launch.Command}' did not start.");
+                }
             }
 
-            _agent = Process.Start(StartInfo()) ?? throw new InvalidOperationException($"'{launch.Command}' did not start.");
+            if (checkoutError is not null)
+            {
+                return await NotStartedAsync(checkoutError is Killed or SupersededError ? 128 + Posix.SigKill : 127, checkoutError, stop, listener, accepting);
+            }
+
+            agent = _agent!;
         }
         catch (Exception exception)
         {
@@ -64,14 +94,14 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             return await NotStartedAsync(127, exception.Message, stop, listener, accepting);
         }
 
-        _log.Write($"run {launch.RunId}: agent {_agent.Id} started");
+        _log.Write($"run {launch.RunId}: agent {agent.Id} started");
         var info = new SupervisorInfo
         {
             Version = SupervisorProtocol.Version,
             RunId = launch.RunId,
             SupervisorPid = Environment.ProcessId,
-            AgentPid = _agent.Id,
-            AgentStartTime = Posix.StartTime(_agent.Id),
+            AgentPid = agent.Id,
+            AgentStartTime = Posix.StartTime(agent.Id),
             OutputStart = _outputStart,
             StderrStart = stderr.Position,
             StartedAt = DateTimeOffset.UtcNow,
@@ -83,16 +113,17 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             SupervisorPid = info.SupervisorPid, AgentPid = info.AgentPid, OutputStart = info.OutputStart, StderrStart = info.StderrStart,
         };
 
-        _ready.TrySetResult(true);
         var stdoutPump = PumpOutputAsync(output);
         var stderrPump = PumpStderrAsync(stderr);
         // After the pumps and the socket: an agent that writes before it has read a large prompt
-        // must not block this (nor keep ARM from connecting).
+        // must not block this (nor keep ARM from connecting). Before the hello: it takes the input
+        // first, so none of ARM's writes comes between its lines.
         var input = WriteInitialInputAsync();
+        _ready.TrySetResult(true);
 
         await Task.WhenAll(stdoutPump, stderrPump, input);
-        await _agent.WaitForExitAsync();
-        var exitCode = _agent.ExitCode;
+        await agent.WaitForExitAsync();
+        var exitCode = agent.ExitCode;
         WriteExit(exitCode, error: null);
         _log.Write($"run {launch.RunId}: agent exited with {exitCode}");
 
@@ -115,10 +146,27 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
         await stop.CancelAsync();
         listener.Dispose();
-        File.Delete(launch.SocketPath);
+        DeleteSocket();
         await accepting;
         connection?.Dispose();
         return 0;
+    }
+
+    /// <summary>Why a run ended without its agent at a kill (ARM's: the session's outcome is "killed").</summary>
+    private const string Killed = "Killed before its agent started.";
+
+    private const string SupersededError = "Another run of this session started before this one's agent did; it didn't start.";
+
+    /// <summary>Whether the socket path is another run's now (a newer supervisor of the same session bound it).</summary>
+    private bool Superseded() => Posix.Identity(launch.SocketPath) != _socket;
+
+    /// <summary>Removes the run's socket, unless a newer run of the session has its own there.</summary>
+    private void DeleteSocket()
+    {
+        if (!Superseded())
+        {
+            File.Delete(launch.SocketPath);
+        }
     }
 
     /// <summary>
@@ -131,7 +179,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         _ready.TrySetResult(false);
         await stop.CancelAsync();
         listener.Dispose();
-        File.Delete(launch.SocketPath);
+        DeleteSocket();
         await accepting;
         lock (_gate)
         {
@@ -149,12 +197,18 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             return null;
         }
 
-        var checkout = new RepoCheckout(new Git(launch.Environment, launch.GitTimeout), _log);
+        // A kill stops it, and so does running past its limit (each git command is bounded too).
+        var limit = SupervisorLaunch.CheckoutLimit(launch.Repos.Count, launch.GitTimeout);
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(_stopCheckout.Token);
+        bounded.CancelAfter(limit);
+        var checkout = new RepoCheckout(new Git(launch.Environment, launch.GitTimeout, bounded.Token), _log);
         foreach (var repo in launch.Repos)
         {
             if (await checkout.CheckoutAsync(repo) is { } error)
             {
-                return error;
+                return bounded.IsCancellationRequested && !_stopCheckout.IsCancellationRequested
+                    ? $"Checking out {repo.Url} failed: the checkout took more than {limit.TotalSeconds:0} s."
+                    : error;
             }
         }
 
@@ -174,6 +228,10 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
                 break;
             case SupervisorMessage.CloseInput:
                 await CloseInputAsync();
+                break;
+            case SupervisorMessage.Kill when message.RunId is { } run && run != launch.RunId:
+                // Meant for an earlier run of the session (whose ARM reached this socket instead).
+                _log.Write($"run {launch.RunId}: ignored a kill for run {run}");
                 break;
             case SupervisorMessage.Kill:
                 Kill();
@@ -239,6 +297,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         // The group too: an agent running as its own user (docs/AGENT-USER.md) has ARM in its group.
         // Who may talk on it is checked per connection (ClientUid).
         File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
+        _socket = Posix.Identity(launch.SocketPath);
         listener.Listen(4);
         return listener;
     }
@@ -274,12 +333,14 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             }
 
             previous?.Dispose();
-            _ = StartWhenReadyAsync(connection);
+            // Read from now on (a kill may come during the checkout); greeted once the agent runs.
+            connection.Start();
+            _ = GreetWhenReadyAsync(connection);
         }
     }
 
     /// <summary>Greets a connection once the agent has started; closes it if the run ended without one.</summary>
-    private async Task StartWhenReadyAsync(ArmConnection connection)
+    private async Task GreetWhenReadyAsync(ArmConnection connection)
     {
         if (!await _ready.Task)
         {
@@ -295,7 +356,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             }
         }
 
-        connection.Start(_hello);
+        connection.Send(_hello);
     }
 
     /// <summary>Sends the output from <paramref name="offset"/> on, then every new line as it comes.</summary>
@@ -303,7 +364,8 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     {
         lock (_gate)
         {
-            if (connection != _connection)
+            // An attach comes after the hello, so with the agent; one before it is ignored.
+            if (connection != _connection || _agent is null)
             {
                 return;
             }
@@ -343,7 +405,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
     private async Task PumpOutputAsync(FileStream output)
     {
-        while (await _agent.StandardOutput.ReadLineAsync() is { } line)
+        while (await _agent!.StandardOutput.ReadLineAsync() is { } line)
         {
             var bytes = Utf8.GetBytes(line + "\n");
             await output.WriteAsync(bytes);
@@ -363,7 +425,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     {
         var buffer = new char[4096];
         int read;
-        while ((read = await _agent.StandardError.ReadAsync(buffer)) > 0)
+        while ((read = await _agent!.StandardError.ReadAsync(buffer)) > 0)
         {
             await stderr.WriteAsync(Utf8.GetBytes(buffer, 0, read));
             await stderr.FlushAsync();
@@ -380,8 +442,9 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         await _input.WaitAsync();
         try
         {
-            if (_inputClosed)
+            if (_inputClosed || _agent is null)
             {
+                // No agent yet: ARM sends input only after the hello, which comes with the agent.
                 return;
             }
 
@@ -407,7 +470,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         await _input.WaitAsync();
         try
         {
-            if (!_inputClosed)
+            if (!_inputClosed && _agent is not null)
             {
                 _inputClosed = true;
                 _agent.StandardInput.Close();
@@ -423,12 +486,30 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         }
     }
 
+    /// <summary>
+    /// Kills the agent, or, before it has started, stops the checkout (its git, the wait for the
+    /// lock) and makes sure it never starts.
+    /// </summary>
     private void Kill()
     {
+        Process? agent;
+        lock (_gate)
+        {
+            _killRequested = true;
+            agent = _agent;
+        }
+
+        if (agent is null)
+        {
+            _log.Write($"run {launch.RunId}: killed before its agent started; stopping the checkout");
+            _stopCheckout.Cancel();
+            return;
+        }
+
         _log.Write($"run {launch.RunId}: killing the agent");
         try
         {
-            _agent.Kill(entireProcessTree: true);
+            agent.Kill(entireProcessTree: true);
         }
         catch (InvalidOperationException)
         {

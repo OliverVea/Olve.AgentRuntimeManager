@@ -7,12 +7,15 @@ namespace Olve.AgentRuntimeManager.Supervisor;
 [UnsupportedOSPlatform("windows")]
 internal static class RepoWorktree
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
+    /// <summary>All of it, the wait for the lock included: a delete request waits for this.</summary>
+    public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+
+    private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Removes the worktree at <paramref name="worktree"/>, uncommitted work and all (even if it's
-    /// locked); the branch stays in the shared copy. A worktree whose folder is gone is pruned instead.
-    /// Null when done (or there was nothing to remove), else why not.
+    /// Removes the worktree at <paramref name="worktree"/> (and a half-made one at its pending path),
+    /// uncommitted work and all; the branch stays in the shared copy. Holds the copy's lock, so it
+    /// doesn't meet a checkout. Null when done (or there was nothing to remove), else why not.
     /// </summary>
     public static async Task<string?> RemoveAsync(string shared, string worktree)
     {
@@ -21,15 +24,32 @@ internal static class RepoWorktree
             return Posix.ExistsNoFollow(worktree) ? $"{worktree} has no shared copy at {shared} to be removed from." : null;
         }
 
-        // Nothing here needs the network or the agent's own settings: a plain environment.
-        var git = new Git(new Dictionary<string, string> { ["PATH"] = "/usr/local/bin:/usr/bin:/bin" }, Timeout);
-        if (!Posix.ExistsNoFollow(worktree))
+        using var deadline = new CancellationTokenSource(Timeout);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? held;
+        try
         {
-            var pruned = await git.RunAsync("-C", shared, "worktree", "prune");
-            return pruned.Succeeded ? null : $"git worktree prune failed: {(pruned.TimedOut ? "timed out" : pruned.Error)}";
+            held = await RepoLock.AcquireAsync(shared + ".lock", LockWait, deadline.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            held = null;
+        }
+        catch (IOException exception)
+        {
+            return exception.Message;
         }
 
-        var removed = await git.RunAsync("-C", shared, "worktree", "remove", "--force", "--force", worktree);
-        return removed.Succeeded ? null : $"git worktree remove failed: {(removed.TimedOut ? "timed out" : removed.Error)}";
+        if (held is null)
+        {
+            return $"{shared} is busy (another session's checkout of it took more than {LockWait.TotalSeconds:0} s).";
+        }
+
+        using (held)
+        {
+            // Nothing here needs the network or the agent's own settings: a plain environment.
+            var git = new Git(new Dictionary<string, string> { ["PATH"] = "/usr/local/bin:/usr/bin:/bin" }, Timeout, deadline.Token);
+            return await Worktrees.RemoveAsync(git, shared, SupervisorRepo.PendingPath(worktree))
+                ?? await Worktrees.RemoveAsync(git, shared, worktree);
+        }
     }
 }

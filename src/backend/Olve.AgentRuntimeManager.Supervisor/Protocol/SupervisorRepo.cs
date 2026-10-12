@@ -21,4 +21,20 @@ public sealed record SupervisorRepo
 
     /// <summary>The session's branch (<c>arm/&lt;short session id&gt;</c>).</summary>
     public required string Branch { get; init; }
+
+    /// <summary>
+    /// The session it's for (its full id): recorded on the branch in the shared copy
+    /// (<see cref="OwnerKey"/>), so a branch is only checked out again for the session that made it.
+    /// </summary>
+    public required string Owner { get; init; }
+
+    /// <summary>
+    /// Where a worktree is made before it's moved to <paramref name="path"/>, complete: next to it,
+    /// hidden. What's at <paramref name="path"/> is so always a whole worktree; one left here is half-made.
+    /// </summary>
+    public static string PendingPath(string path) =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $".{System.IO.Path.GetFileName(path)}.arm-checkout");
+
+    /// <summary>The shared copy's git config key naming the session a branch is for.</summary>
+    public static string OwnerKey(string branch) => $"branch.{branch}.armSession";
 }
