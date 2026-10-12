@@ -58,7 +58,9 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         using var stop = new CancellationTokenSource();
         using var listener = Listen();
         var accepting = AcceptAsync(listener, stop.Token);
-        Process agent;
+        // Why the run ends without an agent, if it does: handled once, after (not in) the try below,
+        // so a failure while ending (the socket's folder gone) can't end it a second time.
+        string? notStarted;
         try
         {
             CreateWorkplace();
@@ -81,18 +83,20 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
                 }
             }
 
-            if (checkoutError is not null)
-            {
-                return await NotStartedAsync(checkoutError is Killed or SupersededError ? 128 + Posix.SigKill : 127, checkoutError, stop, listener, accepting);
-            }
-
-            agent = _agent!;
+            notStarted = checkoutError;
         }
         catch (Exception exception)
         {
             _log.Write($"run {launch.RunId}: could not start the agent: {exception.Message}");
-            return await NotStartedAsync(127, exception.Message, stop, listener, accepting);
+            notStarted = exception.Message;
         }
+
+        if (notStarted is not null)
+        {
+            return await NotStartedAsync(notStarted is Killed or SupersededError ? 128 + Posix.SigKill : 127, notStarted, stop, listener, accepting);
+        }
+
+        var agent = _agent!;
 
         _log.Write($"run {launch.RunId}: agent {agent.Id} started");
         var info = new SupervisorInfo
@@ -162,11 +166,31 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     /// made after this one's. Such a run doesn't start its agent, nor write the session's <c>exit.json</c>
     /// (the newer run's).
     /// </summary>
-    private bool Superseded() =>
-        SupervisorSockets.OtherRuns(launch.SocketPath).Any(other => File.GetLastWriteTimeUtc(other) > _socketMade);
+    private bool Superseded()
+    {
+        try
+        {
+            return SupervisorSockets.OtherRuns(launch.SocketPath).Any(other => File.GetLastWriteTimeUtc(other) > _socketMade);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The socket folder is gone (or unreadable): no newer run's socket can be in it.
+            return false;
+        }
+    }
 
-    /// <summary>Removes the run's socket (its own: no other run uses the name).</summary>
-    private void DeleteSocket() => File.Delete(launch.SocketPath);
+    /// <summary>Removes the run's socket (its own: no other run uses the name); one that's gone already is fine.</summary>
+    private void DeleteSocket()
+    {
+        try
+        {
+            File.Delete(launch.SocketPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Write($"run {launch.RunId}: could not remove its socket: {exception.Message}");
+        }
+    }
 
     /// <summary>
     /// The run ends without an agent (a checkout that failed, a command that didn't start): the exit
