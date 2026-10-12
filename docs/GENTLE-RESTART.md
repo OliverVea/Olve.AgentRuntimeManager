@@ -99,11 +99,20 @@ old one: that's the old ARM being gone).
 - After the agent exits the supervisor writes `exit.json` (temp + rename), sends `exited` if
   someone's attached, and exits. Nothing lingers: the files are the record.
 - **Before the agent (M5e, additive):** the launch may name git repositories to check out first
-  (`workplace`, `repos`, `gitTimeout`), which can take minutes. So the supervisor listens before the
-  checkout and sends `hello` once the agent has started: ARM, connected, just waits for it (each
-  git command is bounded, so the wait is too). A run that ends without an agent (a failed checkout,
-  a command that didn't start) writes `exit.json` with its `error` and then closes the connection
-  and the socket: ARM finds the exit file, and the error becomes the session's.
+  (`workplace`, `repos`, `gitTimeout`), which can take minutes. So the supervisor listens, and reads
+  what ARM sends, before the checkout, and sends `hello` only once the agent has started. While it
+  holds the connection open without a hello, it's alive and checking out; a connection that drops,
+  with no socket to reconnect to and no exit file within the connect timeout, means it's lost. Both
+  sides bound the wait: each git command (its output included) by `gitTimeout`, the whole checkout by
+  `CheckoutLimit` (eight git timeouts per repository, and a minute; the supervisor stops a checkout
+  that runs longer), and ARM waits for the hello that long and a minute more, then kills the run and
+  fails it. A `kill` (it carries the run's id; one for another run is ignored) is the one message ARM
+  sends before the hello: it stops the checkout (SIGTERM to git, SIGKILL a few seconds later), and the
+  agent never starts. Before starting the agent, a supervisor also checks that the socket is still its
+  own: if a newer run of the session took it (killed, then continued), it doesn't start; and it only
+  ever removes its own socket. A run that ends without an agent (a failed or killed checkout, a
+  command that didn't start) writes `exit.json` with its `error` and then closes the connection and the
+  socket: ARM finds the exit file, and the error becomes the session's (a kill's: killed).
 
 ## Recovery (`Recover()`), per working session
 

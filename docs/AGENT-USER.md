@@ -110,7 +110,9 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   without a `safe.directory` entry. ARM never reads them. Deleting a session removes its worktrees
   as the agent user too, through the same sudoers rule:
   `sudo -n -u arm-agent -- <supervisor> remove-worktree <shared copy> <worktree>` (ARM couldn't:
-  the files are the agent's, not group-writable).
+  the files are the agent's, not group-writable), which takes the copy's lock like a checkout. ARM's
+  git runs no hooks (`core.hooksPath=/dev/null`): all agents can write every shared copy, so a hook
+  one planted there would otherwise run in another session's supervisor.
 
 ## The VM (`vm-deploy.sh` → `agent-user.sh`, every deploy, idempotent)
 
