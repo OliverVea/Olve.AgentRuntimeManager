@@ -20,14 +20,6 @@
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
   </ItemGroup>
 
-  <!-- The beta check (src/deploy/vm/beta-check.py) and what BetaCheckTests run it with. -->
-  <ItemGroup>
-    <None Include="BetaCheck/*.py" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../deploy/vm/beta-check.py" Link="BetaCheck/beta-check.py" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../../.pipelines/scripts/deploy-beta.sh" Link="BetaCheck/deploy-beta.sh" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="../Olve.AgentRuntimeManager.UnitTests/Support/TestProcesses.cs" Link="BetaCheck/TestProcesses.cs" />
-  </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="../Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
   </ItemGroup>

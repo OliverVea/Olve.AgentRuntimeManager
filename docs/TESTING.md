@@ -82,30 +82,11 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   clobbers real beta state.
 - **LLM-free** — control-plane only (session CRUD, approval flow via FakeProvider, policy,
   SSE, health). Never spawn a real Claude/Codex session here.
-- **One exception, in `deploy-beta` (2026-10-12; was one "Tell me a joke" session from 2026-09-26):
-  the beta checks.** Each bundle's beta deploy proves ARM's main paths with real `claude` sessions
-  through its API, in the VM (`src/deploy/vm/beta-check.py`, run as `arm`; caller `deploy-beta`; a
-  client-credentials token of the beta `olve-arm` machine client), and prod deploys only if every
-  check passes. Three Haiku turns: a session runs a command with its Bash tool (it ran as the agent
-  user, a registered default variable and the session's own reached it, ARM's own config didn't;
-  Claude Code is locked down), its conversation and activity are checked against each other, a
-  message continues it (M11), and a second session is killed in the middle of a command (it ends
-  `killed`, and nothing of it runs on: its processes, their descendants, and anything left in a
-  process session one of them led). A `fake` session (no model) is deleted. Also `/health`, server
-  info (the bundle's version), auth, provider health and the event stream (both sessions'
-  lifecycles). The command's output and ARM's answers decide, never the model's wording; about a
-  minute in all, every wait bounded (the whole run by the VM's `timeout`, 3.5 minutes). Idempotent
-  per bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed
-  for <version>"), and a retried deploy of it starts no sessions; a run first kills what a failed
-  one left running. Left on beta: those sessions, in ARM's history (ARM's delete would leave a
-  `claude` session's folder and transcript on disk, so the deleted one is a `fake` one). The checks
-  themselves are tested per push (`BetaCheckTests`, API tests): against this build started locally
-  with a stub Claude Code (`BetaCheck/claude-stub.py`) that runs the commands for real and can
-  misbehave (a variable missing, ARM's config leaking, no tool call, a hang, processes outliving a
-  kill, logged out, the wrong version), each failure saying what failed; deploy-beta's part that
-  sends it (the secret on stdin only); the check's own logic on
-  what a working ARM never answers (`BetaCheck/beta_check_test.py`). New features add their check
-  to `CHECKS` in `beta-check.py` (with the turns it costs) and a case to those tests.
+- **One exception, in `deploy-beta` (2026-09-26):** each bundle's beta deploy starts one real
+  `claude` session through ARM's API (`src/deploy/vm/claude-check.sh`: Haiku, "Tell me a joke",
+  caller `deploy-beta`, a client-credentials token of the beta `olve-arm` machine client) and fails
+  unless it completed and its Claude Code saw no tools or MCP servers. It confirms the bundle's
+  provider, Claude Code version, login and lockdown before prod; the session stays in beta's history.
 
 ## Provider (LLM) integration testing
 
