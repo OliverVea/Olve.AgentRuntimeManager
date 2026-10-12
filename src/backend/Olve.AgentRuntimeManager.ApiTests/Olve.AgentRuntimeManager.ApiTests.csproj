@@ -26,6 +26,7 @@
     <None Include="../../../.pipelines/scripts/beta-check.py" Link="BetaCheck/beta-check.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../.pipelines/scripts/test-after-beta.sh" Link="BetaCheck/test-after-beta.sh" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Olve.AgentRuntimeManager.UnitTests/Support/TestProcesses.cs" Link="BetaCheck/TestProcesses.cs" />
+    <Compile Include="../Olve.AgentRuntimeManager.UnitTests/Support/TestGit.cs" Link="BetaCheck/TestGit.cs" />
   </ItemGroup>
 
   <ItemGroup>

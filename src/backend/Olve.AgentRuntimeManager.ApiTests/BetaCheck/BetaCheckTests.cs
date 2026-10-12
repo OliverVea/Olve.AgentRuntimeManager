@@ -46,10 +46,13 @@ public class BetaCheckTests
         await Assert.That(first.Output).Contains($"killed session {leftover}");
         await Assert.That(first.Output).Contains("deleting it while it worked was refused (409), the kill ended it killed");
         await Assert.That(first.Output).Contains($"Beta check passed for {LocalArm.Version} (1 model turn)");
+        await Assert.That(first.Output).Contains("beta-check-repo (the API's folder) is a work tree of its own on arm/");
         var sessions = await arm.CheckSessionsAsync();
-        // The leftover (killed by the check), the claude one, the continued fake one and the record; the killed fake one is deleted.
-        await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "completed", "completed", "killed"]);
-        await Assert.That(sessions.Count(s => s.Provider == "claude")).IsEqualTo(1);
+        // The leftover (killed by the check), the continued fake one and the record; the killed fake one and the claude one are deleted.
+        await Assert.That(sessions.Select(s => s.Status).Order()).IsEquivalentTo(["completed", "completed", "killed"]);
+        await Assert.That(sessions.Count(s => s.Provider == "claude")).IsEqualTo(0);
+        // Deleting the claude session removed its worktree: the shared copy names none but itself.
+        await Assert.That(arm.Worktrees()).IsEmpty();
         await Assert.That(await arm.EnvAsync()).IsEmpty();
 
         // A retried run for the same version starts nothing.
@@ -71,6 +74,9 @@ public class BetaCheckTests
     [Arguments("logged-out", "", "FAIL provider health: the claude provider (the model turn's) is unauthorized")]
     [Arguments("ok", "BETA_CHECK_VERSION=2026.1.1.1", "FAIL server info: ARM says it is version '2026.10.12.1' in 'beta', expected '2026.1.1.1' in 'beta'")]
     [Arguments("ok", "BETA_CHECK_TOKEN=not-a-token", "FAIL server info: GET /api/server-info answered 401")]
+    [Arguments("wrong-branch", "", "FAIL claude session: session {id}'s checkout of {repo}: beta-check-repo is on the branch 'beta-check-other', not the session's 'arm/{id8}'")]
+    [Arguments("no-checkout", "", "FAIL claude session: session {id}'s checkout of {repo}: its workplace has no folder 'beta-check-repo' (the command saw ['beta-check-repo-moved'])")]
+    [Arguments("nested", "", "beta-check-repo isn't a checkout of its own: it's inside the work tree ")]
     public async Task Check_WhenSomethingIsWrong_FailsSayingWhat_AndLeavesNothingRunning(string mode, string setting, string expected)
     {
         await using var arm = await LocalArm.StartAsync(mode);
@@ -78,10 +84,18 @@ public class BetaCheckTests
         var run = await arm.RunCheckAsync(setting.Replace("{user}", LocalArm.User, StringComparison.Ordinal).Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
         await Assert.That(run.ExitCode).IsEqualTo(1).Because(run.ToString());
-        await Assert.That(run.Output).Contains(expected);
+        var claude = ClaudeSessionId(run.Output);
+        await Assert.That(run.Output).Contains(expected
+            .Replace("{repo}", arm.Repo, StringComparison.Ordinal)
+            .Replace("{id8}", claude?[..Math.Min(8, claude.Length)] ?? "?", StringComparison.Ordinal)
+            .Replace("{id}", claude ?? "?", StringComparison.Ordinal));
         await Assert.That(run.Output).Contains("Beta check FAILED");
         await Assert.That(run.Output).DoesNotContain("Traceback");
-        await Assert.That((await arm.CheckSessionsAsync()).Where(s => s.Status is "queued" or "working")).IsEmpty();
+        var left = await arm.CheckSessionsAsync();
+        await Assert.That(left.Where(s => s.Status is "queued" or "working")).IsEmpty();
+        // A claude session (it has the repository) is deleted, its worktree with it.
+        await Assert.That(left.Where(s => s.Provider == "claude")).IsEmpty();
+        await Assert.That(arm.Worktrees()).IsEmpty();
         await Assert.That(await arm.EnvAsync()).IsEmpty();
     }
 
@@ -102,13 +116,15 @@ public class BetaCheckTests
     {
         await using var arm = await LocalArm.StartAsync("hang");
 
-        var run = await arm.RunCheckAsync("BETA_CHECK_TURN_SECONDS=3");
+        var run = await arm.RunCheckAsync("BETA_CHECK_TURN_SECONDS=3", "BETA_CHECK_CHECKOUT_SECONDS=2");
 
         await Assert.That(run.ExitCode).IsEqualTo(1).Because(run.ToString());
         await Assert.That(run.Output).Contains("FAIL claude session: session ");
-        await Assert.That(run.Output).Contains("is still working after 3s");
+        await Assert.That(run.Output).Contains("is still working after 5s");
         await Assert.That(run.Output).Contains("cleanup: killed session");
-        await Assert.That((await arm.CheckSessionsAsync()).Where(s => s.Provider == "claude").Select(s => s.Status)).IsEquivalentTo(["killed"]);
+        await Assert.That(run.Output).Contains("cleanup: deleted session");
+        await Assert.That((await arm.CheckSessionsAsync()).Where(s => s.Provider == "claude")).IsEmpty();
+        await Assert.That(arm.Worktrees()).IsEmpty();
     }
 
     [Test]
@@ -140,6 +156,7 @@ public class BetaCheckTests
         await Assert.That(step.Check).Contains($"BETA_CHECK_CLIENT_SECRET={Secret}\n");
         // The CA it read (here in the test's folder, not /tmp).
         await Assert.That(step.Check).Contains("BETA_CHECK_CA_FILE=/").And.Contains("/ca.crt\n");
+        await Assert.That(step.Check).Contains("BETA_CHECK_REPO_URL=git@github.com:OliverVea/Olve.AgentRuntimeManager.git\n");
         // The first line is how the check is started: its arguments.
         await Assert.That(step.Ssh + step.Check.Split('\n')[0] + step.Output).DoesNotContain("s3cr");
         await Assert.That(step.Output).Contains("Beta confirmed");
@@ -290,6 +307,12 @@ public class BetaCheckTests
 
         await Assert.That(process.ExitCode).IsEqualTo(0).Because(await output + await errors);
     }
+
+    /// <summary>The claude session's id, from the line that names it ("session &lt;id&gt; …" in its check's line).</summary>
+    private static string? ClaudeSessionId(string output) =>
+        System.Text.RegularExpressions.Regex.Match(output, @"(?:ok   |FAIL )claude session: session ([0-9a-f-]{36})") is { Success: true } match
+            ? match.Groups[1].Value
+            : null;
 
     /// <summary>A session as the check creates them (its caller, its tag).</summary>
     private static async Task<string> CreateCheckSessionAsync(LocalArm arm, string prompt)

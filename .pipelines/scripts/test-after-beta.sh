@@ -50,9 +50,12 @@ mise run api:remote
 # from the cluster's `authentik-ca` configMap through the host (vm-deploy.sh): read here the same
 # way, a public certificate (the only thing this step asks the host; nothing runs in the VM).
 # Bounded: `timeout` for the CA's read and for the whole run of the checks (about a minute when all
-# is well), and the checks' own waits. A bundle from before Claude Code was deployed has no claude
+# is well; the claude session's checkout adds a few seconds), and the checks' own waits. A bundle from before Claude Code was deployed has no claude
 # provider to check, and a commit from before these checks has none to run: each says so.
 BETA_HOST=oliver@bulwark-m2
+# The repository the one claude session is created with (its checkout is checked against what the
+# API says): one beta's agent user can clone. A step `environmentVariables` entry overrides it.
+BETA_CHECK_REPO_URL=${BETA_CHECK_REPO_URL:-git@github.com:OliverVea/Olve.AgentRuntimeManager.git}
 if ! ls /input/*/claude-version.txt >/dev/null 2>&1; then
   echo "This bundle ($VERSION) has no Claude Code (it predates the claude-code step): no beta checks"
 elif [ ! -f .pipelines/scripts/beta-check.py ]; then
@@ -79,7 +82,7 @@ else
   echo "Running the beta checks..."
   BETA_CHECK_API=$ARM_API_BASE_URL BETA_CHECK_VERSION=$VERSION \
   BETA_CHECK_AUTHORITY=https://auth-beta.ovea.pro/application/o/olve-arm/ BETA_CHECK_CLIENT_ID=olve-arm \
-  BETA_CHECK_CLIENT_SECRET=$ARM_BETA_OIDC_CLIENT_SECRET BETA_CHECK_CA_FILE=$CA_FILE \
+  BETA_CHECK_CLIENT_SECRET=$ARM_BETA_OIDC_CLIENT_SECRET BETA_CHECK_CA_FILE=$CA_FILE BETA_CHECK_REPO_URL=$BETA_CHECK_REPO_URL \
     timeout -k 30 240 "$PY" -u .pipelines/scripts/beta-check.py
 fi
 

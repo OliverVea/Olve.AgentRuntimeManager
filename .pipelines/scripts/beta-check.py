@@ -7,9 +7,10 @@ client-credentials token from beta's Authentik. Nothing runs in the VM. Every ch
 with one line saying what it proved, or fails the step, saying plainly what failed; the checks after
 a failed one are skipped (they build on it). Prod deploys only if every check passes.
 
-One model turn per deploy (Haiku): a `claude` session whose agent runs one small command with its
-Bash tool; the command's output, in the conversation, says who it ran as and which variables reached
-it. Everything else runs on the `fake` provider (no model; enabled on beta, never on prod): a
+One model turn per deploy (Haiku): a `claude` session, created with a repository, whose agent runs
+one small command with its Bash tool; the command's output, in the conversation, says who it ran as,
+which variables reached it, and what is checked out in its workplace, which must be what ARM's API
+says (the repository's folder and branch). Everything else runs on the `fake` provider (no model; enabled on beta, never on prod): a
 conversation and its activity, a message continuing an ended session, a kill, a delete, the event
 stream, and the record. Every wait is bounded.
 
@@ -27,13 +28,17 @@ Settings, from the environment:
   BETA_CHECK_AGENT_USER         the user agents must run as (default arm-agent)
   BETA_CHECK_NOT_AGENT_USERS    users an agent must never run as (default arm,root: ARM's own, root)
   BETA_CHECK_TURN_SECONDS       how long the model turn may take (default 60)
+  BETA_CHECK_CHECKOUT_SECONDS   how long its repository's checkout may add to that (default 60)
+  BETA_CHECK_REPO_URL           the repository the claude session is created with (default this
+                                repository over ssh, git@github.com:OliverVea/Olve.AgentRuntimeManager.git)
   BETA_CHECK_PROVIDER / _MODEL  default claude / haiku
 
 Idempotent per bundle: a passing run leaves a record in ARM's history (a completed `fake` session,
 "Beta checks passed for <version>"), and a run for a version with a record starts no sessions. A
-run first kills what an earlier, failed run left running. What it leaves on beta is ARM's history:
-the claude session, the continued fake session and the record (and, on a failure, what failed); the
-killed fake session is deleted.
+run first kills what an earlier, failed run left running, and deletes a session with a repository
+it left. What it leaves on beta is ARM's history: the continued fake session and the record (and, on
+a failure, the fake sessions that failed); the killed fake session and the claude session are deleted
+(deleting the claude session removes its worktree; its branch stays in the shared copy).
 
 Adding a check: write `check_<what>(ctx) -> str` (return what it proved; raise CheckFailed with
 what failed), add it to CHECKS with the model turns it costs (the budget is one: use the `fake`
@@ -68,11 +73,22 @@ RECORD_PROMPT = "Beta checks passed for {version}: the beta check's record. fake
 # The claude session's command. Its output, not the agent's words, decides: who it ran as, and
 # which variables reached it (ARM's own configuration must not: Auth__Authority is in ARM's
 # environment through /etc/olve-arm/env).
+#
+# Then, for each folder in its workplace (where ARM checks out the session's repos), the folder as
+# the shell sees it, the top of the git work tree it's in, and its current branch: the check
+# compares these with the folder and branch ARM's API says (it doesn't work them out itself). A
+# folder that's a checkout of its own is the top of its own work tree.
 TOOL_COMMAND = (
     'echo "user=$(id -un) nonce=${BETA_CHECK_NONCE:-} version=${BETA_CHECK_VERSION:-} '
-    'withheld=${Auth__Authority:-}"'
+    'withheld=${Auth__Authority:-}"; '
+    'for d in */; do d=${d%/}; echo "folder=$d path=$(cd "$d" && pwd -P) '
+    'toplevel=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) '
+    'branch=$(git -C "$d" branch --show-current 2>/dev/null)"; done'
 )
 TOOL_LINE = re.compile(r"user=(?P<user>\S*) nonce=(?P<nonce>\S*) version=(?P<version>\S*) withheld=(?P<withheld>.*)")
+FOLDER_LINE = re.compile(r"folder=(?P<folder>\S*) path=(?P<path>\S*) toplevel=(?P<toplevel>\S*) branch=(?P<branch>\S*)$")
+# The repository the claude session is created with: one the agent user can clone on beta.
+DEFAULT_REPO_URL = "git@github.com:OliverVea/Olve.AgentRuntimeManager.git"
 TOOL_PROMPT = (
     "This is ARM's deploy check. Run the command below with the Bash tool, exactly as written and "
     "only once, then reply with one short sentence saying what it printed.\n\n```sh\n{command}\n```"
@@ -146,8 +162,10 @@ class Settings:
         self.model = get("BETA_CHECK_MODEL", "haiku")
         try:
             self.turn_seconds = int(get("BETA_CHECK_TURN_SECONDS", "60"))
+            self.checkout_seconds = int(get("BETA_CHECK_CHECKOUT_SECONDS", "60"))
         except ValueError:
-            raise CheckFailed("BETA_CHECK_TURN_SECONDS must be whole seconds")
+            raise CheckFailed("BETA_CHECK_TURN_SECONDS and BETA_CHECK_CHECKOUT_SECONDS must be whole seconds")
+        self.repo_url = get("BETA_CHECK_REPO_URL", DEFAULT_REPO_URL)
         self.agent_user = get("BETA_CHECK_AGENT_USER", "arm-agent")
         # Set but empty: none (the local tests, where ARM, its agents and the check share a user).
         self.not_agent_users = [u for u in source.get("BETA_CHECK_NOT_AGENT_USERS", "arm,root").split(",") if u]
@@ -357,10 +375,11 @@ class Context:
     def tags(self):
         return {TAG: self.settings.version, RUN_TAG: self.nonce}
 
-    def create_session(self, prompt, provider, model, timeout_seconds):
+    def create_session(self, prompt, provider, model, timeout_seconds, repos=None):
         created = self.api.call("POST", "/api/sessions", {
             "prompt": prompt, "provider": provider, "model": model,
             "caller": CALLER, "timeoutSeconds": timeout_seconds, "env": self.tags(),
+            **({"repos": repos} if repos else {}),
         }, expect=(201, 202))
         self.created.append(created["id"])
         return created["id"]
@@ -447,6 +466,12 @@ def check_earlier_runs(ctx):
             ctx.api.call("POST", f"/api/sessions/{session['id']}/kill",
                          {"caller": CALLER, "reason": "Left running by an earlier beta check."}, expect=(200, 409))
             done.append(f"killed session {session['id']}")
+    # A session with a repository that an earlier run left (it couldn't delete it): its worktree goes with it.
+    page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "status": sorted(ENDED), "limit": 100})
+    for session in page["items"]:
+        if TAG in (session.get("env") or {}) and session.get("repos"):
+            ctx.api.call("DELETE", f"/api/sessions/{session['id']}", expect=(204, 404))
+            done.append(f"deleted session {session['id']} (and its worktree)")
     variables = {v["name"] for v in ctx.api.call("GET", "/api/env")}
     if NONCE_VARIABLE in variables:
         ctx.api.call("DELETE", f"/api/env/{NONCE_VARIABLE}", expect=(204, 404))
@@ -672,21 +697,61 @@ def check_kill_and_delete(ctx):
             f"(by the user, {CALLER}), a second kill 409, then deleted (204) and gone (404)")
 
 
+def api_repo(session, url):
+    """The session's one repository as ARM's API gives it: (folder, branch); CheckFailed if it doesn't."""
+    repos = session.get("repos") or []
+    if len(repos) != 1 or repos[0].get("url") != url:
+        raise CheckFailed(f"session {session.get('id')} lists the repos {short(repos)}, expected just {url}")
+    folder, branch = repos[0].get("folder"), repos[0].get("branch")
+    missing = [name for name, value in (("folder", folder), ("branch", branch)) if not isinstance(value, str) or not value.strip()]
+    if missing:
+        raise CheckFailed(f"session {session.get('id')}'s repo {url} has no {' or '.join(missing)} in ARM's answer: {short(repos[0])}")
+    return folder, branch
+
+
+def checkout_problems(conversation, folder, branch):
+    """What the claude session's command saw of the folder and branch ARM's API named, if not what it said."""
+    seen = {}
+    for _, result in tool_calls(conversation, "Bash"):
+        for line in ((result or {}).get("text") or "").splitlines():
+            if (match := FOLDER_LINE.search(line.strip())) is not None:
+                seen.setdefault(match["folder"], match.groupdict())
+    if folder not in seen:
+        return [f"its workplace has no folder {folder!r} (the command saw {sorted(seen) or 'none'})"]
+    line = seen[folder]
+    problems = []
+    if not line["toplevel"]:
+        problems.append(f"{folder} isn't a git work tree")
+    elif line["toplevel"] != line["path"]:
+        problems.append(f"{folder} isn't a checkout of its own: it's inside the work tree {line['toplevel']}")
+    if line["branch"] != branch:
+        problems.append(f"{folder} is on the branch {line['branch']!r}, not the session's {branch!r}")
+    return problems
+
+
 def check_claude_session(ctx):
-    """The one model turn: the agent runs a command; its output says who it ran as and what reached it."""
+    """
+    The one model turn: the agent runs a command in a session created with a repository; its output
+    says who it ran as, what reached it, and what is checked out where ARM's API says.
+    """
     settings = ctx.settings
     # Before the PUT: if its answer is lost, it may still have been registered.
     ctx.nonce_registered = True
     ctx.api.call("PUT", f"/api/env/{NONCE_VARIABLE}", {"value": ctx.nonce, "default": True})
     try:
-        ctx.claude_session = ctx.create_session(ctx.claude_prompt, settings.provider, settings.model, settings.turn_seconds + 60)
+        ctx.claude_session = ctx.create_session(ctx.claude_prompt, settings.provider, settings.model,
+                                                settings.turn_seconds + settings.checkout_seconds + 60,
+                                                repos=[{"url": settings.repo_url}])
     finally:
         ctx.api.call("DELETE", f"/api/env/{NONCE_VARIABLE}", expect=(204, 404))
         ctx.nonce_registered = False
     session_id = ctx.claude_session
-    session = ctx.wait_ended(session_id, settings.turn_seconds, provider=settings.provider)
+    folder, branch = api_repo(ctx.session(session_id), settings.repo_url)
+    session = ctx.wait_ended(session_id, settings.turn_seconds + settings.checkout_seconds, provider=settings.provider)
     if session["status"] != "completed":
         raise CheckFailed(f"session {session_id} ended {session['status']}: {session.get('error') or session.get('killReason') or ''}")
+    if api_repo(session, settings.repo_url) != (folder, branch):
+        raise CheckFailed(f"session {session_id}'s repo changed from {(folder, branch)} to {api_repo(session, settings.repo_url)}")
     conversation = ctx.conversation_of(session_id)
     seen = tool_output(conversation)
     if seen["user"] in settings.not_agent_users:
@@ -699,11 +764,18 @@ def check_claude_session(ctx):
         raise CheckFailed(f"the session's own variable {TAG} didn't reach the agent (it saw {seen['version']!r})")
     if seen["withheld"].strip():
         raise CheckFailed("ARM's own configuration (Auth__Authority) reached the agent's environment")
+    problems = checkout_problems(conversation, folder, branch)
+    if problems:
+        raise CheckFailed(f"session {session_id}'s checkout of {settings.repo_url}: " + "; ".join(problems))
     entries = conversation.get("entries") or []
     if not entries or entries[-1].get("kind") != "turn_end" or entries[-1].get("isError"):
         raise CheckFailed(f"session {session_id}'s conversation doesn't end with a turn that succeeded")
+    # Its worktree goes with it (the shared copy and the branch in it stay).
+    ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204,))
+    ctx.api.call("GET", f"/api/sessions/{session_id}", expect=(404,))
     return (f"session {session_id} ({settings.provider}/{settings.model}) completed one turn: its Bash call ran as "
-            f"{seen['user']}, the registered default and the session's own variables reached it, ARM's config didn't")
+            f"{seen['user']}, the registered default and the session's own variables reached it, ARM's config didn't; "
+            f"{folder} (the API's folder) is a work tree of its own on {branch} (the API's branch); the session is deleted")
 
 
 def check_events(ctx):
@@ -781,8 +853,9 @@ CHECKS = [
 def cleanup(ctx):
     """
     Whatever happened: no default variable left registered, none of this run's sessions running
-    (those it knows, and any its tag finds). Each step on its own: one failing (or the run's time
-    running out in the middle) doesn't skip the others.
+    (those it knows, and any its tag finds), and none with a repository left (deleting it removes
+    its worktree). Each step on its own: one failing (or the run's time running out in the middle)
+    doesn't skip the others.
     """
     global HTTP_TIMEOUT
     HTTP_TIMEOUT = 3
@@ -800,9 +873,12 @@ def cleanup(ctx):
             ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
                          {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
             say(f"cleanup: killed session {session_id}", stop=False)
+        if status == 200 and session.get("repos"):
+            ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204, 404))
+            say(f"cleanup: deleted session {session_id} (and its worktree)", stop=False)
 
     def find_ours():
-        page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "status": ["queued", "working"], "limit": 100})
+        page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "limit": 100})
         for session in page["items"]:
             if (session.get("env") or {}).get(RUN_TAG) == ctx.nonce and session["id"] not in ctx.created:
                 ctx.created.append(session["id"])

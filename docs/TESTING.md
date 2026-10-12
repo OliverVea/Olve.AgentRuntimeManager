@@ -93,10 +93,19 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   client-credentials token of the beta `olve-arm` machine client from beta's Authentik (secret
   `ARM_BETA_OIDC_CLIENT_SECRET`, in the job's environment only; the Authentik CA for that HTTPS is
   read the way the VM gets it, from the cluster's `authentik-ca` configMap through the host).
-  **One Haiku turn per bundle:** a `claude` session whose agent runs one small command with its
-  Bash tool; the command's own output in the conversation (never the model's wording) proves
+  **One Haiku turn per bundle:** a `claude` session, created with a repository (the step's
+  `BETA_CHECK_REPO_URL`, default this repository over ssh), whose agent runs one small command with
+  its Bash tool; the command's own output in the conversation (never the model's wording) proves
   Claude Code started and is logged in, the command ran as the agent user (not `arm`, not root), a
-  registered default variable and the session's own reached it, and ARM's config didn't.
+  registered default variable and the session's own reached it, and ARM's config didn't. The same
+  command lists each folder in the session's workplace with the top of its git work tree and its
+  current branch; the API's answer must list the repository with a `folder` and a `branch` (none is
+  a failure), and the check compares the command's output with them: that folder exists, is a work
+  tree of its own (not a plain folder, not inside another), and is on the API's branch. The check
+  never works the names out itself. Then the session is deleted (204, then 404), which removes its
+  worktree; what is left of it on disk isn't visible through the API, so that part is proved per
+  push only (locally, the shared copy lists no worktree afterwards). A run that fails deletes it
+  too, and a later run deletes any an earlier one left.
   **Everything else on the `fake` provider** (enabled on beta, never on prod; no model): `/health`,
   server info (the bundle's version), auth (401 without a valid token), provider health (claude and
   fake available), a scripted conversation and its activity checked against each other, a message
@@ -105,7 +114,8 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   in all, every wait bounded (the whole run by the step's `timeout`, 4 minutes). Idempotent per
   bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed for
   <version>"), and a retried run for it starts no sessions; a run first kills what a failed one
-  left running. Left on beta: the claude session, the continued fake session and the record.
+  left running. Left on beta: the continued fake session and the record (the claude session is
+  deleted: ARM keeps its folder and transcript on disk, and its branch in the shared copy).
   **Not checked per deploy:** that nothing of a killed *real* agent runs on (the fake kill proves
   ARM's kill path, not the end of an agent's processes; from outside it would take a second real
   turn), and Claude Code's lockdown (built-in tools only; no MCP servers, plugins or skills), which
@@ -115,9 +125,10 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   (deploy-beta doesn't wait for this step), the record step sees the version change, before or
   after it writes the record (which it then deletes), and fails. The checks themselves are tested per push
   (`BetaCheckTests`, API tests): against this build started locally with a stub Claude Code
-  (`BetaCheck/claude-stub.py`) that runs the command for real and can misbehave (a variable
-  missing, ARM's config leaking, no tool call, a hang, logged out, the wrong version, no fake
-  provider), each failure saying what failed and leaving nothing running; test-after-beta's part
+  (`BetaCheck/claude-stub.py`) and a local repository; the stub runs the command for real and can
+  misbehave (a variable missing, ARM's config leaking, no tool call, a hang, logged out, the wrong
+  version, no fake provider, the checkout on another branch, missing, or a plain folder inside
+  another work tree), each failure saying what failed and leaving nothing running; test-after-beta's part
   that runs them (the secret in the environment only, each missing prerequisite failing the step
   by name); the check's own logic on what a working ARM never answers (`BetaCheck/beta_check_test.py`).
   New features add their check to `CHECKS` in `beta-check.py` on the `fake` provider where it can

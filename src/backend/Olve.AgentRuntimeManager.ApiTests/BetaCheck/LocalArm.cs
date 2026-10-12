@@ -56,6 +56,9 @@ public sealed class LocalArm : IAsyncDisposable
 
     public string Sessions => Path.Combine(_root, "sessions");
 
+    /// <summary>The repository the check's claude session is created with: a local one (the URL is its path).</summary>
+    public string Repo => Path.Combine(_root, "origin", "beta-check-repo");
+
     /// <summary>A client with a valid token.</summary>
     public HttpClient Client()
     {
@@ -71,6 +74,7 @@ public sealed class LocalArm : IAsyncDisposable
     public static async Task<LocalArm> StartAsync(string mode = "ok", params string[] settings)
     {
         var root = Directory.CreateTempSubdirectory("arm-beta-check-").FullName;
+        TestGit.Origin(Path.Combine(root, "origin", "beta-check-repo"));
         var stub = Path.Combine(root, "claude");
         File.Copy(Path.Combine(Here, "claude-stub.py"), stub);
         File.SetUnixFileMode(stub, File.GetUnixFileMode(stub) | UnixFileMode.UserExecute);
@@ -95,6 +99,7 @@ public sealed class LocalArm : IAsyncDisposable
         info.Environment["ConnectionStrings__Arm"] = ApiFactory.ConnectionString(root);
         info.Environment["Providers__Claude__Command"] = stub;
         info.Environment["Supervisor__SocketRoot"] = Path.Combine(root, "sockets");
+        info.Environment["Repos__Root"] = Path.Combine(root, "repos");
         info.Environment["Arm__Version"] = Version;
         info.Environment["Arm__Environment"] = "beta";
         info.Environment["OpenTelemetry__Endpoint"] = "";
@@ -144,6 +149,9 @@ public sealed class LocalArm : IAsyncDisposable
         info.Environment["BETA_CHECK_AGENT_USER"] = User;
         info.Environment["BETA_CHECK_NOT_AGENT_USERS"] = "";
         info.Environment["BETA_CHECK_TURN_SECONDS"] = "20";
+        info.Environment["BETA_CHECK_CHECKOUT_SECONDS"] = "20";
+        // A local repository for the claude session's checkout, as beta's clones this one.
+        info.Environment["BETA_CHECK_REPO_URL"] = Repo;
         foreach (var setting in settings)
         {
             var (name, value) = (setting.Split('=', 2)[0], setting.Split('=', 2)[1]);
@@ -176,6 +184,16 @@ public sealed class LocalArm : IAsyncDisposable
         using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return [.. page.RootElement.GetProperty("items").EnumerateArray()
             .Select(s => (s.GetProperty("id").GetString()!, s.GetProperty("status").GetString()!, s.GetProperty("provider").GetString()!))];
+    }
+
+    /// <summary>The worktrees of the shared copies of the repositories, but for the copies themselves (listed first): none once their sessions are deleted.</summary>
+    public IReadOnlyList<string> Worktrees()
+    {
+        var repos = Path.Combine(_root, "repos");
+        return Directory.Exists(repos)
+            ? [.. Directory.GetDirectories(repos, "*.git").SelectMany(shared => TestGit.Run(shared, "worktree", "list", "--porcelain")
+                .Split('\n').Where(line => line.StartsWith("worktree ", StringComparison.Ordinal)).Skip(1))]
+            : [];
     }
 
     /// <summary>The registered environment variables, by name.</summary>

@@ -257,7 +257,8 @@ The repo deploys via [**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipe
   checks from the step's own job, against live beta from outside, over HTTP through the host relay
   like any client; nothing runs in the VM: the API test suite, then ARM's beta checks,
   `.pipelines/scripts/beta-check.py`, sessions through ARM's API with a client-credentials token
-  from beta's Authentik, one Haiku turn and the rest on the `fake` provider; see
+  from beta's Authentik, one Haiku turn (which also proves a repository's checkout is where and on
+  the branch the API says) and the rest on the `fake` provider; see
   [`docs/TESTING.md`](docs/TESTING.md)) → `deploy` (prod).
 - **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN_BETA`,
   `CLAUDE_CODE_OAUTH_TOKEN_PROD`, `ARM_BETA_OIDC_CLIENT_SECRET`); values live in the pipeline's k8s secret. The Claude Code

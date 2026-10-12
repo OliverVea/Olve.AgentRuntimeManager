@@ -6,6 +6,9 @@ import http.server
 import importlib.util
 import json
 import os
+import re
+import shutil
+import subprocess
 import socket
 import tempfile
 import threading
@@ -143,6 +146,73 @@ class EventTests(unittest.TestCase):
         self.assertIn("no session.started where expected", "; ".join(check.event_problems(swapped, self.EXPECTED)))
         self.assertIn("an event without at", "; ".join(check.event_problems(bare, self.EXPECTED)))
         self.assertIn("no session.killed", "; ".join(check.event_problems(other, self.EXPECTED)))
+
+
+class RepoTests(unittest.TestCase):
+    URL = "git@github.com:OliverVea/Olve.AgentRuntimeManager.git"
+
+    def session(self, **repo):
+        return {"id": "s", "repos": [{"url": self.URL, "folder": "Olve.AgentRuntimeManager", "branch": "arm/1a2b3c4d", **repo}]}
+
+    def test_the_api_s_folder_and_branch(self):
+        self.assertEqual(check.api_repo(self.session(), self.URL), ("Olve.AgentRuntimeManager", "arm/1a2b3c4d"))
+
+    def test_an_answer_without_a_folder_or_branch_fails(self):
+        cases = {
+            "has no folder": self.session(folder=None),
+            "has no branch": self.session(branch=" "),
+            "has no folder or branch": {"id": "s", "repos": [{"url": self.URL}]},
+            "lists the repos [], expected just": {"id": "s"},
+            "lists the repos": self.session(url="git@github.com:o/other.git"),
+        }
+        for expected, session in cases.items():
+            with self.subTest(expected), self.assertRaisesRegex(check.CheckFailed, re.escape(expected)):
+                check.api_repo(session, self.URL)
+
+    @staticmethod
+    def conversation(*lines):
+        text = "user=arm-agent nonce=n version=v withheld=\n" + "\n".join(lines)
+        return {"entries": [{"seq": 1, "kind": "tool_call", "tool": "Bash", "toolId": "t", "input": {}},
+                            {"seq": 2, "kind": "tool_result", "toolId": "t", "text": text}]}
+
+    def problems(self, *lines):
+        return "; ".join(check.checkout_problems(self.conversation(*lines), "Olve.AgentRuntimeManager", "arm/1a2b3c4d"))
+
+    def test_a_checkout_as_the_api_says_has_none(self):
+        self.assertEqual(self.problems("folder=other path=/w/other toplevel= branch=",
+                                       "folder=Olve.AgentRuntimeManager path=/w/Olve.AgentRuntimeManager "
+                                       "toplevel=/w/Olve.AgentRuntimeManager branch=arm/1a2b3c4d"), "")
+
+    def test_each_way_it_differs_is_said(self):
+        good = "folder=Olve.AgentRuntimeManager path=/w/Olve.AgentRuntimeManager toplevel=/w/Olve.AgentRuntimeManager branch="
+        cases = {
+            "its workplace has no folder 'Olve.AgentRuntimeManager' (the command saw ['x'])": ["folder=x path=/w/x toplevel=/w/x branch=arm/1a2b3c4d"],
+            "its workplace has no folder 'Olve.AgentRuntimeManager' (the command saw none)": [],
+            "isn't a git work tree": [good.replace("toplevel=/w/Olve.AgentRuntimeManager", "toplevel=") + "arm/1a2b3c4d"],
+            "isn't a checkout of its own: it's inside the work tree /w": [good.replace("toplevel=/w/Olve.AgentRuntimeManager", "toplevel=/w") + "arm/1a2b3c4d"],
+            "is on the branch 'main', not the session's 'arm/1a2b3c4d'": [good + "main"],
+            "is on the branch '', not": [good],
+        }
+        for expected, lines in cases.items():
+            with self.subTest(expected):
+                self.assertIn(expected, self.problems(*lines))
+
+    def test_the_command_reports_a_real_worktree_and_a_plain_folder(self):
+        if shutil.which("git") is None:
+            self.skipTest("no git")
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@arm.invalid", "-c", "commit.gpgsign=false"]
+        with tempfile.TemporaryDirectory() as root:
+            origin, workplace = os.path.join(root, "origin"), os.path.join(root, "workplace")
+            subprocess.run([*git, "init", "-q", "-b", "main", origin], check=True)
+            subprocess.run([*git, "-C", origin, "commit", "-q", "--allow-empty", "-m", "one"], check=True)
+            os.mkdir(workplace)
+            subprocess.run([*git, "-C", origin, "worktree", "add", "-q", "-b", "arm/1a2b3c4d", os.path.join(workplace, "repo")], check=True)
+            os.mkdir(os.path.join(workplace, "plain"))
+            ran = subprocess.run(["sh", "-c", check.TOOL_COMMAND], cwd=workplace, capture_output=True, text=True, timeout=30)
+            conversation = self.conversation(*ran.stdout.splitlines()[1:])
+            self.assertEqual(check.checkout_problems(conversation, "repo", "arm/1a2b3c4d"), [], ran.stdout)
+            self.assertIn("isn't a git work tree", "; ".join(check.checkout_problems(conversation, "plain", "arm/1a2b3c4d")))
+            self.assertIn("not the session's 'arm/other'", "; ".join(check.checkout_problems(conversation, "repo", "arm/other")))
 
 
 class RecordTests(unittest.TestCase):

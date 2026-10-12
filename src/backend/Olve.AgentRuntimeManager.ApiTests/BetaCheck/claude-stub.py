@@ -9,6 +9,9 @@ How it misbehaves is chosen by a `stub-mode` file next to it (one word, default 
   leak-env    runs it with Auth__Authority set (ARM's own config reaching the agent)
   no-tool     answers without calling a tool
   hang        takes up the first message and never answers
+  wrong-branch  switches each checkout in its workplace to another branch first
+  no-checkout   moves each checkout in its workplace aside first (the folder ARM named is missing)
+  nested      makes its workplace a git repository and each checkout's folder a plain one in it
   logged-out  `claude auth status` says it isn't logged in
 """
 
@@ -44,6 +47,21 @@ def assistant(session, *blocks):
           "parent_tool_use_id": None, "session_id": session, "timestamp": now()})
 
 
+def tamper():
+    """What the misbehaving modes do to the checkouts in the workplace (the current folder) first."""
+    folders = [d for d in os.listdir(".") if os.path.isdir(d) and not d.startswith(".")]
+    git = ["git", "-c", "user.name=stub", "-c", "user.email=stub@arm.invalid"]
+    for folder in folders:
+        if MODE == "wrong-branch":
+            subprocess.run([*git, "-C", folder, "checkout", "-q", "-b", "beta-check-other"], check=True)
+        elif MODE in ("no-checkout", "nested"):
+            os.rename(folder, folder + "-moved")
+            if MODE == "nested":
+                os.mkdir(folder)
+    if MODE == "nested":
+        subprocess.run([*git, "init", "-q", "."], check=True)
+
+
 def main(args):
     if args[:2] == ["auth", "status"]:
         logged_in = MODE != "logged-out"
@@ -68,6 +86,7 @@ def main(args):
             tool_id = "toolu_" + uuid.uuid4().hex
             assistant(session, {"type": "tool_use", "id": tool_id, "name": "Bash",
                                 "input": {"command": command, "description": "Run the check's command"}})
+            tamper()
             env = dict(os.environ)
             if MODE == "no-env":
                 env.pop("BETA_CHECK_NONCE", None)
