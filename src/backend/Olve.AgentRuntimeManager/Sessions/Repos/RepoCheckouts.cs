@@ -14,6 +14,8 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
 {
     public TimeSpan GitTimeout => options.Value.GitTimeout;
 
+    public TimeSpan? CheckoutTimeout => options.Value.CheckoutTimeout;
+
     /// <summary>What the supervisor checks out for the session in <paramref name="workplace"/>.</summary>
     public IReadOnlyList<SupervisorRepo> Plan(Guid sessionId, string workplace, IReadOnlyList<RepoRecord>? repos) =>
         [.. (repos ?? []).Select(repo => new SupervisorRepo
@@ -26,32 +28,32 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
             Owner = sessionId.ToString(),
         })];
 
-    /// <summary>Where the agent starts: in the repository when there's exactly one (so it reads its <c>CLAUDE.md</c>), else the workplace.</summary>
-    public static string AgentDirectory(string workplace, IReadOnlyList<RepoRecord>? repos) =>
-        repos is [var only] ? Worktree(workplace, only) : workplace;
-
     /// <summary>
     /// Removes a deleted session's worktrees from the shared copies (their branches stay there).
     /// Best effort: what can't be removed is logged, and the session is deleted anyway.
     /// </summary>
     /// <remarks>All at once, each bounded (<see cref="Supervisors.RemoveTimeout"/>): a delete waits for this.</remarks>
-    public void Remove(Guid sessionId, string workplace, IReadOnlyList<RepoRecord> repos)
+    /// <returns>The repositories whose worktrees couldn't be removed (to be tried again).</returns>
+    public IReadOnlyList<RepoRecord> Remove(Guid sessionId, string workplace, IReadOnlyList<RepoRecord> repos)
     {
-        var removals = Plan(sessionId, workplace, repos)
-            .Select(repo => Task.Run(() => (Repo: repo, Error: supervisors.RemoveWorktree(repo.Shared, repo.Path))))
-            .ToArray();
+        var plan = Plan(sessionId, workplace, repos);
+        var removals = plan.Select(repo => Task.Run(() => supervisors.RemoveWorktree(repo.Shared, repo.Path))).ToArray();
         Task.WaitAll(removals);
-        foreach (var (repo, error) in removals.Select(r => r.Result))
+        var left = new List<RepoRecord>();
+        for (var i = 0; i < plan.Count; i++)
         {
-            if (error is not null)
+            if (removals[i].Result is { } error)
             {
-                logger.LogWarning("Session {SessionId}: could not remove its worktree {Worktree} of {Url}: {Error}", sessionId, repo.Path, repo.Url, error);
+                logger.LogWarning("Session {SessionId}: could not remove its worktree {Worktree} of {Url}: {Error}", sessionId, plan[i].Path, plan[i].Url, error);
+                left.Add(repos[i]);
             }
             else
             {
-                logger.LogInformation("Session {SessionId}: removed its worktree {Worktree} of {Url}", sessionId, repo.Path, repo.Url);
+                logger.LogInformation("Session {SessionId}: removed its worktree {Worktree} of {Url}", sessionId, plan[i].Path, plan[i].Url);
             }
         }
+
+        return left;
     }
 
     private static string Worktree(string workplace, RepoRecord repo) =>

@@ -11,7 +11,7 @@ using Olve.AgentRuntimeManager.Persistence;
 namespace Olve.AgentRuntimeManager.Persistence.Migrations
 {
     [DbContext(typeof(ArmDbContext))]
-    [Migration("20261012040627_SessionRepos")]
+    [Migration("20261012060254_SessionRepos")]
     partial class SessionRepos
     {
         /// <inheritdoc />
@@ -19,6 +19,33 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
+
+            modelBuilder.Entity("Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRecord", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Repos")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("NextAttemptAt");
+
+                    b.ToTable("WorktreeRemovals", (string)null);
+                });
 
             modelBuilder.Entity("Olve.AgentRuntimeManager.Sessions.SessionRecord", b =>
                 {
@@ -88,6 +115,12 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("RunId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RunMessages")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RunResume")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("StartedAt")

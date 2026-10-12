@@ -41,10 +41,9 @@ public interface IAgentProvider
 
     /// <summary>
     /// A session that named <paramref name="repos"/> was deleted (M5e): remove its worktrees from the
-    /// shared copies (their branches stay). Best effort, and never for a session still running. The
-    /// default has no workplace, so nothing to remove.
+    /// shared copies (their branches stay), each bounded; never for a session still running. The
+    /// repositories whose worktrees are still there (to be tried again later). The default has no
+    /// workplace, so nothing to remove.
     /// </summary>
-    void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos)
-    {
-    }
+    IReadOnlyList<RepoRecord> RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos) => [];
 }

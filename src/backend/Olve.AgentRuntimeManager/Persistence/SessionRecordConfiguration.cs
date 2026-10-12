@@ -19,6 +19,7 @@ public sealed class SessionRecordConfiguration : IEntityTypeConfiguration<Sessio
         // Environment variables, held messages and repositories as JSON text: read and written whole, never queried.
         session.Property(s => s.Env).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());
         session.Property(s => s.UseEnv).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>());
+        session.Property(s => s.RunMessages).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>());
         session.Property(s => s.Messages).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>());
         session.Property(s => s.Repos).HasConversion(JsonColumn.Converter<IReadOnlyList<RepoRecord>>(), JsonColumn.Comparer<IReadOnlyList<RepoRecord>>());
         session.Property(s => s.AgentEnv).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());

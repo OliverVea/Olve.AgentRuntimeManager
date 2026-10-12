@@ -20,4 +20,10 @@ public sealed class RepoOptions
     /// bounded by <c>SupervisorLaunch.CheckoutLimit</c> (eight of these per repository, and a minute).
     /// </summary>
     public TimeSpan GitTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The longest a session's whole checkout may take; then it's stopped and the session fails.
+    /// Unset: eight <see cref="GitTimeout"/>s per repository, and a minute.
+    /// </summary>
+    public TimeSpan? CheckoutTimeout { get; set; }
 }

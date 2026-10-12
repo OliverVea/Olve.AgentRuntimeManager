@@ -30,6 +30,7 @@ public static class SessionServices
         services.AddSingleton<IAgentProvider, ClaudeProvider>();
         services.AddSingleton<SessionManager>();
         services.AddSingleton<IAsyncOnStartup, ProviderCheck>();
+        services.AddHostedService<WorktreeRemovalRetries>();
         services.AddSingleton<IdempotencyStore<SessionsCreateResponse>>();
 
         services.AddSingleton<ISessionsCreateHandler, CreateSessionHandler>();
