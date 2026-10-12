@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.UnitTests.Support;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Persistence;
 
@@ -60,11 +62,45 @@ public sealed class StoredRepoNamesTests : IDisposable
 
         await using (var db = _database.Context())
         {
-            await Assert.That(await StoredRepoNames.FillAsync(db)).IsEqualTo(1);
+            await Assert.That(await StoredRepoNames.FillAsync(db, NullLogger.Instance)).IsEqualTo(1);
         }
 
         await Assert.That(_database.Removals().Due(DateTimeOffset.UnixEpoch.AddDays(1)).Single().Repos.Select(r => (r.Folder, r.Branch)))
             .IsEquivalentTo([("Olve.Trains", "arm/0b7d3e52"), ("Olve.Utilities", "arm/0b7d3e52")]);
+    }
+
+    [Test]
+    public async Task ARowThatCantBeNamed_IsLoggedAndLeftAsItIs_TheOthersAreFilled_AndItStillReads()
+    {
+        var bad = Guid.NewGuid();
+        var good = Guid.NewGuid();
+        _database.Store().Add(Session(bad));
+        _database.Store().Add(Session(good));
+        await using (var db = _database.Context())
+        {
+            // A URL that gives no folder (creation refuses it: a corrupt row).
+            const string corrupt = """[{"Url":"https://host/.git","Ref":null},{"Url":"https://x/fine","Ref":null}]""";
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE Sessions SET Repos = {corrupt} WHERE Id = {bad}");
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE Sessions SET Repos = {OldFormat} WHERE Id = {good}");
+        }
+
+        var logger = new ListLogger<StoredRepoNamesTests>();
+        int filled;
+        await using (var db = _database.Context())
+        {
+            filled = await StoredRepoNames.FillAsync(db, logger);
+        }
+
+        await Assert.That(filled).IsEqualTo(1);
+        await Assert.That(logger.Messages.Single()).Contains($"Session {bad}: its repos can't be given a folder and branch");
+        await Assert.That(await ReposJson(bad)).DoesNotContain("Folder");
+        await Assert.That(_database.Store().Get(good)!.Repos!.Select(r => r.Folder)).IsEquivalentTo(["Olve.Trains", "Olve.Utilities"]);
+        // It still reads: its unnamed repos are left out of the response, never returned without a folder.
+        await Assert.That(_database.Store().Get(bad)!.ToDto(2).Repos).IsEmpty();
+
+        // And the server starts over it.
+        await using var services = Services();
+        await services.MigrateDatabaseAsync();
     }
 
     [Test]
@@ -78,7 +114,7 @@ public sealed class StoredRepoNamesTests : IDisposable
 
         await using (var db = _database.Context())
         {
-            await Assert.That(await StoredRepoNames.FillAsync(db)).IsEqualTo(0);
+            await Assert.That(await StoredRepoNames.FillAsync(db, NullLogger.Instance)).IsEqualTo(0);
         }
 
         await Assert.That(_database.Store().Get(id)!.Repos).IsEquivalentTo([stored]);

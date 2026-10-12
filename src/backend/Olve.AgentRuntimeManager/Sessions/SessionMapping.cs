@@ -18,8 +18,10 @@ public static class SessionMapping
         TimeoutSeconds = session.TimeoutSeconds,
         Env = session.Env,
         UseEnv = session.UseEnv,
-        // As stored: the folder and branch it was created with, which the checkout uses.
-        Repos = session.Repos?.Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref, Folder = r.Folder, Branch = r.Branch }).ToList(),
+        // As stored: the folder and branch it was created with, which the checkout uses. A repo of
+        // a corrupt row that couldn't be named (StoredRepoNames) has neither and is left out.
+        Repos = session.Repos?.Where(r => r.Folder is not null && r.Branch is not null)
+            .Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref, Folder = r.Folder, Branch = r.Branch }).ToList(),
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

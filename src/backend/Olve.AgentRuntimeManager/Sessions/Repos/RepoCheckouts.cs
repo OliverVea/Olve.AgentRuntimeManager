@@ -16,7 +16,11 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
 
     public TimeSpan? CheckoutTimeout => options.Value.CheckoutTimeout;
 
-    /// <summary>What the supervisor checks out for the session in <paramref name="workplace"/>.</summary>
+    /// <summary>What the supervisor checks out (or removes) for the session in <paramref name="workplace"/>.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// A stored folder isn't one plain folder name in the workplace, or a branch is missing (a corrupt
+    /// row): nothing is checked out or removed (a start fails the session with this message).
+    /// </exception>
     public IReadOnlyList<SupervisorRepo> Plan(Guid sessionId, string workplace, IReadOnlyList<RepoRecord>? repos) =>
         [.. (repos ?? []).Select(repo => new SupervisorRepo
         {
@@ -24,8 +28,10 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
             Ref = repo.Ref,
             Shared = Path.Combine(Root(), RepoNames.Shared(repo.Url)),
             // The folder and branch the session was created with (and returns).
-            Path = Path.Combine(workplace, repo.Folder),
-            Branch = repo.Branch,
+            Path = Worktree(workplace, repo),
+            Branch = string.IsNullOrWhiteSpace(repo.Branch)
+                ? throw new InvalidOperationException($"Checking out {repo.Url} failed: it has no branch stored.")
+                : repo.Branch,
             Owner = sessionId.ToString(),
         })];
 
@@ -55,6 +61,19 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
         }
 
         return left;
+    }
+
+    /// <summary>The repo's worktree: its stored folder, which must be one plain folder name directly in the workplace.</summary>
+    private static string Worktree(string workplace, RepoRecord repo)
+    {
+        var folder = repo.Folder;
+        var plain = !string.IsNullOrWhiteSpace(folder) && folder is not ("." or "..")
+            && folder.IndexOfAny(['/', '\\']) < 0 && !folder.Any(char.IsControl) && !Path.IsPathRooted(folder);
+        var inside = plain && Path.GetDirectoryName(Path.GetFullPath(Path.Combine(workplace, folder!)))
+            == Path.GetFullPath(workplace).TrimEnd(Path.DirectorySeparatorChar);
+        return inside
+            ? Path.Combine(workplace, folder!)
+            : throw new InvalidOperationException($"Checking out {repo.Url} failed: its stored folder '{folder}' isn't a folder name in the session's workplace.");
     }
 
     private string Root() =>

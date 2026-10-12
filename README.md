@@ -165,7 +165,10 @@ A session returns its `repos` as given, each with the `folder` and `branch` ARM 
 once by `RepoNames.Record` when the session is created, stored with it, and used as stored by the
 checkout and the API (present from creation, also while it's queued). Sessions stored before
 these were kept (and deleted sessions' worktrees still to be removed) are named once at startup,
-when the database is brought up to date (`StoredRepoNames`). Clients show them and never work them out: `arm session get` (one line per repo),
+when the database is brought up to date (`StoredRepoNames`); a corrupt row that can't be named
+is logged and left as it is (the server still starts; the API leaves its unnamed repos out, and
+its checkout is refused). The checkout only uses a stored folder that is one plain folder name in
+the session's workplace, and refuses any other (the session fails; a removal touches nothing). Clients show them and never work them out: `arm session get` (one line per repo),
 and the web UI's session page (Details, a `repos` row). The web UI's composer has a `repos` button
 next to `env`, opening a panel of rows (a clone URL and an optional ref each), checked as the
 server checks them before anything is sent.
