@@ -59,6 +59,17 @@ public class RepoTests(ApiTarget target)
         await Assert.That((await response.ErrorAsync()).Code).IsEqualTo("INVALID_REQUEST");
     }
 
+    [Test]
+    [Arguments("--upload-pack=touch /tmp/arm-pwned", null)]
+    [Arguments("git@github.com:a/tools.git", "--orphan")]
+    public async Task Session_WithAUrlOrRefLikeAGitOption_Is400(string url, string? gitRef)
+    {
+        using var response = await Create([new RepoBody(url, gitRef)]);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await Assert.That((await response.ErrorAsync()).Code).IsEqualTo("INVALID_REQUEST");
+    }
+
     private async Task<HttpResponseMessage> Create(IReadOnlyList<RepoBody> repos) =>
         await target.CreateAuthenticatedClient().PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("fake:sleep=0ms") { Repos = repos }));
 }

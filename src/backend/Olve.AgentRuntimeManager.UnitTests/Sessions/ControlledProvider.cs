@@ -56,7 +56,14 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
     /// <summary>The sessions whose worktrees <see cref="RemoveRepos"/> was asked to remove, with their repositories.</summary>
     public List<(Guid SessionId, IReadOnlyList<RepoRecord> Repos)> RemovedRepos { get; } = [];
 
-    public void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos) => RemovedRepos.Add((sessionId, repos));
+    /// <summary>What a test does while the worktrees are being removed.</summary>
+    public Action<Guid>? Removing { get; set; }
+
+    public void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos)
+    {
+        Removing?.Invoke(sessionId);
+        RemovedRepos.Add((sessionId, repos));
+    }
 
     public ControlledRun RunOf(Guid sessionId) => Runs.Single(r => r.Launch.SessionId == sessionId);
 

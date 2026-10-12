@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
@@ -14,9 +15,13 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 /// (Stub/claude-stub.sh, which writes <c>invocation.txt</c> where it was started) runs. The
 /// origins are local repositories, named by their paths: no network.
 /// </summary>
+[UnsupportedOSPlatform("windows")]
 public class ClaudeRepoTests
 {
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(30);
+
+    /// <summary>How soon a kill must have stopped a checkout: well inside the git timeout (20 s here), so a git that ran into it doesn't pass.</summary>
+    private static readonly TimeSpan Promptly = TimeSpan.FromSeconds(10);
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-repos-").FullName;
 
@@ -154,15 +159,410 @@ public class ClaudeRepoTests
     {
         TestGit.Require();
         // ssh that never answers: git runs GIT_SSH_COMMAND through the shell, so this sleeps.
+        var sleeper = $"sleep 60.{Random.Shared.Next(100_000, 999_999)}";
         var launch = Launch(new RepoRecord("ssh://arm.invalid/hangs.git")) with
         {
-            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = "sleep 60;:" },
+            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{sleeper};:" },
         };
+
+        try
+        {
+            var outcome = await Provider(gitTimeout: TimeSpan.FromSeconds(1)).Start(launch).Completion.WaitAsync(Guard);
+
+            await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed("Checking out ssh://arm.invalid/hangs.git failed: git fetch took more than 1 s."));
+            await Assert.That(AgentStarted(launch)).IsFalse();
+            // git's child (the "ssh") was ended with it, not left behind.
+            await Assert.That(TestProcesses.WithCommandLine(sleeper)).IsEmpty();
+        }
+        finally
+        {
+            TestProcesses.KillWithCommandLine(sleeper);
+        }
+    }
+
+    [Test]
+    public async Task GitLeavingAProcessOnItsPipes_DoesntHoldTheCheckout()
+    {
+        TestGit.Require();
+        // An "ssh" that fails at once but leaves a process holding git's stderr, not its protocol (like an ssh
+        // ControlMaster with ControlPersist): git exits, its pipes stay open.
+        var lingerer = $"sleep 59.{Random.Shared.Next(100_000, 999_999)}";
+        var launch = Launch(new RepoRecord("ssh://arm.invalid/lingers.git")) with
+        {
+            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{lingerer} >/dev/null & echo 'no route to arm.invalid' >&2; exit 255;:" },
+        };
+
+        try
+        {
+            var outcome = await Provider().Start(launch).Completion.WaitAsync(TimeSpan.FromSeconds(20));
+
+            await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+            await Assert.That(((AgentOutcome.Failed)outcome).Error).Contains("no route to arm.invalid");
+        }
+        finally
+        {
+            TestProcesses.KillWithCommandLine(lingerer);
+        }
+    }
+
+    [Test]
+    public async Task Kill_DuringTheCheckout_StopsIt_TheAgentNeverStarts_AndNothingIsLeftHalfMade()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var run = Provider().Start(launch);
+        await gate.ReachedAsync(Guard);
+
+        run.Kill();
+        var outcome = await run.Completion.WaitAsync(Promptly);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Killed());
+        await Assert.That(AgentStarted(launch)).IsFalse();
+        await Assert.That(run.AgentStarted).IsFalse();
+        await Until(() => SupervisorFiles.ReadExit(Folder(launch)) is not null);
+        await Assert.That(SupervisorFiles.ReadExit(Folder(launch))!.Error).IsEqualTo("Killed before its agent started.");
+        // The clone it was in is gone (it was the first), so are the worktree and the waiting "ssh".
+        // (The lock file stays: it's only ever locked, never removed.)
+        await Assert.That(Directory.GetDirectories(SharedRoot)).IsEmpty();
+        await Assert.That(Directory.GetFileSystemEntries(Workplace(launch))).IsEmpty();
+        await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
+    }
+
+    [Test]
+    public async Task Kill_DuringAFetch_LeavesTheSharedCopyAndNoBranch()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var provider = Provider();
+        var url = GatedSsh.Url(origin);
+        gate.Release();
+        await provider.Start(Launch(new RepoRecord(url)) with { Env = gate.Env }).Completion.WaitAsync(Guard);
+        var slow = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(url)) with { Env = slow.Env };
+        var run = provider.Start(launch);
+        await slow.ReachedAsync(Guard);
+
+        run.Kill();
+        var outcome = await run.Completion.WaitAsync(Promptly);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Killed());
+        await Assert.That(AgentStarted(launch)).IsFalse();
+        await Assert.That(TestGit.TryRun(Shared("alpha"), "show-ref", "--verify", "--quiet", $"refs/heads/{Branch(launch)}").ExitCode).IsNotEqualTo(0);
+        await Assert.That(Directory.GetFileSystemEntries(Workplace(launch))).IsEmpty();
+    }
+
+    [Test]
+    public async Task ServerRestart_DuringTheCheckout_ReattachesAndTheRunCompletes()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var (before, provider) = Server();
+        _ = provider.Start(launch);
+        await gate.ReachedAsync(Guard);
+
+        // ARM dies: its connections close, the supervisor (checking out) stays.
+        before.Dispose();
+        var (_, after) = Server();
+        var recovered = after.Recover(new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, launch.SessionId.ToString(),
+            launch.RunId, Guid.NewGuid(), launch.Env, launch.Repos));
+        gate.Release();
+        var outcome = await recovered!.Run.Completion.WaitAsync(Guard);
+
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        await Assert.That(recovered.Resumed).IsFalse();
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+    }
+
+    [Test]
+    public async Task SupervisorLost_DuringTheCheckout_StartsTheAgentAfresh_NotResumed()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var (before, provider) = Server();
+        _ = provider.Start(launch);
+        await gate.ReachedAsync(Guard);
+
+        // ARM and the supervisor (with its git) die mid-checkout: no agent ever ran.
+        before.Dispose();
+        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
+        foreach (var supervisor in supervisors)
+        {
+            Posix.Kill(-supervisor, Posix.SigKill);
+            Posix.Kill(supervisor, Posix.SigKill);
+        }
+
+        // Gone, not just signalled: a dying one (its other threads exiting) may still take a connection.
+        await Until(() => !before.IsListening(launch.SessionId));
+
+        gate.Release();
+        var (_, after) = Server();
+        var recovered = after.Recover(new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, launch.SessionId.ToString(),
+            launch.RunId, Guid.NewGuid(), launch.Env, launch.Repos));
+        var outcome = await recovered!.Run.Completion.WaitAsync(Guard);
+
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        var arguments = await Arguments(worktree);
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(arguments).Contains("--session-id");
+        await Assert.That(arguments).DoesNotContain("--resume");
+        await Assert.That(ClaudeProviderTests.Told((await File.ReadAllLinesAsync(Path.Combine(worktree, "input.jsonl")))[0])).IsEqualTo(launch.Prompt);
+    }
+
+    [Test]
+    public async Task ASecondSession_WaitsForTheFirstsCheckout_ThenBothHaveTheirWorktrees()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var url = GatedSsh.Url(origin);
+        var provider = Provider();
+        var first = Launch(new RepoRecord(url)) with { Env = gate.Env };
+        var firstRun = provider.Start(first);
+        await gate.ReachedAsync(Guard);
+        var second = Launch(new RepoRecord(url)) with { Env = gate.Env };
+
+        var secondRun = provider.Start(second);
+        await Until(() => Log(second).Contains("waiting for", StringComparison.Ordinal));
+        var secondStartedEarly = AgentStarted(second);
+        gate.Release();
+        var outcomes = await Task.WhenAll(firstRun.Completion, secondRun.Completion).WaitAsync(Guard);
+
+        await Assert.That(secondStartedEarly).IsFalse();
+        await Assert.That(outcomes.All(o => o == new AgentOutcome.Completed(0))).IsTrue();
+        await Assert.That(Directory.Exists(Path.Combine(Workplace(second), "alpha"))).IsTrue();
+    }
+
+    [Test]
+    public async Task ALockThatIsNeverReleased_FailsTheCheckout_AfterItsWait()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        using var held = HoldLock(origin);
+        var launch = Launch(new RepoRecord(origin));
 
         var outcome = await Provider(gitTimeout: TimeSpan.FromSeconds(1)).Start(launch).Completion.WaitAsync(Guard);
 
-        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed("Checking out ssh://arm.invalid/hangs.git failed: git fetch took more than 1 s."));
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed($"Checking out {origin} failed: another session's checkout of it took more than 4 s."));
         await Assert.That(AgentStarted(launch)).IsFalse();
+    }
+
+    [Test]
+    public async Task AHolderThatDies_LetsTheWaitingSessionGoOn()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var held = HoldLock(origin);
+        var launch = Launch(new RepoRecord(origin));
+        var run = Provider().Start(launch);
+        await Until(() => Log(launch).Contains("waiting for", StringComparison.Ordinal));
+
+        // The holder dies: the kernel drops its lock, the lock file stays.
+        held.Dispose();
+        var outcome = await run.Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(File.Exists(Path.Combine(SharedRoot, RepoNames.Shared(origin) + ".lock"))).IsTrue();
+    }
+
+    [Test]
+    public async Task ALockFileThatCantBeLocked_SaysSo_NotThatAnotherSessionIsSlow()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        Directory.CreateDirectory(Path.Combine(SharedRoot, RepoNames.Shared(origin) + ".lock"));
+        var launch = Launch(new RepoRecord(origin));
+
+        var outcome = await Provider(gitTimeout: TimeSpan.FromSeconds(1)).Start(launch).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+        var error = ((AgentOutcome.Failed)outcome).Error;
+        await Assert.That(error).StartsWith($"Checking out {origin} failed: Could not open the lock file");
+        await Assert.That(error).DoesNotContain("another session");
+    }
+
+    [Test]
+    public async Task AHalfMadeWorktreeFromAnEarlierAttempt_IsRemoved_AndMadeWhole()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        var launch = Launch(new RepoRecord(origin));
+        var shared = Shared("alpha");
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        // What an attempt killed in `git worktree add` leaves: the branch (with its owner), and a
+        // registered worktree at the pending path with only part of the files.
+        Directory.CreateDirectory(Workplace(launch));
+        TestGit.Run(shared, "config", SupervisorRepo.OwnerKey(Branch(launch)), launch.SessionId.ToString());
+        TestGit.Run(shared, "branch", "--no-track", Branch(launch), "refs/remotes/origin/HEAD");
+        var pending = SupervisorRepo.PendingPath(worktree);
+        TestGit.Run(shared, "worktree", "add", "--quiet", pending, Branch(launch));
+        File.Delete(Path.Combine(pending, "README.md"));
+
+        var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(File.Exists(Path.Combine(worktree, "README.md"))).IsTrue();
+        await Assert.That(Directory.Exists(pending)).IsFalse();
+        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+        await Assert.That(TestGit.Run(shared, "worktree", "list", "--porcelain")).DoesNotContain(pending);
+    }
+
+    [Test]
+    public async Task SomethingElseInTheWorktreesPlace_FailsTheCheckout_AndIsLeftAlone()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var launch = Launch(new RepoRecord(origin));
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        Directory.CreateDirectory(worktree);
+        await File.WriteAllTextAsync(Path.Combine(worktree, "mine.txt"), "not a worktree");
+
+        var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed($"Checking out {origin} failed: {worktree} is there already but isn't a worktree of its shared copy."));
+        await Assert.That(await File.ReadAllTextAsync(Path.Combine(worktree, "mine.txt"))).IsEqualTo("not a worktree");
+        await Assert.That(AgentStarted(launch)).IsFalse();
+    }
+
+    [Test]
+    public async Task ABranchOfTheSameNameFromAnotherSession_IsNotTakenOver()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        var first = Launch(new RepoRecord(origin));
+        await provider.Start(first).Completion.WaitAsync(Guard);
+        // Another session whose id starts with the same 8 characters.
+        var id = Guid.Parse(first.SessionId.ToString()[..8] + Guid.NewGuid().ToString()[8..]);
+        var second = Launch(new RepoRecord(origin)) with { SessionId = id, ProviderSessionId = id };
+
+        var outcome = await provider.Start(second).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed(
+            $"Checking out {origin} failed: its shared copy has a branch {Branch(first)} already, and it isn't this session's."));
+        await Assert.That(AgentStarted(second)).IsFalse();
+    }
+
+    [Test]
+    public async Task Ref_AnotherSessionsBranch_IsNotARefOfTheRepository()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        var first = Launch(new RepoRecord(origin));
+        await provider.Start(first).Completion.WaitAsync(Guard);
+        var second = Launch(new RepoRecord(origin, Branch(first)));
+
+        var outcome = await provider.Start(second).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed($"Checking out {origin} failed: '{Branch(first)}' is not a branch, tag or commit of it."));
+    }
+
+    [Test]
+    public async Task Ref_AnAbbreviatedCommit_StartsFromIt()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var first = TestGit.Head(origin);
+        TestGit.Commit(origin, "second.txt", "second");
+        var launch = Launch(new RepoRecord(origin, first[..9]));
+
+        var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(TestGit.Head(Path.Combine(Workplace(launch), "alpha"))).IsEqualTo(first);
+    }
+
+    [Test]
+    public async Task AStaleGitLockInTheSharedCopy_DoesntFailTheNextFetch()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        var pushed = TestGit.Commit(origin, "later.txt", "pushed later");
+        // A fetch that died mid-update left its ref lock behind, a while ago.
+        var stale = Path.Combine(Shared("alpha"), "refs", "remotes", "origin", "main.lock");
+        await File.WriteAllTextAsync(stale, "");
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddHours(-1));
+        var launch = Launch(new RepoRecord(origin));
+
+        var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(TestGit.Head(Path.Combine(Workplace(launch), "alpha"))).IsEqualTo(pushed);
+        await Assert.That(File.Exists(stale)).IsFalse();
+    }
+
+    [Test]
+    public async Task HooksInTheSharedCopy_DontRun()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        // What an agent could plant in the copy every session shares.
+        var ran = Path.Combine(_root, "hook-ran");
+        foreach (var hook in (string[])["post-checkout", "reference-transaction"])
+        {
+            var path = Path.Combine(Shared("alpha"), "hooks", hook);
+            await File.WriteAllTextAsync(path, $"#!/bin/sh\necho {hook} >> '{ran}'\n");
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        var outcome = await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(File.Exists(ran)).IsFalse();
+    }
+
+    [Test]
+    public async Task Delete_AWorktreeWithSubmodules_RemovesItToo()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var library = TestGit.Origin(Path.Combine(_root, "origin", "library"));
+        var provider = Provider();
+        var launch = Launch(new RepoRecord(origin));
+        await provider.Start(launch).Completion.WaitAsync(Guard);
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        TestGit.Run(worktree, "-c", "protocol.file.allow=always", "submodule", "--quiet", "add", library, "library");
+
+        provider.RemoveRepos(launch.SessionId, launch.Repos!);
+
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
+        await Assert.That(TestGit.Run(Shared("alpha"), "worktree", "list", "--porcelain")).DoesNotContain(worktree);
+    }
+
+    [Test]
+    public async Task Delete_AWorktreeGitRefusesToRemove_DeletesItsFolder_AndPrunes()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        var launch = Launch(new RepoRecord(origin));
+        await provider.Start(launch).Completion.WaitAsync(Guard);
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+        // Its .git file broken (by the agent, say): git no longer takes it for a worktree.
+        await File.WriteAllTextAsync(Path.Combine(worktree, ".git"), "gitdir: /nowhere\n");
+        await Assert.That(TestGit.TryRun(Shared("alpha"), "worktree", "remove", "--force", "--force", worktree).ExitCode).IsNotEqualTo(0);
+
+        provider.RemoveRepos(launch.SessionId, launch.Repos!);
+
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
+        await Assert.That(TestGit.Run(Shared("alpha"), "worktree", "list", "--porcelain")).DoesNotContain(worktree);
+    }
+
+    [Test]
+    public async Task Delete_WaitsForTheSharedCopysLock()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var provider = Provider();
+        var launch = Launch(new RepoRecord(origin));
+        await provider.Start(launch).Completion.WaitAsync(Guard);
+        var worktree = Path.Combine(Workplace(launch), "alpha");
+
+        using (HoldLock(origin))
+        {
+            // Bounded: it gives up (logged) rather than meet a checkout.
+            provider.RemoveRepos(launch.SessionId, launch.Repos!);
+        }
+
+        await Assert.That(Directory.Exists(worktree)).IsTrue();
+        provider.RemoveRepos(launch.SessionId, launch.Repos!);
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
     }
 
     [Test]
@@ -277,6 +677,59 @@ public class ClaudeRepoTests
     }
 
     private string SharedRoot => Path.Combine(_root, "repos");
+
+    private static string Branch(AgentLaunch launch) => RepoNames.Branch(launch.SessionId);
+
+    private string Folder(AgentLaunch launch) => Path.Combine(_root, "sessions", launch.SessionId.ToString());
+
+    private string Log(AgentLaunch launch) =>
+        File.Exists(Path.Combine(Folder(launch), SupervisorFiles.Log)) ? File.ReadAllText(Path.Combine(Folder(launch), SupervisorFiles.Log)) : "";
+
+    /// <summary>Holds the lock on the shared copy of <paramref name="url"/>, as another session's supervisor would.</summary>
+    private Microsoft.Win32.SafeHandles.SafeFileHandle HoldLock(string url)
+    {
+        Directory.CreateDirectory(SharedRoot);
+        var handle = Posix.OpenLockFile(Path.Combine(SharedRoot, RepoNames.Shared(url) + ".lock"));
+        return Posix.TryLock(handle) ? handle : throw new InvalidOperationException("The lock is taken.");
+    }
+
+    /// <summary>Whether <paramref name="pid"/> runs in <paramref name="folder"/> (a session's supervisor does).</summary>
+    private static bool IsIn(int pid, string folder)
+    {
+        try
+        {
+            return new DirectoryInfo($"/proc/{pid}/cwd").LinkTarget == folder;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task Until(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(Guard);
+        while (!condition())
+        {
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+
+    /// <summary>A server: its supervisors (dispose them to act out ARM dying) and a Claude provider.</summary>
+    private (Supervisors Supervisors, ClaudeProvider Provider) Server()
+    {
+        var supervisors = new Supervisors(
+            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+        var repos = new RepoCheckouts(
+            Options.Create(new RepoOptions { Root = SharedRoot, GitTimeout = TimeSpan.FromSeconds(20) }), supervisors, NullLogger<RepoCheckouts>.Instance);
+        var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, repos, NullLogger<ClaudeProvider>.Instance));
+    }
+
+    /// <summary>The arguments the stub CLI was started with, from the <c>invocation.txt</c> in <paramref name="directory"/>.</summary>
+    private static async Task<string[]> Arguments(string directory) =>
+        [.. (await File.ReadAllLinesAsync(Path.Combine(directory, "invocation.txt")))
+            .Where(l => l.StartsWith("arg:", StringComparison.Ordinal)).Select(l => l[4..])];
 
     private string Shared(string name) => Directory.GetDirectories(SharedRoot, $"{name}-*.git").Single();
 

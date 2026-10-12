@@ -382,6 +382,81 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task AnAgentThatNeverStarted_LeavesNothingToResume_AndAMessageStartsItAfresh()
+    {
+        var session = Create("the task");
+        var run = _provider.RunOf(session.Id);
+        run.AgentStarted = false;
+        run.End(new AgentOutcome.Failed("Checking out x failed."));
+        var failed = await Eventually(session.Id, s => s.Status == SessionStatus.Failed);
+
+        var sent = _sessions.Send(session.Id, "try again", "tests");
+        var again = await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        await Assert.That(failed.ProviderSessionId).IsNull();
+        await Assert.That(sent).IsTypeOf<MessageOutcome.Continued>();
+        var launch = _provider.Runs.Last(r => r.Launch.SessionId == session.Id).Launch;
+        await Assert.That(launch.Resume).IsNull();
+        await Assert.That(launch.Input).IsEquivalentTo(["the task", "try again"]);
+        await Assert.That(again.Attempts).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task KilledBeforeItsAgentStarted_LeavesNothingToResume()
+    {
+        var session = Create("the task");
+        _provider.RunOf(session.Id).AgentStarted = false;
+
+        var killed = ((KillOutcome.Stopped)_sessions.Kill(session.Id, null, KillSource.User)).Session;
+        _sessions.Send(session.Id, "go on", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        await Assert.That(killed.ProviderSessionId).IsNull();
+        await Assert.That(_database.Store().Get(session.Id)!.ProviderSessionId).IsNotNull();
+        await Assert.That(_provider.Runs.Last(r => r.Launch.SessionId == session.Id).Launch.Resume).IsNull();
+    }
+
+    [Test]
+    public async Task AContinuedRunWhoseAgentNeverStarted_KeepsTheProviderSessionItResumes()
+    {
+        var session = Create();
+        var first = _provider.RunOf(session.Id);
+        first.End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "more", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        var continued = _provider.Runs.Last(r => r.Launch.SessionId == session.Id);
+        continued.AgentStarted = false;
+
+        continued.End(new AgentOutcome.Failed("Checking out x failed."));
+        var failed = await Eventually(session.Id, s => s.Status == SessionStatus.Failed);
+
+        await Assert.That(continued.Launch.Resume).IsEqualTo(first.ProviderSessionId);
+        await Assert.That(failed.ProviderSessionId).IsEqualTo(first.ProviderSessionId);
+    }
+
+    [Test]
+    public async Task Delete_RemovesTheWorktrees_BeforeTheRecord_AndMeanwhileItCantContinue()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        var storedMeanwhile = false;
+        MessageOutcome? sentMeanwhile = null;
+        _provider.Removing = id =>
+        {
+            storedMeanwhile = _database.Store().Get(id) is not null;
+            sentMeanwhile = _sessions.Send(id, "wait", "tests");
+        };
+
+        var deleted = _sessions.Delete(session.Id);
+
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(storedMeanwhile).IsTrue();
+        await Assert.That(sentMeanwhile).IsTypeOf<MessageOutcome.NotFound>();
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+    }
+
+    [Test]
     public async Task Restart_KeepsEndedSessions()
     {
         var done = Create("finish");
