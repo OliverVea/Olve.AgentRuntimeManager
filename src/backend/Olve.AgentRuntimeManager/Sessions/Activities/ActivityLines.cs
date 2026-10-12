@@ -56,7 +56,7 @@ public static class ActivityLines
     {
         { ParentToolId: not null } => null,
         { Kind: ConversationEntryKind.Text } => ActivityText.FirstLine(entry.Text) is { } text ? Line(ActivityKind.Text, text) : null,
-        { Kind: ConversationEntryKind.ToolCall } => Line(ActivityKind.Tool, ActivityText.Bound(ActivityText.Flatten($"{entry.Tool ?? "tool"} → {ToolGist.Of(entry.Input)}"))),
+        { Kind: ConversationEntryKind.ToolCall } => Line(ActivityKind.Tool, ActivityText.Bound(ActivityText.Flatten($"{ActivityText.Head(entry.Tool ?? "tool", ActivityText.MaxLength)} → {ToolGist.Of(entry.Input)}"))),
         { Kind: ConversationEntryKind.ToolResult, IsError: true } => Line(ActivityKind.Error, ActivityText.ErrorLine(entry.Text) ?? "The tool call failed."),
         { Kind: ConversationEntryKind.TurnEnd, IsError: true } => Line(ActivityKind.Error, ActivityText.ErrorLine(entry.Text) ?? "The turn failed."),
         _ => null,

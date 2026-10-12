@@ -36,7 +36,12 @@ model Activity {
 
 @route("/sessions/{id}/activity")
 interface SessionActivity {
-  /** The session's most recent activity. */
+  /**
+   * The session's most recent activity. Only the recent end of the conversation is searched (for
+   * `claude`, the last 1 MiB of the agent's output, skipping any single event over 256 KiB): when
+   * nothing there is worth showing (e.g. a subagent has been busy for long), fewer lines come back,
+   * or none.
+   */
   @get get(
     ...SessionId,
 

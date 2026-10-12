@@ -3,6 +3,8 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Activities;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Supervision;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Activities;
 
@@ -158,5 +160,41 @@ public class ActivityLinesTests
         await Assert.That(lines[0]).IsEqualTo((ActivityKind.Tool, "Bash → Two lines"));
         await Assert.That(lines[1].Item2.Length).IsEqualTo(ActivityText.MaxLength);
         await Assert.That(lines[1].Item2).StartsWith("Bash → echo xxx").And.EndsWith("x…");
+    }
+
+    [Test]
+    public async Task NothingRecentWorthShowing_WithinTheScanBudget_IsNoLines()
+    {
+        // The agent said something, then a subagent ran for long: more output than one read scans.
+        var folder = Directory.CreateTempSubdirectory("arm-activity-budget-").FullName;
+        try
+        {
+            var output = Path.Combine(folder, "output.jsonl");
+            var said = """{"type":"assistant","message":{"content":[{"type":"text","text":"Early words"}]},"parent_tool_use_id":null}""";
+            var sub = """{"type":"assistant","message":{"content":[{"type":"text","text":"subagent busy"}]},"parent_tool_use_id":"t1"}""";
+            async Task<IReadOnlyList<ActivityLine>> Activity(int subLines)
+            {
+                await File.WriteAllTextAsync(output, said + "\n" + string.Concat(Enumerable.Repeat(sub + "\n", subLines)));
+                return ActivityLines.Pick(Working, ClaudeConversation.ReadNewestFirst(OutputLines.Backwards(output)), 3);
+            }
+
+            await Assert.That((await Activity(100)).Select(l => l.Text)).IsEquivalentTo(["Early words"]);
+            await Assert.That(await Activity((OutputLines.MaxScanBytes / sub.Length) + 10)).IsEmpty();
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task HugeToolInput_IsOneBoundedLine()
+    {
+        var description = new string('d', 3_000_000);
+        ConversationEntryRecord[] entries = [new(ConversationEntryKind.ToolCall, Tool: "Bash", Input: JsonSerializer.SerializeToElement(new { description }))];
+
+        var line = Pick(Working, entries, 1).Single();
+
+        await Assert.That(line.Item2.Length).IsEqualTo(ActivityText.MaxLength);
     }
 }

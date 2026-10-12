@@ -28,4 +28,15 @@ public class ToolGistTests
 
         await Assert.That(ToolGist.Of(input)).IsEqualTo(c.Gist);
     }
+
+    [Test]
+    public async Task HugeInput_WithoutAKnownKey_IsNotWrittenOutWhole()
+    {
+        var input = JsonSerializer.SerializeToElement(new { blob = new string('a', 5_000_000) });
+
+        var gist = ToolGist.Of(input);
+
+        await Assert.That(gist.Length).IsLessThanOrEqualTo(ToolGist.MaxLength);
+        await Assert.That(gist).StartsWith("{\"blob\":\"aaaa");
+    }
 }

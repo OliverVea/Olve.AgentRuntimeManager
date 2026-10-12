@@ -10,7 +10,7 @@ public class ActivityTextTests
     [Arguments("\n\n  First line  \nsecond line", "First line")]
     [Arguments("## Plan\n\n1. Read", "Plan")]
     [Arguments("- **Bold** and `code`", "Bold and code")]
-    [Arguments("> - quoted item", "quoted item")]
+    [Arguments("* starred item", "starred item")]
     [Arguments("3) third", "third")]
     [Arguments("```bash\nnpx mise run ci\n```", "npx mise run ci")]
     [Arguments("See [the docs](https://example.com/d) now", "See the docs (https://example.com/d) now")]
@@ -63,5 +63,55 @@ public class ActivityTextTests
 
         await Assert.That(line).IsEqualTo(new string('a', 198) + "…");
         await Assert.That(ActivityText.Bound(new string('a', 197) + "😀😀")).IsEqualTo(new string('a', 197) + "😀…");
+    }
+
+    [Test]
+    [Arguments("> 5 seconds left")]
+    [Arguments("2026. Plans")]
+    [Arguments("**kwargs and **args")]
+    [Arguments("handlers[name](args)")]
+    [Arguments("a ** b ** c")]
+    [Arguments("-1 is the answer")]
+    public async Task OrdinaryText_IsLeftAlone(string text)
+    {
+        await Assert.That(ActivityText.FirstLine(text)).IsEqualTo(text);
+    }
+
+    [Test]
+    [Arguments("0 errors, 3 warnings\nfatal: boom", "fatal: boom")]
+    [Arguments("Build: 0 errors\nno errors found\nsomething else", "something else")]
+    [Arguments("10 errors\nlast", "10 errors")]
+    public async Task ErrorLine_DoesNotTakeAZeroCountForTheCause(string text, string line)
+    {
+        await Assert.That(ActivityText.ErrorLine(text)).IsEqualTo(line);
+    }
+
+    [Test]
+    public async Task HugeText_IsShapedFromItsStart_Quickly()
+    {
+        // A long run of '[' made the link pattern quadratic (3 million took minutes); a huge line is
+        // cut before it's shaped.
+        var brackets = new string('[', 1_000_000) + "](x";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var line = ActivityText.FirstLine(brackets)!;
+        var error = ActivityText.ErrorLine(string.Concat(Enumerable.Repeat("x\n", 2_000_000)) + "fatal: at the end")!;
+        clock.Stop();
+
+        await Assert.That(clock.Elapsed).IsLessThan(TimeSpan.FromSeconds(2));
+        await Assert.That(line).IsEqualTo(new string('[', ActivityText.MaxLength - 1) + "…");
+        await Assert.That(error).IsEqualTo("fatal: at the end");
+    }
+
+    [Test]
+    [Arguments("abc\u202Edef", "abcdef")]
+    [Arguments("\u2066x\u2069 \u200By\u200C\u200E\u200F\uFEFF", "x y")]
+    [Arguments("a\u202A\u202B\u202C\u202D\u2067\u2068b", "ab")]
+    [Arguments("hidden\U000E0041\U000E0042tags", "hiddentags")]
+    [Arguments("a\u200Db", "ab")]
+    [Arguments("family 👩‍👩‍👧 and ❤️‍🔥 stay", "family 👩‍👩‍👧 and ❤️‍🔥 stay")]
+    public async Task FormatCharacters_ThatReorderOrHideText_AreDropped(string text, string line)
+    {
+        await Assert.That(ActivityText.FirstLine(text)).IsEqualTo(line);
+        await Assert.That(ActivityText.ErrorLine(text)).IsEqualTo(line);
     }
 }

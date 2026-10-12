@@ -72,4 +72,53 @@ public class OutputLinesTests
         await Assert.That(lines.MoveNext()).IsTrue();
         await Assert.That(lines.Current).IsEqualTo("next to last");
     }
+
+    [Test]
+    public async Task ScansAtMostItsBudget_FromTheEnd()
+    {
+        // An early line, then more than the budget of filler, then a late one.
+        var filler = string.Concat(Enumerable.Repeat(new string('x', 99) + "\n", (OutputLines.MaxScanBytes / 100) + 1000));
+        var path = Write("early\n" + filler + "late\n");
+
+        var lines = OutputLines.Backwards(path).ToList();
+
+        await Assert.That(lines[0]).IsEqualTo("late");
+        await Assert.That(lines).DoesNotContain("early");
+        await Assert.That(lines.Sum(l => l.Length + 1)).IsLessThanOrEqualTo(OutputLines.MaxScanBytes);
+    }
+
+    [Test]
+    [Arguments(7)]
+    [Arguments(64 * 1024)]
+    public async Task OversizedLine_IsSkipped_ItsNeighboursAreNot(int chunkSize)
+    {
+        var path = Write($"first\n{new string('y', OutputLines.MaxLineBytes + 1)}\nlast\n");
+
+        var lines = OutputLines.Backwards(path, chunkSize).ToList();
+
+        await Assert.That(lines).IsEquivalentTo(["last", "first"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(OutputLines.Backwards(Write($"a\n{new string('y', OutputLines.MaxLineBytes)}\n"), chunkSize).First().Length)
+            .IsEqualTo(OutputLines.MaxLineBytes);
+    }
+
+    [Test]
+    public async Task FileTruncatedWhileRead_EndsTheLines_WithoutAnError()
+    {
+        var path = Write(string.Concat(Enumerable.Range(1, 100).Select(i => $"line {i}\n")));
+        using var lines = OutputLines.Backwards(path, chunkSize: 8).GetEnumerator();
+        await Assert.That(lines.MoveNext()).IsTrue();
+
+        using (var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+        {
+            writer.SetLength(10);
+        }
+
+        var rest = new List<string>();
+        while (lines.MoveNext())
+        {
+            rest.Add(lines.Current);
+        }
+
+        await Assert.That(rest.Count).IsLessThan(99);
+    }
 }
