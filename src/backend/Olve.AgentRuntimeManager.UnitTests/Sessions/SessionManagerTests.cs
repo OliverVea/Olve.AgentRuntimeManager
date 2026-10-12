@@ -5,6 +5,7 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.UnitTests.Persistence;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
@@ -339,6 +340,45 @@ public class SessionManagerTests : IDisposable
         await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.Deleted>();
         await Assert.That(_sessions.Get(session.Id)).IsNull();
         await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.NotFound>();
+    }
+
+    [Test]
+    public async Task Repos_AreStoredAsGiven_AndGoToEveryLaunch()
+    {
+        var request = Request() with { Repos = [new CreateSessionRepo { Url = "git@github.com:o/a.git" }, new CreateSessionRepo { Url = "https://x/b", Ref = "v1" }] };
+        RepoRecord[] expected = [new("git@github.com:o/a.git"), new("https://x/b", "v1")];
+
+        var session = Record(_sessions.Create(request));
+
+        await Assert.That(_database.Store().Get(session.Id)!.Repos).IsEquivalentTo(expected);
+        await Assert.That(_provider.RunOf(session.Id).Launch.Repos).IsEquivalentTo(expected);
+        await Assert.That(session.ToDto(2).Repos!.Select(r => (r.Url, r.Ref))).IsEquivalentTo([("git@github.com:o/a.git", (string?)null), ("https://x/b", "v1")]);
+    }
+
+    [Test]
+    public async Task Repos_GoToARecoveredSession()
+    {
+        var request = Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] };
+        var working = Record(_sessions.Create(request));
+
+        var provider = Restart((p, r) => p.Reattach(r, resumed: true));
+
+        await Assert.That(provider.Recoveries.Single(r => r.SessionId == working.Id).Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+    }
+
+    [Test]
+    public async Task Delete_RemovesTheSessionsWorktrees_ThroughItsProvider()
+    {
+        var withRepos = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        var without = Create();
+        _sessions.Kill(withRepos.Id, null, KillSource.User);
+        _sessions.Kill(without.Id, null, KillSource.User);
+
+        _sessions.Delete(withRepos.Id);
+        _sessions.Delete(without.Id);
+
+        await Assert.That(_provider.RemovedRepos.Select(r => r.SessionId)).IsEquivalentTo([withRepos.Id]);
+        await Assert.That(_provider.RemovedRepos.Single().Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
     }
 
     [Test]

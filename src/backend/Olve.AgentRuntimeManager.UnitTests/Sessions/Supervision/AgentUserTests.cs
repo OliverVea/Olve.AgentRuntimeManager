@@ -120,6 +120,27 @@ public class AgentUserTests
         await Assert.That(File.Exists(Path.Combine(work, "prompt.jsonl"))).IsTrue();
     }
 
+    [Test]
+    public async Task Repos_AreCheckedOutByTheSupervisor_AndRemovedAsTheAgentUser()
+    {
+        var account = OwnAccount();
+        var (_, provider) = Server(account);
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var launch = Launch("Say READY") with { Repos = [new RepoRecord(origin)] };
+        var worktree = Path.Combine(Folder(launch), "work", "alpha");
+
+        var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);
+        var checkedOut = Directory.Exists(worktree);
+        provider.RemoveRepos(launch.SessionId, launch.Repos!);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(checkedOut).IsTrue();
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
+        var shared = Directory.GetDirectories(Path.Combine(_root, "repos"), "alpha-*.git").Single();
+        await Assert.That(SudoCalls()).IsEquivalentTo(
+            [$"-n -u {account.Name} -- {Supervisor}", $"-n -u {account.Name} -- {Supervisor} remove-worktree {shared} {worktree}"]);
+    }
+
     [NotInParallel("signals")]
     [Test]
     public async Task SupervisorLost_OrphanIsKilled_AsTheAgentUser()

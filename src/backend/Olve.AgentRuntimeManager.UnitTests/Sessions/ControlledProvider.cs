@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Sessions.Providers;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
@@ -51,6 +52,11 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
             }
         }
     }
+
+    /// <summary>The sessions whose worktrees <see cref="RemoveRepos"/> was asked to remove, with their repositories.</summary>
+    public List<(Guid SessionId, IReadOnlyList<RepoRecord> Repos)> RemovedRepos { get; } = [];
+
+    public void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos) => RemovedRepos.Add((sessionId, repos));
 
     public ControlledRun RunOf(Guid sessionId) => Runs.Single(r => r.Launch.SessionId == sessionId);
 
