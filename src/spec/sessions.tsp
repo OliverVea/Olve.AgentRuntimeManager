@@ -57,7 +57,7 @@ model CreateSession {
   /** The provider that runs the agent: `claude` (Claude Code), or `fake` (no LLM, for tests; not in prod). An unknown name is a 400 `UNKNOWN_PROVIDER`. */
   @minLength(1) provider: string;
 
-  /** The model, in the provider's own naming, passed to it as is. The `fake` provider ignores it. */
+  /** One of the provider's models, by id (`GET /api/providers`). An unknown one is a 400 `UNKNOWN_MODEL`. The `fake` provider ignores which. */
   @minLength(1) `model`: string;
 
   /** Who started the session, e.g. an integration's name. Free text, for searching. */

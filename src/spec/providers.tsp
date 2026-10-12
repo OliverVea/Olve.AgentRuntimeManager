@@ -38,6 +38,33 @@ model ProviderHealth {
   until?: utcDateTime;
 }
 
+/** A model a provider offers. */
+model ProviderModel {
+  /** What a session gives as `model`. */
+  id: string;
+
+  /** Its name for people, e.g. `Opus`; the id when the server's configuration gives none. */
+  displayName: string;
+}
+
+/** A provider this server has, and the models it offers. */
+model Provider {
+  /** What a session gives as `provider`: `claude`, `fake`. */
+  name: string;
+
+  /** Its name for people, e.g. `Claude Code`; the name when the configuration gives none. */
+  displayName: string;
+
+  /** The models sessions may name for it, as configured on this server. */
+  models: ProviderModel[];
+}
+
+@route("/providers")
+interface Providers {
+  /** Every provider this server has, with its models. */
+  @get list(): Provider[] | UnauthorizedResponse;
+}
+
 @route("/providers/health")
 interface ProvidersHealth {
   /** The health of every provider this server has. */
