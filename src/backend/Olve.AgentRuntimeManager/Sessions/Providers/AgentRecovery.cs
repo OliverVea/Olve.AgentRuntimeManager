@@ -7,7 +7,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// (<paramref name="RunId"/>, for the provider session <paramref name="ProviderSessionId"/>), and
 /// <paramref name="ResumeRunId"/> for a new run if the provider has to resume it, with the
 /// session's environment variables <paramref name="Env"/> (null: none) and its repositories
-/// <paramref name="Repos"/> (null: none; checked out already, but a resumed agent starts in the one there is).
+/// <paramref name="Repos"/> (null: none; checked out already, or checked out by a run launched again).
 /// <paramref name="Resume"/> and <paramref name="Messages"/>: how the run was launched (the provider
 /// session it resumed, if it did, and the messages it was given), to launch it again the same way
 /// if its agent never started.

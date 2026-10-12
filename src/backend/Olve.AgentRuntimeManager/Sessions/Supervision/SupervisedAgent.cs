@@ -59,6 +59,10 @@ public sealed class SupervisedAgent
         _runId = runId;
         _connectTimeout = connectTimeout;
         _helloTimeout = connectTimeout + helloTimeout;
+        // A run followed again after a restart whose agent did start (its supervisor.json names the
+        // run) is known to have started from now on, not only once its hello is read: a kill at once
+        // (a timeout that ran out while ARM was away) must not take it for a run that never started.
+        AgentStarted = SupervisorFiles.ReadInfo(folder) is { } info && info.RunId == runId;
         _ = Task.Run(RunAsync);
     }
 
@@ -198,6 +202,50 @@ public sealed class SupervisedAgent
         catch (Exception exception)
         {
             Fail($"Following the supervisor failed: {exception.Message}");
+        }
+        finally
+        {
+            if (!detached.IsCancellationRequested)
+            {
+                ForgetRun();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The run has ended (or its supervisor is lost): its kill mark goes, and so does its socket if
+    /// nothing answers on it any more (a supervisor that died left it; a live one removes its own).
+    /// Best effort. Neither is followed if it's a link: they're unlinked by name.
+    /// </summary>
+    private void ForgetRun()
+    {
+        try
+        {
+            File.Delete(Path.Combine(_folder, SupervisorFiles.KillMark(_runId)));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Left for whoever cleans the session's folder.
+        }
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            try
+            {
+                socket.Connect(new UnixDomainSocketEndPoint(_socketPath));
+                return;
+            }
+            catch (SocketException)
+            {
+                // Nobody listens: a dead run's socket.
+            }
+
+            File.Delete(_socketPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Left; a socket nobody answers on reads as a supervisor that's gone.
         }
     }
 

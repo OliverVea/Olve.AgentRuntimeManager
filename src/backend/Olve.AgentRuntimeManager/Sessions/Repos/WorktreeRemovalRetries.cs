@@ -18,8 +18,9 @@ public sealed class WorktreeRemovalRetries(SessionManager sessions, TimeProvider
             {
                 try
                 {
-                    // It runs git (bounded) as the agent user: off the timer's thread.
-                    await Task.Run(sessions.RetryWorktreeRemovals, stoppingToken);
+                    // It runs git (bounded) as the agent user: off the timer's thread. Stopping ends the
+                    // pass between entries, and isn't held up by the one in progress (it's abandoned).
+                    await Task.Run(() => sessions.RetryWorktreeRemovals(stoppingToken), stoppingToken).WaitAsync(stoppingToken);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {

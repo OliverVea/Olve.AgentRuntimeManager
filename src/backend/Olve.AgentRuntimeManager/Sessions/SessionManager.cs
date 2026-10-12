@@ -426,17 +426,26 @@ public sealed class SessionManager : IDisposable
         {
             lock (_gate)
             {
-                if (left.Count > 0)
+                try
                 {
-                    KeepWorktreeRemoval(new WorktreeRemovalRecord
+                    // The worktrees left must be kept before the record goes: if that fails, so does
+                    // the delete (the record stays, to be deleted again), rather than leak them unnoticed.
+                    if (left.Count > 0)
                     {
-                        SessionId = id, Provider = ended.Provider, Repos = left, Attempts = 1,
-                        NextAttemptAt = _time.GetUtcNow() + WorktreeRemovalBackoff,
-                    });
-                }
+                        KeepWorktreeRemoval(new WorktreeRemovalRecord
+                        {
+                            SessionId = id, Provider = ended.Provider, Repos = left, Attempts = 1,
+                            NextAttemptAt = _time.GetUtcNow() + WorktreeRemovalBackoff,
+                        });
+                    }
 
-                _store.Delete(id);
-                _deleting.Remove(id);
+                    _store.Delete(id);
+                }
+                finally
+                {
+                    // Whatever happened: the session isn't being deleted any more (it's gone, or it stays as it was).
+                    _deleting.Remove(id);
+                }
             }
         }
 
@@ -448,7 +457,8 @@ public sealed class SessionManager : IDisposable
     /// what's removed is forgotten, what isn't waits twice as long (up to an hour), and after
     /// <see cref="WorktreeRemovalAttempts"/> it's given up, logged as an error. Not under the lock: it runs git.
     /// </summary>
-    public void RetryWorktreeRemovals()
+    /// <param name="cancellationToken">Stops the pass between entries (the server stopping); one in progress finishes.</param>
+    public void RetryWorktreeRemovals(CancellationToken cancellationToken = default)
     {
         if (_removals is null)
         {
@@ -457,6 +467,11 @@ public sealed class SessionManager : IDisposable
 
         foreach (var removal in _removals.Due(_time.GetUtcNow()))
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
             if (!_providers.TryGetValue(removal.Provider, out var provider))
             {
                 _logger.LogError("Deleted session {SessionId}: provider {Provider} is gone; its worktrees of {Repos} stay", removal.SessionId, removal.Provider,
