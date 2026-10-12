@@ -1,20 +1,129 @@
 [
-  { "input": { "command": "npx mise run ci" }, "gist": "npx mise run ci" },
   {
-    "input": { "command": "cd /w && npx mise run ci", "description": "Run the gate" },
+    "input": {
+      "command": "npx mise run ci"
+    },
+    "gist": "npx mise run ci"
+  },
+  {
+    "input": {
+      "command": "cd /w && npx mise run ci",
+      "description": "Run the gate"
+    },
     "gist": "Run the gate"
   },
-  { "input": { "command": "cd /w && export X=1; ls ; git status" }, "gist": "ls && git status" },
-  { "input": { "command": "cd /w" }, "gist": "cd /w" },
-  { "input": { "command": "make\nmake test" }, "gist": "make" },
-  { "input": { "file_path": "src/spec/main.tsp", "limit": 20 }, "gist": "src/spec/main.tsp" },
-  { "input": { "pattern": "TODO", "path": "src" }, "gist": "TODO" },
   {
-    "input": { "url": "https://example.com/a", "prompt": "Read it" },
+    "input": {
+      "command": "cd /w && export X=1; ls ; git status"
+    },
+    "gist": "ls && git status"
+  },
+  {
+    "input": {
+      "command": "cd /w"
+    },
+    "gist": "cd /w"
+  },
+  {
+    "input": {
+      "command": "make\nmake test"
+    },
+    "gist": "make"
+  },
+  {
+    "input": {
+      "file_path": "src/spec/main.tsp",
+      "limit": 20
+    },
+    "gist": "src/spec/main.tsp"
+  },
+  {
+    "input": {
+      "pattern": "TODO",
+      "path": "src"
+    },
+    "gist": "TODO"
+  },
+  {
+    "input": {
+      "url": "https://example.com/a",
+      "prompt": "Read it"
+    },
     "gist": "https://example.com/a"
   },
-  { "input": { "command": 3, "file_path": "a.txt" }, "gist": "a.txt" },
-  { "input": { "query": "née", "n": 2 }, "gist": "{\"query\":\"née\",\"n\":2}" },
-  { "input": "abc", "gist": "\"abc\"" },
-  { "gist": "{}" }
+  {
+    "input": {
+      "command": 3,
+      "file_path": "a.txt"
+    },
+    "gist": "a.txt"
+  },
+  {
+    "input": {
+      "query": "née",
+      "n": 2
+    },
+    "gist": "{\"query\":\"née\",\"n\":2}"
+  },
+  {
+    "input": "abc",
+    "gist": "\"abc\""
+  },
+  {
+    "input": {
+      "command": "cd /w && npm test",
+      "description": "  "
+    },
+    "gist": "npm test"
+  },
+  {
+    "input": {
+      "command": "ls",
+      "description": ""
+    },
+    "gist": "ls"
+  },
+  {
+    "input": {
+      "n": 1.0,
+      "m": 1000.0,
+      "f": 1.5,
+      "s": 1e-7,
+      "b": 1e21,
+      "z": -0.0
+    },
+    "gist": "{\"n\":1,\"m\":1000,\"f\":1.5,\"s\":1e-7,\"b\":1e+21,\"z\":0}"
+  },
+  {
+    "input": {
+      "small": 1e-6,
+      "big": 123456789012345680000
+    },
+    "gist": "{\"small\":0.000001,\"big\":123456789012345680000}"
+  },
+  {
+    "input": {
+      "q": "😀 x",
+      "list": [1, "a", null, true, {}]
+    },
+    "gist": "{\"q\":\"😀 x\",\"list\":[1,\"a\",null,true,{}]}"
+  },
+  {
+    "input": {
+      "text": "a\u0001b\"c\\d\ne\tf"
+    },
+    "gist": "{\"text\":\"a\\u0001b\\\"c\\\\d\\ne\\tf\"}"
+  },
+  {
+    "input": {
+      "b": 1,
+      "2": 0,
+      "a": 2,
+      "10": 1
+    },
+    "gist": "{\"2\":0,\"10\":1,\"b\":1,\"a\":2}"
+  },
+  {
+    "gist": "{}"
+  }
 ]

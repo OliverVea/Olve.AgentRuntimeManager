@@ -9,9 +9,44 @@ export type TimesAs = "relative" | "absolute";
 /** A working session's log column: its latest activity (undefined until read), wrapped, expanded. */
 export type LogView = { lines: readonly ActivityLine[] | undefined; wrap: boolean; open: boolean };
 
-/** Lines a log shows unless expanded: 3, and 8 wrapped (the box keeps its height; older lines leave at the top). */
-const SHOWN = 3;
-const SHOWN_WRAPPED = 8;
+/**
+ * Lines a log shows, and so asks for: 3, 8 wrapped (the box keeps its height; older lines leave at
+ * the top), and expanded up to 20.
+ */
+export const LOG_LINES = { shown: 3, wrapped: 8, expanded: 20 } as const;
+
+/** How many lines a log with these settings shows (and is read for). */
+export function logLimit(log: { wrap: boolean; open: boolean }): number {
+  return log.open ? LOG_LINES.expanded : log.wrap ? LOG_LINES.wrapped : LOG_LINES.shown;
+}
+
+/** One of a card's log buttons: its classes, title and icon. */
+export type ToggleState = { className: string; title: string; icon: string };
+
+/**
+ * The card's expand and wrap buttons. Expand is offered once the box is full (more may be behind
+ * it: a collapsed card reads only what it shows); wrap once there's a line. A queued card keeps
+ * both slots, hidden, so the icons line up.
+ */
+export function logToggles(log: LogView | undefined): { expand: ToggleState; wrap: ToggleState } {
+  const count = log?.lines?.length ?? 0;
+  const open = !!log?.open;
+  const wrap = !!log?.wrap;
+  return {
+    expand: {
+      className: `${open ? "on" : ""}${log && (open || count >= LOG_LINES.shown) ? "" : " off"}`,
+      title: open
+        ? `Show the last ${LOG_LINES.shown} lines`
+        : `Show more of the log (up to ${LOG_LINES.expanded} lines)`,
+      icon: icon(open ? "collapse" : "expand"),
+    },
+    wrap: {
+      className: `${wrap ? "on" : ""}${log && count ? "" : " off"}`,
+      title: wrap ? "Don't wrap long lines" : "Wrap long lines",
+      icon: icon("wrap"),
+    },
+  };
+}
 
 const icon = (name: string) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 
@@ -74,9 +109,9 @@ export function note(session: Session): string {
 }
 
 /** A working session's latest activity, filling its box from the bottom; links in it work. */
-function logBox(log: LogView): string {
+export function logBox(log: LogView): string {
   const all = log.lines ?? [];
-  const lines = log.open ? all : all.slice(log.wrap ? -SHOWN_WRAPPED : -SHOWN);
+  const lines = all.slice(-logLimit(log));
   const body = lines.length
     ? lines
         .map(
@@ -124,13 +159,11 @@ export function sessionCard(
       : "",
   ];
   const working = session.status === "working" && log !== undefined;
-  const count = log?.lines?.length ?? 0;
-  const expand = working && log.open;
-  const wrap = working && log.wrap;
+  const { expand, wrap } = logToggles(working ? log : undefined);
   const toggles = ended
     ? ""
-    : `<button class="${expand ? "on" : ""}${working && count > SHOWN ? "" : " off"}" data-expand="${id}" title="${expand ? `Show the last ${SHOWN} lines` : `Show the latest ${count} lines`}" aria-label="Expand the log">${icon(expand ? "collapse" : "expand")}</button>` +
-      `<button class="${wrap ? "on" : ""}${working && count ? "" : " off"}" data-wrap="${id}" title="${wrap ? "Don't wrap long lines" : "Wrap long lines"}" aria-label="Wrap the log's lines">${icon("wrap")}</button>`;
+    : `<button class="${expand.className}" data-expand="${id}" title="${expand.title}" aria-label="Expand the log">${expand.icon}</button>` +
+      `<button class="${wrap.className}" data-wrap="${id}" title="${wrap.title}" aria-label="Wrap the log's lines">${wrap.icon}</button>`;
   const stop = ended
     ? `<button class="stop" data-delete="${id}" title="Delete session" aria-label="Delete session">${icon("trash")}</button>`
     : session.status === "queued"

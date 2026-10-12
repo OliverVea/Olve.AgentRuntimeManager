@@ -266,7 +266,9 @@ describe("<session-list>'s log column (M5f)", () => {
       fakeApi({ sessions: [session("w")], activity: () => lines }),
     );
     await vi.waitFor(() => expect(shown(el, "w")).toHaveLength(3));
-    expect(button(el, '[data-expand="w"]').getAttribute("title")).toBe("Show the latest 5 lines");
+    expect(button(el, '[data-expand="w"]').getAttribute("title")).toBe(
+      "Show more of the log (up to 20 lines)",
+    );
 
     button(el, '[data-expand="w"]').click();
     expect(shown(el, "w")).toHaveLength(5);
@@ -335,5 +337,93 @@ describe("<session-list>'s log column (M5f)", () => {
     const reads = api.activityReads().length;
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(api.activityReads().length).toBeLessThanOrEqual(reads + 1);
+  });
+
+  it("asks for 3 lines, 8 for a wrapped card and 20 for an expanded one", async () => {
+    const api = fakeApi({ sessions: [session("w")], activity: () => lines.slice(0, 3) });
+    const { el } = await mountWithActivity(api);
+    await vi.waitFor(() => expect(shown(el, "w")).toHaveLength(3));
+    expect(new Set(api.activityReads("w").map((c) => c.search))).toEqual(new Set(["?limit=3"]));
+    // A full box may have more behind it.
+    expect(button(el, '[data-expand="w"]').classList.contains("off")).toBe(false);
+
+    button(el, '[data-wrap="w"]').click();
+    await vi.waitFor(() => expect(api.activityReads("w").at(-1)?.search).toBe("?limit=8"));
+    button(el, '[data-expand="w"]').click();
+    await vi.waitFor(() => expect(api.activityReads("w").at(-1)?.search).toBe("?limit=20"));
+  });
+
+  it("new lines update only that card's log, keeping focus and the other cards", async () => {
+    let said = "first";
+    const api = fakeApi({
+      sessions: [session("a"), session("b", { createdAt: "2026-09-26T10:01:00Z" })],
+      activity: (id) => [{ kind: "text", text: id === "a" ? said : "steady" }],
+    });
+    const { el } = await mountWithActivity(api);
+    await vi.waitFor(() => expect(shown(el, "a")).toEqual(["text: first"]));
+    await vi.waitFor(() => expect(shown(el, "b")).toEqual(["text: steady"]));
+    const cardA = el.shadowRoot!.querySelector('[data-open="a"]');
+    const logB = log(el, "b");
+    button(el, '[data-wrap="b"]').focus();
+    expect(el.shadowRoot!.activeElement?.getAttribute("data-wrap")).toBe("b");
+
+    said = "second";
+
+    await vi.waitFor(() => expect(shown(el, "a")).toEqual(["text: second"]));
+    expect(el.shadowRoot!.querySelector('[data-open="a"]')).toBe(cardA);
+    expect(log(el, "b")).toBe(logB);
+    expect(el.shadowRoot!.activeElement?.getAttribute("data-wrap")).toBe("b");
+  });
+
+  it("Options saved without a change to the log defaults keep each card's own choice", async () => {
+    const { el } = await mountWithActivity(
+      fakeApi({ sessions: [session("w")], activity: () => lines }),
+    );
+    await vi.waitFor(() => expect(shown(el, "w")).toHaveLength(3));
+    button(el, '[data-wrap="w"]').click();
+
+    el.logDefaults = { wrap: false, expand: false };
+
+    expect(log(el, "w")!.classList.contains("wrap")).toBe(true);
+  });
+
+  it("a card's own choice goes when its session ends: continued, it starts from the defaults", async () => {
+    const api = fakeApi({ sessions: [session("s1")], activity: () => lines });
+    const { el } = await mountWithActivity(api);
+    await vi.waitFor(() => expect(shown(el, "s1")).toHaveLength(3));
+    await vi.waitFor(() => expect(api.streams()).toBe(1));
+    button(el, '[data-wrap="s1"]').click();
+    expect(log(el, "s1")!.classList.contains("wrap")).toBe(true);
+    const at = "2026-09-26T10:05:00Z";
+
+    api.push({ type: "session.completed", at, sessionId: "s1", previous: "working", exitCode: 0 });
+    await vi.waitFor(() => expect(cards(el)).toHaveLength(0));
+    api.push({ type: "session.queued", at, sessionId: "s1", position: 1, previous: "completed" });
+    api.push({
+      type: "session.started",
+      at,
+      sessionId: "s1",
+      previous: "queued",
+      providerSessionId: "p",
+    });
+
+    await vi.waitFor(() => expect(shown(el, "s1")).toHaveLength(3));
+    expect(log(el, "s1")!.classList.contains("wrap")).toBe(false);
+  });
+
+  it("links: not one cut short by the bound, and not past a quote or '>'", async () => {
+    const { el } = await mountWithActivity(
+      fakeApi({
+        sessions: [session("w")],
+        activity: () => [
+          { kind: "text", text: "Opened https://example.com/a-very-long-pa…" },
+          { kind: "text", text: 'See "https://example.com/q?a=1&b=2" and <https://example.com/x>' },
+        ],
+      }),
+    );
+    await vi.waitFor(() => expect(shown(el, "w")).toHaveLength(2));
+
+    const hrefs = [...log(el, "w")!.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["https://example.com/q?a=1&b=2", "https://example.com/x"]);
   });
 });

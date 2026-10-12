@@ -37,7 +37,7 @@ src/frontend/
 │  ├─ api-errors.ts           ApiError / unwrap: SDK results → exceptions with the HTTP status
 │  ├─ sessions/
 │  │  ├─ session-store.ts     the sessions, from a snapshot + the event stream (see Live updates)
-│  │  ├─ activity-store.ts    working sessions' latest activity for the cards' logs, re-read every 3 s (M5f)
+│  │  ├─ activity-store.ts    working sessions' latest activity for the cards' logs, each re-read every 3 s (M5f)
 │  │  ├─ tool-gist.cases.json a tool call in short: cases the server's activity is tested against too
 │  │  ├─ new-session.ts       the composer's fields → a create request (validation)
 │  │  └─ format.ts            durations, times, ids, provider/model

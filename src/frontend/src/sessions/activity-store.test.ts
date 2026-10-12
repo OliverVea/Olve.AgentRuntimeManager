@@ -1,7 +1,7 @@
 import type { ActivityLine, Session } from "@arm/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeApi, session } from "../testing/fake-api.js";
-import { ACTIVITY_LINES, ActivityStore } from "./activity-store.js";
+import { ActivityStore } from "./activity-store.js";
 
 /** The working sessions, as the session store gives them, and changed by hand. */
 class Sessions extends EventTarget {
@@ -29,9 +29,15 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.stop();
 });
 
-function start(api: ReturnType<typeof fakeApi>, sessions: Sessions, page = new Page()) {
+function start(
+  api: ReturnType<typeof fakeApi>,
+  sessions: Sessions,
+  page = new Page(),
+  intervalMs = INTERVAL,
+) {
   const store = new ActivityStore(api.client, sessions, {
-    intervalMs: INTERVAL,
+    intervalMs,
+    timeoutMs: INTERVAL * 3,
     document: page as unknown as Document,
   });
   stores.push(store);
@@ -55,7 +61,7 @@ describe("ActivityStore", () => {
     expect(changed).toHaveBeenCalled();
     expect(store.lines("q")).toBeUndefined();
     expect(api.activityReads("q")).toHaveLength(0);
-    expect(api.activityReads("w")[0]?.search).toBe(`?limit=${ACTIVITY_LINES}`);
+    expect(api.activityReads("w")[0]?.search).toBe("?limit=3");
   });
 
   it("re-reads every few seconds while the session works, and stops once it has ended", async () => {
@@ -143,5 +149,66 @@ describe("ActivityStore", () => {
     await vi.waitFor(() => expect(api.activityReads().length).toBeGreaterThan(reads + 1));
 
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("asks for as many lines as a card shows: 3, or more when asked, read at once", async () => {
+    const api = fakeApi({ activity: () => [line("hi")] });
+    // A slow pace, so the reads can be counted.
+    const store = start(api, new Sessions([session("w")]), new Page(), 60_000);
+    await vi.waitFor(() => expect(store.lines("w")).toBeDefined());
+    expect(api.activityReads("w").map((c) => c.search)).toEqual(["?limit=3"]);
+
+    store.want("w", 20);
+
+    await vi.waitFor(() =>
+      expect(api.activityReads("w").map((c) => c.search)).toEqual(["?limit=3", "?limit=20"]),
+    );
+    store.want("w", 20); // the same again: no extra read
+    await settle();
+    expect(api.activityReads("w")).toHaveLength(2);
+  });
+
+  it("one hung read neither holds back the others nor stops its own: it times out and is read again", async () => {
+    let said = 1;
+    const api = fakeApi({ activity: (id) => (id === "slow" ? "hang" : [line(`line ${said}`)]) });
+    const store = start(api, new Sessions([session("slow"), session("fast")]));
+    await vi.waitFor(() => expect(store.lines("fast")).toEqual([line("line 1")]));
+
+    said = 2;
+
+    await vi.waitFor(() => expect(store.lines("fast")).toEqual([line("line 2")]));
+    await vi.waitFor(() => expect(api.activityReads("slow").length).toBeGreaterThanOrEqual(2));
+    expect(api.aborted()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("stop() aborts the reads in flight", async () => {
+    const api = fakeApi({ activity: () => "hang" });
+    const store = new ActivityStore(api.client, new Sessions([session("w")]), {
+      intervalMs: INTERVAL,
+      timeoutMs: 60_000,
+      document: new Page() as unknown as Document,
+    });
+    stores.push(store);
+    store.start();
+    await vi.waitFor(() => expect(api.activityReads()).toHaveLength(1));
+
+    store.stop();
+
+    await vi.waitFor(() => expect(api.aborted()).toBe(1));
+    store.start(); // and it can start again
+    await vi.waitFor(() => expect(api.activityReads()).toHaveLength(2));
+  });
+
+  it("a session whose read keeps failing is read at the usual pace, not on every change", async () => {
+    const api = fakeApi({ activity: (id) => (id === "gone" ? undefined : [line("hi")]) });
+    const sessions = new Sessions([session("gone"), session("ok")]);
+    const store = start(api, sessions, new Page(), 60_000);
+    await vi.waitFor(() => expect(store.lines("ok")).toBeDefined());
+    await settle();
+
+    for (let i = 0; i < 20; i++) sessions.set([session("gone"), session("ok", { prompt: `${i}` })]);
+    await settle();
+
+    expect(api.activityReads("gone")).toHaveLength(1);
   });
 });

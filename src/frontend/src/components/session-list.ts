@@ -1,8 +1,17 @@
 import { BaseElement, escapeHtml } from "../base-element.js";
-import type { ActivityStore } from "../sessions/activity-store.js";
+import type { ActivityChange, ActivityStore } from "../sessions/activity-store.js";
 import { isEnded } from "../sessions/format.js";
 import type { SessionStore } from "../sessions/session-store.js";
-import { cardStyles, type LogView, sessionCard, type TimesAs, timeOf } from "./session-card.js";
+import {
+  cardStyles,
+  type LogView,
+  logBox,
+  logLimit,
+  logToggles,
+  sessionCard,
+  type TimesAs,
+  timeOf,
+} from "./session-card.js";
 
 export type View = "overview" | "history";
 
@@ -24,10 +33,12 @@ export type LogDefaults = { wrap: boolean; expand: boolean };
  * ticks the running times in between; the composer and dialogs live outside it, so a live update
  * never touches what the user is typing.
  *
- * Working sessions' cards show their latest activity from an {@link ActivityStore} (M5f), which it
- * re-renders on too; each card's expand and wrap buttons flip that card from the defaults
- * (`logDefaults`, from Options), and new defaults apply to every card again. The log column isn't a
- * link to the session: its text can be selected and its links followed.
+ * Working sessions' cards show their latest activity from an {@link ActivityStore} (M5f): new lines
+ * replace only that card's log column (focus and the other cards stay as they are), and each card
+ * tells the store how many lines it shows. Each card's expand and wrap buttons flip that card from
+ * the defaults (`logDefaults`, from Options); different defaults apply to every card again, and a
+ * card's own choice goes when its session ends. The log column isn't a link to the session: its
+ * text can be selected and its links followed.
  *
  * It only reports what the user wants, as bubbling events whose `detail` is the session id:
  * `open-session`, `kill-session`, `delete-session`, `copy-id`; plus `toggle-times`.
@@ -43,7 +54,11 @@ export class SessionList extends BaseElement {
   #logDefaults: LogDefaults = { wrap: false, expand: false };
   /** Cards whose log is wrapped or expanded unlike the defaults. */
   readonly #flipped = { wrap: new Set<string>(), expand: new Set<string>() };
-  readonly #onChange = () => this.render();
+  readonly #onChange = () => {
+    this.#forgetEnded();
+    this.render();
+  };
+  readonly #onActivity = (e: Event) => this.#patchLog((e as CustomEvent<ActivityChange>).detail.id);
   readonly #onResize = () => this.#markOverflow();
 
   set store(store: SessionStore) {
@@ -54,15 +69,17 @@ export class SessionList extends BaseElement {
   }
 
   set activity(activity: ActivityStore) {
-    this.#activity?.removeEventListener("change", this.#onChange);
+    this.#activity?.removeEventListener("change", this.#onActivity);
     this.#activity = activity;
-    activity.addEventListener("change", this.#onChange);
+    activity.addEventListener("change", this.#onActivity);
     this.render();
   }
 
-  /** New defaults apply to every card, as the Options dialog says. */
+  /** Different defaults apply to every card, as the Options dialog says; the same ones change nothing. */
   set logDefaults(defaults: LogDefaults) {
-    this.#logDefaults = defaults;
+    if (defaults.wrap === this.#logDefaults.wrap && defaults.expand === this.#logDefaults.expand)
+      return;
+    this.#logDefaults = { ...defaults };
     this.#flipped.wrap.clear();
     this.#flipped.expand.clear();
     this.render();
@@ -140,15 +157,56 @@ export class SessionList extends BaseElement {
   #log(id: string): LogView {
     const flipped = (key: keyof LogDefaults) =>
       this.#logDefaults[key] !== this.#flipped[key].has(id);
-    return { lines: this.#activity?.lines(id), wrap: flipped("wrap"), open: flipped("expand") };
+    const view = {
+      lines: this.#activity?.lines(id),
+      wrap: flipped("wrap"),
+      open: flipped("expand"),
+    };
+    if (this.#store?.get(id)?.status === "working") this.#activity?.want(id, logLimit(view));
+    return view;
+  }
+
+  /** A card's own expand and wrap choices go once its session has ended (or is gone). */
+  #forgetEnded(): void {
+    for (const set of [this.#flipped.wrap, this.#flipped.expand]) {
+      for (const id of set) {
+        const session = this.#store?.get(id);
+        if (!session || isEnded(session)) set.delete(id);
+      }
+    }
+  }
+
+  /** One working card's log column and buttons, updated in place: the rest of the list, and focus, stay. */
+  #patchLog(id: string): void {
+    const card = this.query<HTMLElement>(`.card[data-open="${CSS.escape(id)}"]`);
+    const logcol = card?.querySelector<HTMLElement>(".logcol");
+    if (!card || !logcol || this.#store?.get(id)?.status !== "working") return;
+    const view = this.#log(id);
+    logcol.innerHTML = logBox(view);
+    const toggles = logToggles(view);
+    for (const [key, state] of [
+      ["expand", toggles.expand],
+      ["wrap", toggles.wrap],
+    ] as const) {
+      const button = card.querySelector<HTMLElement>(`[data-${key}]`);
+      if (!button) continue;
+      button.className = state.className;
+      button.title = state.title;
+      if (button.innerHTML !== state.icon) button.innerHTML = state.icon;
+    }
+    this.#markOverflow(card);
   }
 
   /** Fade rows and log lines that are wider than the card, and the top of wrapped logs that overflow. */
-  #markOverflow(): void {
-    for (const row of this.queryAll<HTMLElement>(".info, .r1, .log:not(.wrap) > div")) {
+  #markOverflow(within?: HTMLElement): void {
+    const all = (selector: string) =>
+      within
+        ? [...within.querySelectorAll<HTMLElement>(selector)]
+        : this.queryAll<HTMLElement>(selector);
+    for (const row of all(".info, .r1, .log:not(.wrap) > div")) {
       row.classList.toggle("overflows", row.scrollWidth > row.clientWidth + 1);
     }
-    for (const box of this.queryAll<HTMLElement>(".log.wrap:not(.open)")) {
+    for (const box of all(".log.wrap:not(.open)")) {
       const height = [...box.children].reduce(
         (sum, l) => sum + l.getBoundingClientRect().height,
         0,
@@ -193,7 +251,7 @@ export class SessionList extends BaseElement {
   #flip(key: keyof LogDefaults, id: string): void {
     const set = this.#flipped[key];
     if (!set.delete(id)) set.add(id);
-    this.render();
+    this.#patchLog(id);
   }
 
   /** Enter opens the focused card; Delete asks to kill (or delete) it. */

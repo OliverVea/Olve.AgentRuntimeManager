@@ -37,7 +37,8 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
  * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
  * DELETEs wait for `releaseEnvWrites`. `activity` is what `GET /api/sessions/{id}/activity`
- * answers for a session (its lines; 404 when it gives none), read when asked.
+ * answers for a session (its lines; 404 when it gives none; `"hang"`: no answer until the request
+ * is aborted, counted by `aborted()`), read when asked.
  */
 export function fakeApi(
   options: {
@@ -45,7 +46,7 @@ export function fakeApi(
     search?: () => Response;
     providers?: ProviderHealth[];
     env?: EnvVariable[];
-    activity?: (id: string) => ActivityLine[] | undefined;
+    activity?: (id: string) => ActivityLine[] | undefined | "hang";
   } = {},
 ) {
   const calls: Call[] = [];
@@ -57,6 +58,7 @@ export function fakeApi(
   let events: ReadableStreamDefaultController<Uint8Array> | undefined;
   let nextId = 1;
   let held: Array<() => void> | undefined;
+  let aborted = 0;
 
   const searchResponse = (body: SessionSearch) => {
     if (options.search) return options.search();
@@ -87,6 +89,16 @@ export function fakeApi(
     const activityOf = url.pathname.match(/^\/api\/sessions\/([^/]+)\/activity$/);
     if (request.method === "GET" && activityOf) {
       const lines = options.activity?.(activityOf[1] ?? "");
+      if (lines === "hang") {
+        return new Promise<Response>((_, reject) => {
+          const abort = () => {
+            aborted++;
+            reject(new DOMException("aborted", "AbortError"));
+          };
+          if (request.signal.aborted) abort();
+          else request.signal.addEventListener("abort", abort);
+        });
+      }
       return lines
         ? Response.json({ lines })
         : Response.json(
@@ -167,6 +179,8 @@ export function fakeApi(
     },
     streams: () => calls.filter((c) => c.path === "/api/events").length,
     searches: () => calls.filter((c) => c.path === "/api/sessions/search"),
+    /** How many hung activity reads were aborted. */
+    aborted: () => aborted,
     /** The activity reads, of one session or of all. */
     activityReads: (id?: string) =>
       calls.filter((c) =>

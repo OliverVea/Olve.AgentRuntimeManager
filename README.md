@@ -105,9 +105,13 @@ input in short, by the same rules as the web UI's session page: description, els
 `cd`/`export`/`eval`, file path, pattern or URL, else the input as JSON) or an `error` (a failed
 tool result or turn, in its line that says what went wrong; for a failed session, its error last).
 Thinking, notices, prompts, results and turn ends that didn't fail, and subagents' entries are left
-out. Every line is one line of at most 200 characters, cut with `…`. It reads the conversation from
-its end, only as far as it needs: `claude` reads `output.jsonl` backwards in 64 KB chunks, so a long
-conversation costs no more than its last few events.
+out. Every line is one line of at most 200 characters, cut with `…`, without control or invisible
+format characters (bidi overrides, zero-width characters); only a text's first 4 KiB are shaped. It
+reads the conversation from its end, only as far as it needs and never further than its recent end:
+`claude` reads `output.jsonl` backwards in 64 KB chunks, at most its last 1 MiB, skipping any event
+over 256 KiB without decoding it, so a long conversation (or one an agent filled on purpose) costs no
+more than that; when nothing there is worth showing, fewer lines come back. The web UI reads 3 lines
+per working card (8 wrapped, 20 expanded), each card on its own every 3 s.
 
 `POST /api/sessions/{id}/messages` (`arm session message <id> "…"`, M11) tells a session's agent
 something. While it works, the message goes straight to the agent, which sees it after its current

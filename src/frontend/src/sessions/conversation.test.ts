@@ -52,6 +52,17 @@ describe("conversation helpers", () => {
     }
   });
 
+  it("preview of an error doesn't take a count of none for the cause", () => {
+    expect(
+      preview(
+        entry(2, "tool_result", { isError: true, text: "0 errors, 3 warnings\nfatal: boom" }),
+      ),
+    ).toBe("fatal: boom");
+    expect(preview(entry(2, "tool_result", { isError: true, text: "TypeError: x" }))).toBe(
+      "TypeError: x",
+    );
+  });
+
   it("gist prefers a description, then the command's gist, a file, a pattern", () => {
     expect(gist(entry(1, "tool_call", { tool: "Bash", input: { command: "cd x && ls" } }))).toBe(
       "ls",
