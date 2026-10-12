@@ -109,12 +109,23 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         // Kept until it exits, so it's reaped; it outlives this server if need be.
         _ = process.WaitForExitAsync().ContinueWith(_ => process.Dispose(), TaskScheduler.Default);
         logger.LogInformation("Session {SessionId}: supervisor {Pid} started for run {RunId}", sessionId, process.Id, runId);
-        return Follow(new SupervisedAgent(socketPath, folder, runId, settings.ConnectTimeout));
+        return Follow(new SupervisedAgent(socketPath, folder, runId, settings.ConnectTimeout, HelloTimeout(launch.Repos.Count, launch.GitTimeout)));
     }
 
-    /// <summary>Follows a run whose supervisor was started earlier (by this server or the one before).</summary>
-    public SupervisedAgent Attach(Guid sessionId, Guid runId, string folder) =>
-        Follow(new SupervisedAgent(SocketPath(sessionId), folder, runId, options.Value.ConnectTimeout));
+    /// <summary>
+    /// Follows a run whose supervisor was started earlier (by this server or the one before), which
+    /// may still be checking out <paramref name="repos"/> repositories with <paramref name="gitTimeout"/>.
+    /// </summary>
+    public SupervisedAgent Attach(Guid sessionId, Guid runId, string folder, int repos = 0, TimeSpan? gitTimeout = null) =>
+        Follow(new SupervisedAgent(SocketPath(sessionId), folder, runId, options.Value.ConnectTimeout,
+            HelloTimeout(repos, gitTimeout ?? SupervisorLaunch.DefaultGitTimeout)));
+
+    /// <summary>
+    /// How long a supervisor may take to greet: the checkout's limit (it stops the checkout there),
+    /// and time for it to clean up after one stopped (git's grace, a removal) and start the agent.
+    /// </summary>
+    private static TimeSpan HelloTimeout(int repos, TimeSpan gitTimeout) =>
+        repos == 0 ? TimeSpan.Zero : SupervisorLaunch.CheckoutLimit(repos, gitTimeout) + TimeSpan.FromMinutes(1);
 
     public void Dispose()
     {
@@ -273,8 +284,8 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         }
     }
 
-    /// <summary>The supervisor's own git command is bounded at 60 s; this leaves it room to say so.</summary>
-    private static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(90);
+    /// <summary>The supervisor's <c>remove-worktree</c> bounds itself at 20 s; this leaves it room to say so.</summary>
+    public static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(25);
 
     /// <summary>
     /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):

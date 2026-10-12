@@ -15,7 +15,9 @@ public sealed class RepoOptions
     /// <summary>
     /// The longest one git command of a checkout (a clone's fetch, mostly) may take; then the
     /// checkout fails, and with it the session. A session waiting for another's checkout of the same
-    /// repository waits up to four times this.
+    /// repository waits up to four times this. A first clone that takes longer than this can never
+    /// succeed (each attempt starts over): raise it for a large repository. A whole checkout is
+    /// bounded by <c>SupervisorLaunch.CheckoutLimit</c> (eight of these per repository, and a minute).
     /// </summary>
     public TimeSpan GitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }

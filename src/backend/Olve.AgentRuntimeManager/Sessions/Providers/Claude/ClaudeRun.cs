@@ -51,6 +51,8 @@ internal sealed class ClaudeRun : IAgentRun
 
     public string ProviderSessionId { get; }
 
+    public bool AgentStarted => _agent.AgentStarted;
+
     public Task<AgentOutcome> Completion { get; }
 
     public void Kill()

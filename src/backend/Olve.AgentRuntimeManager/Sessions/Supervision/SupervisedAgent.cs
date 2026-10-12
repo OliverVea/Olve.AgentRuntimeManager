@@ -12,6 +12,14 @@ namespace Olve.AgentRuntimeManager.Sessions.Supervision;
 /// connection drops; once the supervisor is gone, the run's files finish the story (the rest of
 /// <c>output.jsonl</c>, then <c>exit.json</c>). Commands given before it's connected are queued.
 /// </summary>
+/// <remarks>
+/// A supervisor that checks out repositories first (M5e) greets only once its agent runs. Until
+/// then, a connection it holds open means it's alive and still checking out; a connection that
+/// drops, with no socket to reconnect to and no exit file within the connect timeout, means it's
+/// lost. The wait for the greeting is bounded too (<c>helloTimeout</c>: the checkout's limit, and a
+/// margin): past it, the run is killed and fails. A kill is sent at once, greeting or not (it stops
+/// the checkout); everything else waits for the greeting, as it needs the agent.
+/// </remarks>
 public sealed class SupervisedAgent
 {
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
@@ -22,6 +30,12 @@ public sealed class SupervisedAgent
     private readonly TimeSpan _connectTimeout;
     private readonly Channel<string> _lines = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleWriter = true });
     private readonly Channel<SupervisorMessage> _outgoing = Channel.CreateUnbounded<SupervisorMessage>();
+
+    /// <summary>The kill: sent as soon as there's a connection, before the hello too.</summary>
+    private readonly Channel<SupervisorMessage> _urgent = Channel.CreateUnbounded<SupervisorMessage>();
+
+    /// <summary>Until when a supervisor may hold off its hello (a checkout); a run that hasn't started its agent by then fails.</summary>
+    private readonly DateTimeOffset _helloDeadline;
     private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _detach = new();
 
@@ -29,14 +43,21 @@ public sealed class SupervisedAgent
     private long? _offset;
     private long? _stderrStart;
 
-    internal SupervisedAgent(string socketPath, string folder, Guid runId, TimeSpan connectTimeout)
+    internal SupervisedAgent(string socketPath, string folder, Guid runId, TimeSpan connectTimeout, TimeSpan helloTimeout = default)
     {
         _socketPath = socketPath;
         _folder = folder;
         _runId = runId;
         _connectTimeout = connectTimeout;
+        _helloDeadline = DateTimeOffset.UtcNow + connectTimeout + helloTimeout;
         _ = Task.Run(RunAsync);
     }
+
+    /// <summary>
+    /// Whether the run's agent started (its supervisor greeted, or left a <c>supervisor.json</c> of
+    /// the run): false while it checks out, and for a run that ended without one (a failed or killed checkout).
+    /// </summary>
+    public bool AgentStarted { get; private set; }
 
     /// <summary>
     /// Why the run ended without an agent (a checkout that failed, M5e; a command that didn't start),
@@ -55,7 +76,8 @@ public sealed class SupervisedAgent
 
     public void CloseInput() => _outgoing.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.CloseInput });
 
-    public void Kill() => _outgoing.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.Kill });
+    /// <summary>Kills the agent, or stops the checkout before it (for this run only: the message carries its id).</summary>
+    public void Kill() => _urgent.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.Kill, RunId = _runId });
 
     /// <summary>
     /// Lets go of the supervisor without stopping the agent, as a server that exits does: the
@@ -94,9 +116,9 @@ public sealed class SupervisedAgent
             var deadline = DateTimeOffset.UtcNow + _connectTimeout;
             while (true)
             {
+                Followed? followed = null;
                 if (await TryConnectAsync(detached) is { } socket)
                 {
-                    Followed followed;
                     using (socket)
                     {
                         followed = await FollowAsync(socket, detached);
@@ -113,6 +135,20 @@ public sealed class SupervisedAgent
                         deadline = DateTimeOffset.UtcNow + _connectTimeout;
                         continue;
                     }
+                }
+
+                if (followed == Followed.NoHello)
+                {
+                    // The kill went out; a moment for the supervisor to clean up and end (its exit file),
+                    // but the run fails for not having started its agent in time, whatever that says.
+                    deadline = DateTimeOffset.UtcNow + _connectTimeout;
+                    while (ReadExit() is null && DateTimeOffset.UtcNow < deadline)
+                    {
+                        await Task.Delay(50, detached);
+                    }
+
+                    Fail($"The supervisor didn't start run {_runId}'s agent in time (by {_helloDeadline:O}); it was killed.");
+                    return;
                 }
 
                 if (ReadExit() is { } exit)
@@ -161,6 +197,8 @@ public sealed class SupervisedAgent
         Dropped,
         /// <summary>Another run's supervisor answered: this run's is gone.</summary>
         Foreign,
+        /// <summary>The supervisor didn't greet (start the agent) by the deadline: the run was killed.</summary>
+        NoHello,
     }
 
     /// <summary>Reads the supervisor's stream until the agent's exit or the connection drops.</summary>
@@ -169,10 +207,21 @@ public sealed class SupervisedAgent
         await using var stream = new NetworkStream(socket, ownsSocket: false);
         using var reader = new StreamReader(stream, Utf8);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(detached);
+        // One writer at a time on the stream: the kill, the attach and the rest.
+        using var sending = new SemaphoreSlim(1, 1);
+        // Until the hello, reading is bounded by its deadline.
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(detached);
+        if (!AgentStarted)
+        {
+            var left = _helloDeadline - DateTimeOffset.UtcNow;
+            waiting.CancelAfter(left > TimeSpan.Zero ? left : TimeSpan.Zero);
+        }
+
+        var urgent = PumpAsync(_urgent, stream, sending, stop.Token);
         Task? writing = null;
         try
         {
-            while (await reader.ReadLineAsync(detached) is { } json)
+            while (await reader.ReadLineAsync(waiting.Token) is { } json)
             {
                 var message = JsonSerializer.Deserialize(json, SupervisorJsonContext.Default.SupervisorMessage);
                 switch (message?.Type)
@@ -183,10 +232,12 @@ public sealed class SupervisedAgent
                             return Followed.Foreign;
                         }
 
+                        waiting.CancelAfter(Timeout.InfiniteTimeSpan);
+                        AgentStarted = true;
                         _offset ??= message.OutputStart;
                         _stderrStart ??= message.StderrStart;
-                        await SendAsync(stream, new SupervisorMessage { Type = SupervisorMessage.Attach, Offset = _offset }, detached);
-                        writing = PumpOutgoingAsync(stream, stop.Token);
+                        await SendLockedAsync(stream, sending, new SupervisorMessage { Type = SupervisorMessage.Attach, Offset = _offset }, detached);
+                        writing = PumpAsync(_outgoing, stream, sending, stop.Token);
                         break;
                     case SupervisorMessage.Output when message.Line is { } line:
                         _offset = message.End;
@@ -201,6 +252,21 @@ public sealed class SupervisedAgent
 
             return Followed.Dropped;
         }
+        catch (OperationCanceledException) when (!detached.IsCancellationRequested && waiting.IsCancellationRequested)
+        {
+            // No hello in time: kill whatever it's doing (the checkout), and say so.
+            using var flushing = new CancellationTokenSource(_connectTimeout);
+            try
+            {
+                await SendLockedAsync(stream, sending, new SupervisorMessage { Type = SupervisorMessage.Kill, RunId = _runId }, flushing.Token);
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or IOException or SocketException)
+            {
+                // It's gone anyway.
+            }
+
+            return Followed.NoHello;
+        }
         catch (Exception exception) when (exception is IOException or SocketException)
         {
             return Followed.Dropped;
@@ -208,6 +274,7 @@ public sealed class SupervisedAgent
         finally
         {
             await stop.CancelAsync();
+            await urgent;
             if (writing is not null)
             {
                 await writing;
@@ -215,22 +282,36 @@ public sealed class SupervisedAgent
         }
     }
 
-    private async Task PumpOutgoingAsync(Stream stream, CancellationToken cancellationToken)
+    /// <summary>Sends <paramref name="channel"/>'s messages in order; one not sent (the connection ended) is sent on the next.</summary>
+    private static async Task PumpAsync(Channel<SupervisorMessage> channel, Stream stream, SemaphoreSlim sending, CancellationToken cancellationToken)
     {
         try
         {
-            while (await _outgoing.Reader.WaitToReadAsync(cancellationToken))
+            while (await channel.Reader.WaitToReadAsync(cancellationToken))
             {
-                while (_outgoing.Reader.TryPeek(out var message))
+                while (channel.Reader.TryPeek(out var message))
                 {
-                    await SendAsync(stream, message, cancellationToken);
-                    _outgoing.Reader.TryRead(out _);
+                    await SendLockedAsync(stream, sending, message, cancellationToken);
+                    channel.Reader.TryRead(out _);
                 }
             }
         }
         catch (Exception exception) when (exception is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
         {
             // The connection ended; what's left is sent on the next one.
+        }
+    }
+
+    private static async Task SendLockedAsync(Stream stream, SemaphoreSlim sending, SupervisorMessage message, CancellationToken cancellationToken)
+    {
+        await sending.WaitAsync(cancellationToken);
+        try
+        {
+            await SendAsync(stream, message, cancellationToken);
+        }
+        finally
+        {
+            sending.Release();
         }
     }
 
@@ -247,6 +328,7 @@ public sealed class SupervisedAgent
     private void FinishFromFiles(SupervisorExit exit)
     {
         var info = SupervisorFiles.ReadInfo(_folder) is { } i && i.RunId == _runId ? i : null;
+        AgentStarted |= info is not null;
         _stderrStart ??= info?.StderrStart;
         var outputPath = Path.Combine(_folder, SupervisorFiles.Output);
         // No info: the agent never started, so it wrote nothing.

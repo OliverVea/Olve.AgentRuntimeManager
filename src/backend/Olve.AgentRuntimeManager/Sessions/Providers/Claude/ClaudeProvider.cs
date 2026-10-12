@@ -65,7 +65,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         if (exit is not null || supervisors.IsListening(recovery.SessionId))
         {
             logger.LogInformation("Session {SessionId}: re-attaching to run {RunId}", recovery.SessionId, recovery.RunId);
-            var attached = supervisors.Attach(recovery.SessionId, recovery.RunId, folder);
+            var attached = supervisors.Attach(recovery.SessionId, recovery.RunId, folder, recovery.Repos?.Count ?? 0, repos.GitTimeout);
             return new RecoveredAgent(new ClaudeRun(attached, recovery.ProviderSessionId, settings.ExitGrace), Resumed: false);
         }
 
@@ -86,6 +86,16 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
                     recovery.SessionId, recovery.RunId);
                 return new RecoveredAgent(new EndedRun(recovery.ProviderSessionId, new AgentOutcome.Failed(OrphanAlive)), Resumed: false);
             }
+        }
+        else
+        {
+            // No supervisor.json of the run: its agent never started (the supervisor was lost during
+            // the checkout, M5e), so there's no Claude session to resume. It starts afresh, with its prompt.
+            logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone and its agent never started; starting it as run {ResumeRunId}",
+                recovery.SessionId, recovery.RunId, recovery.ResumeRunId);
+            var fresh = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--session-id", recovery.ProviderSessionId],
+                [(Guid.NewGuid(), recovery.Prompt)], recovery.Env, recovery.Repos);
+            return new RecoveredAgent(new ClaudeRun(fresh, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
         }
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",

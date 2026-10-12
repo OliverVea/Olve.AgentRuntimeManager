@@ -23,6 +23,7 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
             Shared = Path.Combine(Root(), RepoNames.Shared(repo.Url)),
             Path = Worktree(workplace, repo),
             Branch = RepoNames.Branch(sessionId),
+            Owner = sessionId.ToString(),
         })];
 
     /// <summary>Where the agent starts: in the repository when there's exactly one (so it reads its <c>CLAUDE.md</c>), else the workplace.</summary>
@@ -33,11 +34,16 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
     /// Removes a deleted session's worktrees from the shared copies (their branches stay there).
     /// Best effort: what can't be removed is logged, and the session is deleted anyway.
     /// </summary>
+    /// <remarks>All at once, each bounded (<see cref="Supervisors.RemoveTimeout"/>): a delete waits for this.</remarks>
     public void Remove(Guid sessionId, string workplace, IReadOnlyList<RepoRecord> repos)
     {
-        foreach (var repo in Plan(sessionId, workplace, repos))
+        var removals = Plan(sessionId, workplace, repos)
+            .Select(repo => Task.Run(() => (Repo: repo, Error: supervisors.RemoveWorktree(repo.Shared, repo.Path))))
+            .ToArray();
+        Task.WaitAll(removals);
+        foreach (var (repo, error) in removals.Select(r => r.Result))
         {
-            if (supervisors.RemoveWorktree(repo.Shared, repo.Path) is { } error)
+            if (error is not null)
             {
                 logger.LogWarning("Session {SessionId}: could not remove its worktree {Worktree} of {Url}: {Error}", sessionId, repo.Path, repo.Url, error);
             }
