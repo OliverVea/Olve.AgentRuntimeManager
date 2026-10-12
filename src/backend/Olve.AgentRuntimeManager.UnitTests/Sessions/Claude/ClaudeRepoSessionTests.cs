@@ -7,6 +7,7 @@ using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Persistence;
 using Olve.AgentRuntimeManager.UnitTests.Support;
 
@@ -25,6 +26,7 @@ public class ClaudeRepoSessionTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("arm-repo-sessions-").FullName;
     private readonly TestDatabase _database = new();
     private readonly Supervisors _supervisors;
+    private readonly ClaudeProvider _provider;
     private readonly SessionManager _sessions;
 
     public ClaudeRepoSessionTests()
@@ -33,12 +35,10 @@ public class ClaudeRepoSessionTests : IDisposable
             Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
         var repos = new RepoCheckouts(
             Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos"), GitTimeout = TimeSpan.FromSeconds(20) }), _supervisors, NullLogger<RepoCheckouts>.Instance);
-        var provider = new ClaudeProvider(
+        _provider = new ClaudeProvider(
             Options.Create(new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") }),
             _supervisors, repos, NullLogger<ClaudeProvider>.Instance);
-        _sessions = new SessionManager(
-            new EventBus(TimeProvider.System, Options.Create(new EventOptions())), TimeProvider.System,
-            Options.Create(new SessionOptions()), [provider], _database.Store(), NullLogger<SessionManager>.Instance);
+        _sessions = Manager(TimeProvider.System);
     }
 
     public void Dispose()
@@ -86,13 +86,14 @@ public class ClaudeRepoSessionTests : IDisposable
         var completed = await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
 
         var worktree = Path.Combine(Workplace(session), "alpha");
+        await Assert.That(File.Exists(Path.Combine(worktree, "README.md"))).IsTrue();
         await Assert.That(failed.Error).StartsWith($"Checking out {path} failed: ");
         await Assert.That(sent).IsTypeOf<MessageOutcome.Continued>();
         await Assert.That(completed.Attempts).IsEqualTo(2);
-        var arguments = Arguments(worktree);
+        var arguments = Arguments(Workplace(session));
         await Assert.That(arguments).Contains("--session-id");
         await Assert.That(arguments).DoesNotContain("--resume");
-        var told = (await File.ReadAllLinesAsync(Path.Combine(worktree, "input.jsonl"))).Select(l => ClaudeProviderTests.Told(l) ?? "").ToList();
+        var told = (await File.ReadAllLinesAsync(Path.Combine(Workplace(session), "input.jsonl"))).Select(l => ClaudeProviderTests.Told(l) ?? "").ToList();
         await Assert.That(told).IsEquivalentTo(["the task", "try again"]);
     }
 
@@ -110,13 +111,74 @@ public class ClaudeRepoSessionTests : IDisposable
         var completed = await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
 
         var worktree = Path.Combine(Workplace(session), "alpha");
+        await Assert.That(File.Exists(Path.Combine(worktree, "README.md"))).IsTrue();
         await Assert.That(completed.Attempts).IsEqualTo(2);
         await Assert.That(AgentRuns(session)).IsEqualTo(1);
-        await Assert.That(Arguments(worktree)).DoesNotContain("--resume");
+        await Assert.That(Arguments(Workplace(session))).DoesNotContain("--resume");
     }
 
-    private SessionRecord Create(string url, GatedSsh? gate = null, int? timeoutSeconds = null) =>
-        _sessions.Create(new CreateSession
+    [Test]
+    public async Task ManySessions_KilledDuringTheirCheckouts_ThenContinued_EachRunsOneAgent()
+    {
+        // At once, so supervisors start, connect and end out of step: two runs of a session meet
+        // (their sockets, the kill reaching the old one before it starts an agent).
+        var sessions = await Task.WhenAll(Enumerable.Range(0, 6).Select(async i =>
+        {
+            var origin = TestGit.Origin(Path.Combine(_root, "origin", $"o{i}", "alpha"));
+            var gate = new GatedSsh(_root);
+            var session = Create(GatedSsh.Url(origin), gate);
+            await gate.ReachedAsync(Guard);
+            _sessions.Kill(session.Id, null, KillSource.User);
+            _sessions.Send(session.Id, "go on", "tests");
+            gate.Release();
+            return session;
+        }));
+
+        foreach (var session in sessions)
+        {
+            var completed = await Eventually(session.Id, s => SessionLifecycle.IsTerminal(s.Status) && s.Attempts == 2);
+            await Assert.That(completed.Status).IsEqualTo(SessionStatus.Completed);
+            await Assert.That(AgentRuns(session)).IsEqualTo(1);
+        }
+    }
+
+    [Test]
+    public async Task Delete_WhileAnotherSessionHoldsTheRepository_KeepsTheWorktreeForLater_ThenRemovesIt()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        using var sessions = Manager(time);
+        var session = Create(origin, sessions: sessions);
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed, sessions);
+        var worktree = Path.Combine(Workplace(session), "alpha");
+
+        DeleteOutcome deleted;
+        // Another session's checkout holds the shared copy longer than a delete waits for it.
+        using (var held = Posix.OpenLockFile(Path.Combine(_root, "repos", RepoNames.Shared(origin) + ".lock")))
+        {
+            await Assert.That(Posix.TryLock(held)).IsTrue();
+            deleted = sessions.Delete(session.Id);
+        }
+
+        var keptForLater = _database.Removals().Due(DateTimeOffset.MaxValue).ToList();
+        var stillThere = Directory.Exists(worktree);
+        time.Advance(SessionManager.WorktreeRemovalBackoff);
+        sessions.RetryWorktreeRemovals();
+
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(sessions.Get(session.Id)).IsNull();
+        await Assert.That(stillThere).IsTrue();
+        await Assert.That(keptForLater.Select(r => r.SessionId)).IsEquivalentTo([session.Id]);
+        await Assert.That(Directory.Exists(worktree)).IsFalse();
+        await Assert.That(_database.Removals().Due(DateTimeOffset.MaxValue)).IsEmpty();
+    }
+
+    private SessionManager Manager(TimeProvider time) => new(
+        new EventBus(time, Options.Create(new EventOptions())), time,
+        Options.Create(new SessionOptions()), [_provider], _database.Store(), NullLogger<SessionManager>.Instance, _database.Removals());
+
+    private SessionRecord Create(string url, GatedSsh? gate = null, int? timeoutSeconds = null, SessionManager? sessions = null) =>
+        (sessions ?? _sessions).Create(new CreateSession
         {
             Prompt = "the task", Provider = ClaudeProvider.ProviderName, Model = "sonnet", Caller = "tests", TimeoutSeconds = timeoutSeconds,
             Repos = [new CreateSessionRepo { Url = url }],
@@ -143,15 +205,16 @@ public class ClaudeRepoSessionTests : IDisposable
     private static string[] Arguments(string directory) =>
         [.. File.ReadAllLines(Path.Combine(directory, "invocation.txt")).Where(l => l.StartsWith("arg:", StringComparison.Ordinal)).Select(l => l[4..])];
 
-    private async Task<SessionRecord> Eventually(Guid id, Func<SessionRecord, bool> condition)
+    private async Task<SessionRecord> Eventually(Guid id, Func<SessionRecord, bool> condition, SessionManager? sessions = null)
     {
+        sessions ??= _sessions;
         using var timeout = new CancellationTokenSource(Guard);
-        while (_sessions.Get(id) is not { } session || !condition(session))
+        while (sessions.Get(id) is not { } session || !condition(session))
         {
             await Task.Delay(20, timeout.Token);
         }
 
-        return _sessions.Get(id)!;
+        return sessions.Get(id)!;
     }
 
     private static async Task Until(Func<bool> condition)

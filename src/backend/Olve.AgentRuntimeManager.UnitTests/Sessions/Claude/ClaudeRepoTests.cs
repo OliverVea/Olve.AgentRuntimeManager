@@ -45,7 +45,7 @@ public class ClaudeRepoTests
     }
 
     [Test]
-    public async Task OneRepo_IsAWorktreeOnTheSessionsBranch_AndTheAgentStartsInIt()
+    public async Task OneRepo_IsAWorktreeOnTheSessionsBranch_AndTheAgentStartsInTheWorkplace()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var launch = Launch(new RepoRecord(origin));
@@ -57,7 +57,7 @@ public class ClaudeRepoTests
         await Assert.That(TestGit.Run(worktree, "rev-parse", "--abbrev-ref", "HEAD")).IsEqualTo($"arm/{launch.SessionId.ToString()[..8]}");
         await Assert.That(TestGit.Head(worktree)).IsEqualTo(TestGit.Head(origin));
         await Assert.That(File.Exists(Path.Combine(worktree, "README.md"))).IsTrue();
-        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+        await Assert.That((await Environment(Workplace(launch)))["PWD"]).IsEqualTo(Workplace(launch));
         // A worktree of the shared bare copy, not a clone of its own.
         await Assert.That(File.Exists(Path.Combine(worktree, ".git"))).IsTrue();
         await Assert.That(Directory.GetDirectories(SharedRoot, "alpha-*.git")).Count().IsEqualTo(1);
@@ -273,7 +273,114 @@ public class ClaudeRepoTests
         var worktree = Path.Combine(Workplace(launch), "alpha");
         await Assert.That(recovered.Resumed).IsFalse();
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
-        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+        await Assert.That((await Environment(Workplace(launch)))["PWD"]).IsEqualTo(Workplace(launch));
+    }
+
+    [Test]
+    public async Task Continuing_WithTheWorkRootBehindALink_KeepsTheWorktree()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var real = Directory.CreateDirectory(Path.Combine(_root, "real-sessions")).FullName;
+        var linked = Path.Combine(_root, "linked-sessions");
+        Directory.CreateSymbolicLink(linked, real);
+        var provider = Provider(workRoot: linked);
+        var launch = Launch(new RepoRecord(origin));
+        var run = provider.Start(launch);
+        await run.Completion.WaitAsync(Guard);
+        var worktree = Path.Combine(linked, launch.SessionId.ToString(), "work", "alpha");
+        await File.WriteAllTextAsync(Path.Combine(worktree, "notes.txt"), "uncommitted");
+
+        var continued = launch with { Attempt = 2, RunId = Guid.NewGuid(), Resume = run.ProviderSessionId, Messages = ["carry on"] };
+        var outcome = await provider.Start(continued).Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(await File.ReadAllTextAsync(Path.Combine(worktree, "notes.txt"))).IsEqualTo("uncommitted");
+    }
+
+    [Test]
+    public async Task SupervisorLost_DuringAContinuedRunsCheckout_ResumesWithItsMessages()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var first = new GatedSsh(_root);
+        first.Release();
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = first.Env };
+        var (_, provider) = Server();
+        var run = provider.Start(launch);
+        await run.Completion.WaitAsync(Guard);
+        // Its worktree gone, the session continues: the new run checks out again (held at the gate).
+        Directory.Delete(Path.Combine(Workplace(launch), "alpha"), recursive: true);
+        var gate = new GatedSsh(_root);
+        var continued = launch with { Attempt = 2, RunId = Guid.NewGuid(), Resume = run.ProviderSessionId, Messages = ["carry on"], Env = gate.Env };
+        var (before, again) = Server();
+        _ = again.Start(continued);
+        await gate.ReachedAsync(Guard);
+
+        // ARM and the supervisor (with its git) die mid-checkout: this run's agent never started,
+        // but the Claude session it resumes exists.
+        before.Dispose();
+        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
+        foreach (var supervisor in supervisors)
+        {
+            Posix.Kill(-supervisor, Posix.SigKill);
+            Posix.Kill(supervisor, Posix.SigKill);
+        }
+
+        await Until(() => !before.IsListening(launch.SessionId));
+        gate.Release();
+        var (_, after) = Server();
+        var recovered = after.Recover(new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, run.ProviderSessionId,
+            continued.RunId, Guid.NewGuid(), continued.Env, launch.Repos, Resume: run.ProviderSessionId, Messages: ["carry on"]));
+        var outcome = await recovered!.Run.Completion.WaitAsync(Guard);
+
+        var arguments = await Arguments(Workplace(launch));
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(arguments).Contains("--resume");
+        await Assert.That(arguments).Contains(run.ProviderSessionId);
+        await Assert.That(arguments).DoesNotContain("--session-id");
+        var told = await File.ReadAllLinesAsync(Path.Combine(Workplace(launch), "prompt.jsonl"));
+        await Assert.That(ClaudeProviderTests.Told(told[^1])).IsEqualTo("carry on");
+    }
+
+    [Test]
+    public async Task ARunSupersededByANewerOne_DoesntWriteTheSessionsExit()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var older = new GatedSsh(_root);
+        var newer = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = older.Env };
+        var provider = Provider();
+        _ = provider.Start(launch);
+        await older.ReachedAsync(Guard);
+        // A newer run of the session (as after a kill the older one didn't get, then a continue).
+        var next = launch with { Attempt = 2, RunId = Guid.NewGuid(), Env = newer.Env };
+        var run = provider.Start(next);
+        await Until(() => Log(launch).Contains("waiting for", StringComparison.Ordinal));
+
+        older.Release();
+        await Until(() => Log(launch).Contains("not writing exit.json", StringComparison.Ordinal));
+        var exitMeanwhile = SupervisorFiles.ReadExit(Folder(launch));
+        newer.Release();
+        var outcome = await run.Completion.WaitAsync(Guard);
+
+        await Assert.That(exitMeanwhile).IsNull();
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
+        await Assert.That(SupervisorFiles.ReadExit(Folder(launch))!.RunId).IsEqualTo(next.RunId);
+        await Assert.That(Log(launch).Split('\n').Count(l => l.Contains(": agent ", StringComparison.Ordinal) && l.EndsWith(" started", StringComparison.Ordinal))).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ACheckoutPastItsLimit_IsStopped_AndFailsTheSession()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var url = GatedSsh.Url(origin);
+        var launch = Launch(new RepoRecord(url)) with { Env = gate.Env };
+
+        var outcome = await Provider(checkoutTimeout: TimeSpan.FromSeconds(2)).Start(launch).Completion.WaitAsync(Promptly);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed($"Checking out {url} failed: the checkout took more than 2 s."));
+        await Assert.That(AgentStarted(launch)).IsFalse();
+        await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
     }
 
     [Test]
@@ -305,11 +412,11 @@ public class ClaudeRepoTests
         var outcome = await recovered!.Run.Completion.WaitAsync(Guard);
 
         var worktree = Path.Combine(Workplace(launch), "alpha");
-        var arguments = await Arguments(worktree);
+        var arguments = await Arguments(Workplace(launch));
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(arguments).Contains("--session-id");
         await Assert.That(arguments).DoesNotContain("--resume");
-        await Assert.That(ClaudeProviderTests.Told((await File.ReadAllLinesAsync(Path.Combine(worktree, "input.jsonl")))[0])).IsEqualTo(launch.Prompt);
+        await Assert.That(ClaudeProviderTests.Told((await File.ReadAllLinesAsync(Path.Combine(Workplace(launch), "input.jsonl")))[0])).IsEqualTo(launch.Prompt);
     }
 
     [Test]
@@ -403,7 +510,7 @@ public class ClaudeRepoTests
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(File.Exists(Path.Combine(worktree, "README.md"))).IsTrue();
         await Assert.That(Directory.Exists(pending)).IsFalse();
-        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+        await Assert.That((await Environment(Workplace(launch)))["PWD"]).IsEqualTo(Workplace(launch));
         await Assert.That(TestGit.Run(shared, "worktree", "list", "--porcelain")).DoesNotContain(pending);
     }
 
@@ -619,7 +726,7 @@ public class ClaudeRepoTests
         await Assert.That(TestGit.Head(worktree)).IsEqualTo(started);
         // Not fetched: the shared copy hasn't seen the later commit.
         await Assert.That(TestGit.TryRun(Shared("alpha"), "cat-file", "-e", $"{pushed}^{{commit}}").ExitCode).IsNotEqualTo(0);
-        await Assert.That((await Environment(worktree))["PWD"]).IsEqualTo(worktree);
+        await Assert.That((await Environment(Workplace(launch)))["PWD"]).IsEqualTo(Workplace(launch));
     }
 
     [Test]
@@ -664,7 +771,8 @@ public class ClaudeRepoTests
         var run = provider.Start(launch);
         await run.Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
-        TestGit.Run(worktree, "add", "invocation.txt");
+        await File.WriteAllTextAsync(Path.Combine(worktree, "work.txt"), "the agent's work");
+        TestGit.Run(worktree, "add", "work.txt");
         TestGit.Run(worktree, "commit", "--quiet", "-m", "the agent's work");
         var committed = TestGit.Head(worktree);
         Directory.Delete(worktree, recursive: true);
@@ -733,13 +841,14 @@ public class ClaudeRepoTests
 
     private string Shared(string name) => Directory.GetDirectories(SharedRoot, $"{name}-*.git").Single();
 
-    private ClaudeProvider Provider(TimeSpan? gitTimeout = null)
+    private ClaudeProvider Provider(TimeSpan? gitTimeout = null, string? workRoot = null, TimeSpan? checkoutTimeout = null)
     {
         var supervisors = new Supervisors(
             Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
         var repos = new RepoCheckouts(
-            Options.Create(new RepoOptions { Root = SharedRoot, GitTimeout = gitTimeout ?? TimeSpan.FromSeconds(20) }), supervisors, NullLogger<RepoCheckouts>.Instance);
-        var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
+            Options.Create(new RepoOptions { Root = SharedRoot, GitTimeout = gitTimeout ?? TimeSpan.FromSeconds(20), CheckoutTimeout = checkoutTimeout }),
+            supervisors, NullLogger<RepoCheckouts>.Instance);
+        var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = workRoot ?? Path.Combine(_root, "sessions") };
         return new ClaudeProvider(Options.Create(options), supervisors, repos, NullLogger<ClaudeProvider>.Instance);
     }
 

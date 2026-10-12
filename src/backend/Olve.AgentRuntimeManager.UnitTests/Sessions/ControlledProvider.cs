@@ -59,10 +59,14 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
     /// <summary>What a test does while the worktrees are being removed.</summary>
     public Action<Guid>? Removing { get; set; }
 
-    public void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos)
+    /// <summary>Whether removing worktrees fails (they stay, to be tried again).</summary>
+    public bool RemovalFails { get; set; }
+
+    public IReadOnlyList<RepoRecord> RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos)
     {
         Removing?.Invoke(sessionId);
         RemovedRepos.Add((sessionId, repos));
+        return RemovalFails ? repos : [];
     }
 
     public ControlledRun RunOf(Guid sessionId) => Runs.Single(r => r.Launch.SessionId == sessionId);

@@ -43,7 +43,8 @@ public class SessionManagerTests : IDisposable
         Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2 }),
         [provider ?? _provider],
         _database.Store(),
-        NullLogger<SessionManager>.Instance);
+        NullLogger<SessionManager>.Instance,
+        _database.Removals());
 
     /// <summary>
     /// The server restarts: the old manager lets go, a new one recovers. Its provider finds the
@@ -454,6 +455,66 @@ public class SessionManagerTests : IDisposable
         await Assert.That(storedMeanwhile).IsTrue();
         await Assert.That(sentMeanwhile).IsTypeOf<MessageOutcome.NotFound>();
         await Assert.That(_database.Store().Get(session.Id)).IsNull();
+    }
+
+    [Test]
+    public async Task Delete_WorktreesThatStay_AreTriedAgainLater_UntilRemoved()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        _provider.RemovalFails = true;
+
+        await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.Deleted>();
+        _sessions.RetryWorktreeRemovals();
+        var triedTooEarly = _provider.RemovedRepos.Count;
+        _time.Advance(SessionManager.WorktreeRemovalBackoff);
+        _sessions.RetryWorktreeRemovals();
+        var keptAfterAFailure = _database.Removals().Due(_time.GetUtcNow().AddDays(1)).Single();
+        _provider.RemovalFails = false;
+        _time.Advance(TimeSpan.FromMinutes(1));
+        _sessions.RetryWorktreeRemovals();
+
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+        await Assert.That(triedTooEarly).IsEqualTo(1);
+        await Assert.That(keptAfterAFailure.Attempts).IsEqualTo(2);
+        await Assert.That(keptAfterAFailure.Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+        await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(3);
+        await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+    }
+
+    [Test]
+    public async Task Delete_WorktreesThatNeverGo_AreGivenUp_AfterTheirAttempts()
+    {
+        var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        _sessions.Kill(session.Id, null, KillSource.User);
+        _provider.RemovalFails = true;
+        _sessions.Delete(session.Id);
+
+        for (var i = 0; i < SessionManager.WorktreeRemovalAttempts + 5; i++)
+        {
+            _time.Advance(TimeSpan.FromHours(1));
+            _sessions.RetryWorktreeRemovals();
+        }
+
+        await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(SessionManager.WorktreeRemovalAttempts);
+        await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+    }
+
+    [Test]
+    public async Task Restart_ARunIsRecoveredAsItWasLaunched_ItsResumeAndMessages()
+    {
+        var session = Create();
+        var first = _provider.RunOf(session.Id);
+        first.End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "more", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+
+        var provider = Restart();
+
+        var recovery = provider.Recoveries.Single(r => r.SessionId == session.Id);
+        await Assert.That(recovery.Resume).IsEqualTo(first.ProviderSessionId);
+        await Assert.That(recovery.Messages).IsEquivalentTo(["more"]);
     }
 
     [Test]
