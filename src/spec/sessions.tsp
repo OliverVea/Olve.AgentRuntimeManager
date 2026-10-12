@@ -26,6 +26,23 @@ enum KillSource {
   timeout,
 }
 
+/** A git repository to check out for a new session. */
+model CreateSessionRepo {
+  /** The repository's clone URL (SSH or HTTPS). */
+  @minLength(1) url: string;
+
+  /** A branch, tag or commit to start from. Unset: the repository's default branch. */
+  @minLength(1) ref?: string;
+}
+
+/** A git repository a session was created with. */
+model SessionRepo {
+  url: string;
+
+  /** Set when the session named a branch, tag or commit to start from. */
+  ref?: string;
+}
+
 /** What a session is created with. */
 model CreateSession {
   /** The task: the first user message the agent receives. Must not be blank. */
@@ -58,6 +75,13 @@ model CreateSession {
    * unknown name is a 400). Their values are taken now, when the session is created.
    */
   useEnv?: string[];
+
+  /**
+   * Git repositories ARM checks out into the agent's workplace before it starts, each in a folder
+   * named after the repository and on a new branch of the session's own. Two that would land in
+   * the same folder are a 400. A checkout that fails (no access, unknown ref) fails the session.
+   */
+  repos?: CreateSessionRepo[];
 }
 
 /** A session: what it was created with (defaults resolved) and its lifecycle. */
@@ -81,6 +105,9 @@ model Session {
 
   /** The registered, non-default environment variables it asked for, by name. */
   useEnv?: string[];
+
+  /** The git repositories it was created with, as given. */
+  repos?: SessionRepo[];
 
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;
