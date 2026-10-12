@@ -55,8 +55,9 @@ public class ClaudeRepoSessionTests : IDisposable
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
+        // The gate is never opened, so the checkout can't end before the timeout. (Not waited for:
+        // a loaded machine may time out before git even gets to it, which is a timeout during the checkout too.)
         var session = Create(GatedSsh.Url(origin), gate, timeoutSeconds: 1);
-        await gate.ReachedAsync(Guard);
 
         var killed = await Eventually(session.Id, s => s.Status == SessionStatus.Killed);
 

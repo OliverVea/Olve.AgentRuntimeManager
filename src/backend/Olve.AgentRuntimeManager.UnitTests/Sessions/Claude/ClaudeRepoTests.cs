@@ -248,6 +248,28 @@ public class ClaudeRepoTests
     }
 
     [Test]
+    public async Task ACheckoutThatFails_EndsTheRunOnce_EvenIfItsSocketIsGoneMeanwhile()
+    {
+        TestGit.Require();
+        var gate = new GatedSsh(_root);
+        var missing = Path.Combine(_root, "origin", "missing");
+        var launch = Launch(new RepoRecord(GatedSsh.Url(missing))) with { Env = gate.Env };
+        var run = Provider().Start(launch);
+        await gate.ReachedAsync(Guard);
+        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
+
+        // Its socket's folder goes (as when a test cleans up, or an admin clears /run) while it checks out.
+        Directory.Delete(Path.Combine(_root, "sockets"), recursive: true);
+        gate.Release();
+        var outcome = await run.Completion.WaitAsync(Guard);
+        await Until(() => supervisors.All(pid => Posix.StartTime(pid) is null));
+
+        await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+        await Assert.That(((AgentOutcome.Failed)outcome).Error).StartsWith($"Checking out {GatedSsh.Url(missing)} failed: ");
+        await Assert.That(Log(launch)).DoesNotContain("could not start the agent");
+    }
+
+    [Test]
     public async Task Kill_DuringAFetch_LeavesTheSharedCopyAndNoBranch()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
