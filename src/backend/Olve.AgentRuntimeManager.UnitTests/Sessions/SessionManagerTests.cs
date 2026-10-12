@@ -483,6 +483,94 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task Delete_WhoseWorktreesCantBeKept_FailsWithTheRecordKept_AndCanBeDoneAgain()
+    {
+        var removals = new FailingRemovalStore(_database.Removals());
+        var provider = new ControlledProvider("failing-store") { RemovalFails = true };
+        using var sessions = new SessionManager(_bus, _time, Options.Create(new SessionOptions { TotalSlots = 2, MaxQueueSize = 2 }),
+            [provider], _database.Store(), NullLogger<SessionManager>.Instance, removals);
+        var session = Record(sessions.Create(Request() with { Provider = provider.Name, Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        sessions.Kill(session.Id, null, KillSource.User);
+
+        var failed = Assert.Throws<InvalidOperationException>(() => sessions.Delete(session.Id));
+        var kept = _database.Store().Get(session.Id);
+        // Not stuck as "being deleted": it takes a message (and continues), and can be deleted later.
+        var sent = sessions.Send(session.Id, "still here?", "tests");
+        provider.Runs.Last(r => r.Launch.SessionId == session.Id).End(new AgentOutcome.Completed(0));
+        using (var timeout = new CancellationTokenSource(Guard))
+        {
+            while (sessions.Get(session.Id)?.Status != SessionStatus.Completed)
+            {
+                await Task.Delay(20, timeout.Token);
+            }
+        }
+
+        removals.Fails = false;
+        var deleted = sessions.Delete(session.Id);
+
+        await Assert.That(failed.Message).IsEqualTo("The database refused the write.");
+        await Assert.That(kept).IsNotNull();
+        await Assert.That(sent).IsTypeOf<MessageOutcome.Continued>();
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+        await Assert.That(_database.Removals().Due(DateTimeOffset.MaxValue).Select(r => r.SessionId)).IsEquivalentTo([session.Id]);
+    }
+
+    [Test]
+    public async Task WorktreeRemovalRetries_StopPromptly_InThePassBetweenEntries()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        foreach (var _ in Enumerable.Range(0, 3))
+        {
+            var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+            _sessions.Kill(session.Id, null, KillSource.User);
+            _provider.RemovalFails = true;
+            _sessions.Delete(session.Id);
+        }
+
+        var removedAtDelete = _provider.RemovedRepos.Count;
+        _provider.Removing = _ =>
+        {
+            entered.TrySetResult();
+            // A removal that takes long (bounded, so a failing test can't hang).
+            release.Wait(TimeSpan.FromSeconds(20));
+        };
+        var retries = new Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries(_sessions, _time,
+            NullLogger<Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries>.Instance);
+        await retries.StartAsync(CancellationToken.None);
+        // Its timer is made once it runs: time goes on until a pass has begun.
+        using (var starting = new CancellationTokenSource(Guard))
+        {
+            while (!entered.Task.IsCompleted)
+            {
+                _time.Advance(Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRetries.Period);
+                await Task.Delay(20, starting.Token);
+            }
+        }
+
+        var stopping = System.Diagnostics.Stopwatch.StartNew();
+        await retries.StopAsync(CancellationToken.None).WaitAsync(Guard);
+        stopping.Stop();
+        release.Set();
+        // The one in progress finishes on its own; give the pass a moment to (not) go on after it.
+        using (var finishing = new CancellationTokenSource(Guard))
+        {
+            while (_provider.RemovedRepos.Count == removedAtDelete)
+            {
+                await Task.Delay(20, finishing.Token);
+            }
+        }
+
+        await Task.Delay(300);
+
+        await Assert.That(stopping.Elapsed).IsLessThan(TimeSpan.FromSeconds(2));
+        // The one in progress ran out; the pass didn't go on to the others.
+        await Assert.That(_provider.RemovedRepos.Count - removedAtDelete).IsEqualTo(1);
+        retries.Dispose();
+    }
+
+    [Test]
     public async Task Delete_WorktreesThatNeverGo_AreGivenUp_AfterTheirAttempts()
     {
         var session = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));

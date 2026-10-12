@@ -227,6 +227,8 @@ public class ClaudeRepoTests
         await Assert.That(Directory.GetDirectories(SharedRoot)).IsEmpty();
         await Assert.That(Directory.GetFileSystemEntries(Workplace(launch))).IsEmpty();
         await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
+        // ARM saw the run end: its kill mark and socket are gone.
+        await Until(() => !File.Exists(KillMark(launch)) && !File.Exists(Socket(launch)));
     }
 
     [Test]
@@ -239,12 +241,36 @@ public class ClaudeRepoTests
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
 
-        await Assert.That(Posix.CreateMark(Path.Combine(Folder(launch), SupervisorFiles.KillMark(launch.RunId)))).IsTrue();
+        await Assert.That(Posix.CreateMark(KillMark(launch))).IsTrue();
         var outcome = await run.Completion.WaitAsync(Promptly);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed("Killed before its agent started."));
         await Assert.That(AgentStarted(launch)).IsFalse();
         await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
+        await Until(() => !File.Exists(KillMark(launch)));
+    }
+
+    [Test]
+    public async Task ASupervisorThatDies_LeavesNoSocket_OnceARMHasSeenItGo()
+    {
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var run = Provider().Start(launch);
+        await gate.ReachedAsync(Guard);
+        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
+
+        // Killed outright: it can't remove its own socket.
+        foreach (var supervisor in supervisors)
+        {
+            Posix.Kill(-supervisor, Posix.SigKill);
+            Posix.Kill(supervisor, Posix.SigKill);
+        }
+
+        var outcome = await run.Completion.WaitAsync(Guard);
+
+        await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+        await Until(() => !File.Exists(Socket(launch)));
     }
 
     [Test]
@@ -825,6 +851,10 @@ public class ClaudeRepoTests
     }
 
     private string SharedRoot => Path.Combine(_root, "repos");
+
+    private string KillMark(AgentLaunch launch) => Path.Combine(Folder(launch), SupervisorFiles.KillMark(launch.RunId));
+
+    private string Socket(AgentLaunch launch) => SupervisorSockets.Run(Path.Combine(_root, "sockets"), launch.SessionId, launch.RunId);
 
     private static string Branch(AgentLaunch launch) => RepoNames.Branch(launch.SessionId);
 
