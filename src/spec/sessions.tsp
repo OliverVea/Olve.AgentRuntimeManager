@@ -41,6 +41,12 @@ model SessionRepo {
 
   /** Set when the session named a branch, tag or commit to start from. */
   ref?: string;
+
+  /** The folder it is checked out in, in the session's workplace, e.g. `Olve.Trains`. */
+  folder: string;
+
+  /** The session's own branch in it, e.g. `arm/1a2b3c4d`. */
+  branch: string;
 }
 
 /** What a session is created with. */

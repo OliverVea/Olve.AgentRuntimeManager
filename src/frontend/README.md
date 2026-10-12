@@ -28,6 +28,7 @@ src/frontend/
 ├─ index.html                 the page: header, composer, views, dialogs (static markup)
 ├─ vite.config.ts             dev server + API proxy + the `@arm/client` alias
 ├─ mocks/sessions.html        the approved target (fake data; kept until the screen is done)
+├─ mocks/repos.html           the approved repos mock (M5e), kept until the built UI is approved
 ├─ src/
 │  ├─ main.ts                 entry: wires the page (auth, header, composer, dialogs, options, routes)
 │  ├─ styles.css              the page's styles and the colour tokens (light + dark)
@@ -46,8 +47,13 @@ src/frontend/
 │  │  ├─ env-registry.ts      the registered variables (list, set, delete), shared by the two below
 │  │  ├─ env-panel.ts         the composer's env button and panel (light DOM)
 │  │  └─ env-dialog.ts        the Environment variables dialog, from Options (light DOM)
+│  ├─ repos/                   a session's git repositories (M5e)
+│  │  ├─ repo-rows.ts         the server's checks on new repos, mirrored; the composer's rows → a session's repos
+│  │  └─ repo-panel.ts        the composer's repos button and panel (light DOM)
 │  ├─ components/
 │  │  ├─ session-list.ts      <session-list> — the Overview or History as cards
+│  │  ├─ session-page.ts      <session-page> — one session: its card, Details (its repos, with the
+│  │  │                       folder and branch the API gives them) and the conversation
 │  │  └─ session-card.ts      one card's markup + the cards' styles
 │  └─ testing/fake-api.ts     tests: the generated client over a scripted backend
 ```
@@ -151,7 +157,8 @@ composer's validation, the `SessionStore` over the real generated client and a s
 (snapshot + stream, buffering, stale events, History paging, reconnecting, errors) and
 `<session-list>` (cards, outcomes, "load older", what a click or key asks for, the log column),
 the `ActivityStore` (what it reads, when it re-reads and stops), and the env
-name rules, the composer's env panel and the Environment variables dialog.
+name rules, the composer's env panel and the Environment variables dialog, the repos checks and
+the composer's repos panel, and `<session-page>` (Details' repos included).
 
 ## Lint & format
 

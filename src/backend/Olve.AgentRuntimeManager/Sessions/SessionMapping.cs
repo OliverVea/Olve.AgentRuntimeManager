@@ -18,7 +18,8 @@ public static class SessionMapping
         TimeoutSeconds = session.TimeoutSeconds,
         Env = session.Env,
         UseEnv = session.UseEnv,
-        Repos = session.Repos?.Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref }).ToList(),
+        // As stored: the folder and branch it was created with, which the checkout uses.
+        Repos = session.Repos?.Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref, Folder = r.Folder, Branch = r.Branch }).ToList(),
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

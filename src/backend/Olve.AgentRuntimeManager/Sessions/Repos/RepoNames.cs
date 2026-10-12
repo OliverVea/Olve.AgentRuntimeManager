@@ -26,6 +26,15 @@ public static class RepoNames
     public static string Branch(Guid sessionId) => $"arm/{sessionId.ToString()[..8]}";
 
     /// <summary>
+    /// A repository of the session <paramref name="sessionId"/>, with the folder and branch it is
+    /// checked out as. Made once, when the session is created (or, for a session stored before
+    /// these were, when the database is brought up to date); stored, checked out and returned as is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The URL names no folder (<see cref="RepoErrors.Check"/> refuses such a session).</exception>
+    public static RepoRecord Record(Guid sessionId, string url, string? gitRef = null) =>
+        new(url, gitRef, Folder(url) ?? throw new InvalidOperationException($"'{url}' names no repository folder."), Branch(sessionId));
+
+    /// <summary>
     /// The shared copy's folder name: the repository's folder name and a hash of the exact URL, so two
     /// repositories with one name don't meet (and one repository by two URLs gets two copies).
     /// </summary>

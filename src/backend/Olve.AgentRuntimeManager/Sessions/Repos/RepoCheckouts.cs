@@ -23,8 +23,9 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
             Url = repo.Url.Trim(),
             Ref = repo.Ref,
             Shared = Path.Combine(Root(), RepoNames.Shared(repo.Url)),
-            Path = Worktree(workplace, repo),
-            Branch = RepoNames.Branch(sessionId),
+            // The folder and branch the session was created with (and returns).
+            Path = Path.Combine(workplace, repo.Folder),
+            Branch = repo.Branch,
             Owner = sessionId.ToString(),
         })];
 
@@ -55,9 +56,6 @@ public sealed class RepoCheckouts(IOptions<RepoOptions> options, Supervisors sup
 
         return left;
     }
-
-    private static string Worktree(string workplace, RepoRecord repo) =>
-        Path.Combine(workplace, RepoNames.Folder(repo.Url) ?? throw new InvalidOperationException($"'{repo.Url}' names no repository folder."));
 
     private string Root() =>
         options.Value.Root is { Length: > 0 } root

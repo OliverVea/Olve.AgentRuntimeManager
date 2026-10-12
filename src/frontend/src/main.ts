@@ -19,6 +19,7 @@ import { EnvDialog } from "./env/env-dialog.js";
 import { EnvPanel } from "./env/env-panel.js";
 import { EnvRegistry } from "./env/env-registry.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
+import { RepoPanel } from "./repos/repo-panel.js";
 import { ActivityStore } from "./sessions/activity-store.js";
 import { parseModel, shortId } from "./sessions/format.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
@@ -225,13 +226,18 @@ const envPanel = new EnvPanel($<HTMLButtonElement>("#env-toggle"), $("#env-panel
   change: updateCreate,
 });
 $("#manage-env").addEventListener("click", () => envDialog.open());
+// The session's repos (M5e): a clone URL and an optional ref each, in their own panel under the row.
+const repoPanel = new RepoPanel($<HTMLButtonElement>("#repos-toggle"), $("#repos-panel"), {
+  change: updateCreate,
+});
 
 /** Whether a create is in flight: Start stays disabled until it settles (no duplicate sessions). */
 let creating = false;
 
-/** Start needs a prompt and an env without problems, and no create in flight. */
+/** Start needs a prompt, an env and repos without problems, and no create in flight. */
 function updateCreate(): void {
-  createButton.disabled = creating || prompt.value.trim() === "" || envPanel.invalid;
+  createButton.disabled =
+    creating || prompt.value.trim() === "" || envPanel.invalid || repoPanel.invalid;
 }
 
 function fillComposer(): void {
@@ -278,12 +284,14 @@ async function create(): Promise<void> {
       timeout: $<HTMLInputElement>("#c-timeout").value,
       env: envPanel.rows,
       useEnv: envPanel.useEnv,
+      repos: repoPanel.rows,
     },
     fallbackCaller(),
   );
   if (!parsed.ok) {
     // Ctrl+Enter gets here past a disabled Start: show the flagged row.
     if (envPanel.invalid && !envPanel.open) envPanel.setOpen(true);
+    if (repoPanel.invalid && !repoPanel.open) repoPanel.setOpen(true);
     toast(parsed.problem, true);
     return;
   }
@@ -296,6 +304,7 @@ async function create(): Promise<void> {
     store.upsert(session);
     prompt.value = "";
     envPanel.clear();
+    repoPanel.clear();
     fitPrompt();
     fillComposer();
     setView("overview");

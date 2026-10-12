@@ -18,11 +18,16 @@ public sealed class TestDatabase : IDisposable
     public TestDatabase()
     {
         _options = new DbContextOptionsBuilder<ArmDbContext>()
-            .UseSqlite($"Data Source={Path.Combine(_folder, "arm.db")};Pooling=False")
+            .UseSqlite(ConnectionString)
             .Options;
         using var db = new ArmDbContext(_options);
         db.Database.Migrate();
     }
+
+    public string ConnectionString => $"Data Source={Path.Combine(_folder, "arm.db")};Pooling=False";
+
+    /// <summary>A context on this database, to read or write it as no store does.</summary>
+    public ArmDbContext Context() => new(_options);
 
     /// <summary>A new store on this database, as a restarted server would open it.</summary>
     public ISessionStore Store() => new EfSessionStore(new PooledDbContextFactory<ArmDbContext>(_options));
