@@ -112,8 +112,8 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   ARM's API doesn't expose: it would need, e.g., the provider's init facts on the session or in its
   conversation. Per push, ClaudeProviderTests kill a stub agent, and the `claude-code` step checks
   the lockdown flags at build time. If a newer release is deployed while the checks run
-  (deploy-beta doesn't wait for this step), the record step sees the version change and fails, so a
-  run never vouches for a release it didn't check. The checks themselves are tested per push
+  (deploy-beta doesn't wait for this step), the record step sees the version change, before or
+  after it writes the record (which it then deletes), and fails. The checks themselves are tested per push
   (`BetaCheckTests`, API tests): against this build started locally with a stub Claude Code
   (`BetaCheck/claude-stub.py`) that runs the command for real and can misbehave (a variable
   missing, ARM's config leaking, no tool call, a hang, logged out, the wrong version, no fake

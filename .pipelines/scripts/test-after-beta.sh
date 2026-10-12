@@ -19,9 +19,10 @@ REPO=OliverVea/Olve.AgentRuntimeManager
 INPUT_DIR=$(olve_bundle_input)
 VERSION=$(cat "$INPUT_DIR/version.txt")
 # The commit the bundle was built from (`<repo>@<sha>`); a bundle without one gets main's head.
-REF=main
-if [ -f "$INPUT_DIR/commit.txt" ]; then
-  REF=$(sed 's/.*@//' "$INPUT_DIR/commit.txt")
+REF=$(sed -n 's/.*@\([0-9a-f]\{7,\}\).*/\1/p' "$INPUT_DIR/commit.txt" 2>/dev/null | head -1)
+if [ -z "$REF" ]; then
+  REF=main
+  echo "The bundle names no commit (commit.txt): testing with main's head, which may be newer than the release" >&2
 fi
 
 olve_fetch_repo "$REPO" "$REF" /src

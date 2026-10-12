@@ -731,16 +731,26 @@ def check_events(ctx):
     return f"the stream delivered the three sessions' lifecycles ({sum(len(ctx.events.of(s)) for s in expected)} events)"
 
 
-def check_record(ctx):
-    # A newer bundle's deploy may have landed while the checks ran (deploy-beta doesn't wait for this step).
+def still_serving(ctx, record=None):
+    """
+    Fails if beta no longer serves the checked version: a newer bundle's deploy may land while the
+    checks run (deploy-beta doesn't wait for this step). A record written meanwhile is deleted.
+    """
     info = ctx.api.call("GET", "/api/server-info")
     if info.get("version") != ctx.settings.version:
+        if record is not None:
+            ctx.api.call("DELETE", f"/api/sessions/{record}", expect=(204, 404, 409))
         raise CheckFailed(f"beta now serves {info.get('version')!r}, not {ctx.settings.version!r}: another release was "
                           f"deployed while the checks ran, so they don't vouch for {ctx.settings.version}")
+
+
+def check_record(ctx):
+    still_serving(ctx)
     session_id = ctx.create_fake_session(RECORD_PROMPT.format(version=ctx.settings.version))
     ended = ctx.wait_ended(session_id, 15)
     if ended["status"] != "completed":
         raise CheckFailed(f"the record, fake session {session_id}, ended {ended['status']}: {ended.get('error') or ''}")
+    still_serving(ctx, record=session_id)
     return f"session {session_id} records it in ARM's history (a retried run for {ctx.settings.version} starts no sessions)"
 
 
@@ -775,7 +785,7 @@ def cleanup(ctx):
     running out in the middle) doesn't skip the others.
     """
     global HTTP_TIMEOUT
-    HTTP_TIMEOUT = 5
+    HTTP_TIMEOUT = 3
     problems = []
 
     def step(what, action):

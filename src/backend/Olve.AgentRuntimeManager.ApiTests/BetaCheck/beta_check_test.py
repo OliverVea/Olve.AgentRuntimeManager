@@ -147,21 +147,38 @@ class EventTests(unittest.TestCase):
 
 class RecordTests(unittest.TestCase):
     class Api:
-        """Answers server-info with another version, and records what else it's asked."""
+        """ARM serving `versions` in turn (the last one from then on), recording what it's asked."""
 
-        def __init__(self):
+        def __init__(self, *versions):
             self.calls = []
+            self.versions = list(versions)
 
         def call(self, method, path, body=None, **_):
             self.calls.append((method, path))
-            return {"version": "1.2.4", "environment": "beta"} if path == "/api/server-info" else {"id": "s"}
+            if path == "/api/server-info":
+                return {"version": self.versions.pop(0) if len(self.versions) > 1 else self.versions[0]}
+            return {"id": "r", "status": "completed"}
 
-    def test_a_release_deployed_during_the_run_gets_no_record(self):
+    def context(self, api):
         settings = check.Settings({"BETA_CHECK_VERSION": "1.2.3", "BETA_CHECK_API": "http://arm", "BETA_CHECK_TOKEN": "t"})
-        api = self.Api()
+        return check.Context(settings, api)
+
+    def test_a_release_deployed_before_it_gets_no_record(self):
+        api = self.Api("1.2.4")
         with self.assertRaisesRegex(check.CheckFailed, "beta now serves '1.2.4', not '1.2.3': another release was deployed"):
-            check.check_record(check.Context(settings, api))
+            check.check_record(self.context(api))
         self.assertEqual(api.calls, [("GET", "/api/server-info")])
+
+    def test_a_release_deployed_while_it_is_written_has_it_deleted(self):
+        api = self.Api("1.2.3", "1.2.4")
+        with self.assertRaisesRegex(check.CheckFailed, "beta now serves '1.2.4'"):
+            check.check_record(self.context(api))
+        self.assertEqual(api.calls[-1], ("DELETE", "/api/sessions/r"))
+
+    def test_the_same_release_throughout_keeps_it(self):
+        api = self.Api("1.2.3")
+        self.assertIn("records it", check.check_record(self.context(api)))
+        self.assertNotIn("DELETE", [method for method, _ in api.calls])
 
 
 class Authority(http.server.BaseHTTPRequestHandler):

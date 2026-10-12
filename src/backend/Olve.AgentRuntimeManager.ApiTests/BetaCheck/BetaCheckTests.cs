@@ -151,7 +151,7 @@ public class BetaCheckTests
     [Arguments("secret", "", true, true, true, false, "SSH_PRIVATE_KEY is not set: can't read beta's Authentik CA through oliver@bulwark-m2")]
     [Arguments("secret", "key", false, true, true, false, "Can't read beta's Authentik CA (configMap apps-beta/authentik-ca, key auth-beta-ca.crt) through oliver@bulwark-m2")]
     [Arguments("secret", "key", true, false, true, false, "This bundle (2026.10.12.4) has no Claude Code (it predates the claude-code step): no beta checks")]
-    [Arguments("secret", "key", true, true, false, false, "This bundle's commit (0123abc) predates the post-deploy beta checks: none to run")]
+    [Arguments("secret", "key", true, true, false, false, "This bundle's commit (0123abcdef) predates the post-deploy beta checks: none to run")]
     public async Task TestAfterBeta_SaysWhyItDoesNotCheck(string secret, string key, bool caReadable, bool withClaude, bool withChecks, bool checks, string expected)
     {
         var step = await TestAfterBetaAsync(secret, caReadable, withClaude, withChecks: withChecks, key: key);
@@ -159,6 +159,30 @@ public class BetaCheckTests
         await Assert.That(step.Output).Contains(expected);
         await Assert.That(step.Check.Length > 0).IsEqualTo(checks);
         await Assert.That(step.ExitCode == 0).IsEqualTo(checks || !withClaude || !withChecks).Because(step.Output);
+    }
+
+    [Test]
+    public async Task TestAfterBeta_TestsWithTheBundlesCommit_OrSaysItUsesMain()
+    {
+        var withCommit = await TestAfterBetaAsync("secret");
+        var without = await TestAfterBetaAsync("secret", commit: null);
+
+        await Assert.That(withCommit.Ref).IsEqualTo("0123abcdef\n");
+        await Assert.That(withCommit.Output).DoesNotContain("names no commit");
+        await Assert.That(without.ExitCode).IsEqualTo(0).Because(without.Output);
+        await Assert.That(without.Ref).IsEqualTo("main\n");
+        await Assert.That(without.Output).Contains("The bundle names no commit (commit.txt): testing with main's head");
+    }
+
+    [Test]
+    public async Task TestAfterBeta_WhenBetaNeverGetsHealthy_FailsBeforeTesting()
+    {
+        var step = await TestAfterBetaAsync("secret", healthy: false);
+
+        await Assert.That(step.ExitCode).IsNotEqualTo(0);
+        await Assert.That(step.Output).Contains("beta isn't healthy at http://100.100.117.17:18792/health after 30 tries");
+        await Assert.That(step.Output).DoesNotContain("the API suite ran");
+        await Assert.That(step.Check).IsEmpty();
     }
 
     [Test]
@@ -171,12 +195,14 @@ public class BetaCheckTests
     }
 
     /// <summary>
-    /// test-after-beta.sh's part that runs the check (after the API suite), with `ssh` recording its
-    /// arguments and answering a CA (or nothing), and `timeout` recording how the check is started
-    /// and the settings in its environment.
+    /// test-after-beta.sh from the bundle on (its commit, beta's health, the API suite, the checks),
+    /// with the fetch recording the ref, `curl` answering health as told, `mise` standing in for the
+    /// suite, `ssh` recording its arguments and answering a CA (or nothing), and `timeout` recording
+    /// how the check is started and the settings in its environment.
     /// </summary>
-    private static async Task<(int ExitCode, string Output, string Ssh, string Check)> TestAfterBetaAsync(
-        string secret, bool caReadable = true, bool withClaude = true, int checkExitCode = 0, bool withChecks = true, string key = "a key")
+    private static async Task<(int ExitCode, string Output, string Ssh, string Check, string Ref)> TestAfterBetaAsync(
+        string secret, bool caReadable = true, bool withClaude = true, int checkExitCode = 0, bool withChecks = true, string key = "a key",
+        string? commit = "OliverVea/Olve.AgentRuntimeManager@0123abcdef", bool healthy = true)
     {
         var root = Directory.CreateTempSubdirectory("arm-test-after-beta-").FullName;
         try
@@ -184,6 +210,10 @@ public class BetaCheckTests
             var bundle = Path.Combine(root, "input", "build-and-package");
             Directory.CreateDirectory(bundle);
             await File.WriteAllTextAsync(Path.Combine(bundle, "version.txt"), "2026.10.12.4\n");
+            if (commit is not null)
+            {
+                await File.WriteAllTextAsync(Path.Combine(bundle, "commit.txt"), commit + "\n");
+            }
             if (withClaude)
             {
                 Directory.CreateDirectory(Path.Combine(root, "input", "claude-code"));
@@ -198,14 +228,20 @@ public class BetaCheckTests
             }
 
             var script = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "test-after-beta.sh"));
-            var part = script[script.IndexOf("# ARM's beta checks", StringComparison.Ordinal)..]
+            var part = script[script.IndexOf("INPUT_DIR=$(olve_bundle_input)", StringComparison.Ordinal)..]
                 .Replace("/input/", $"{root}/input/", StringComparison.Ordinal)
-                .Replace("/tmp/authentik-beta-ca.crt", $"{root}/ca.crt", StringComparison.Ordinal);
+                .Replace("/tmp/authentik-beta-ca.crt", $"{root}/ca.crt", StringComparison.Ordinal)
+                .Replace("\"$REF\" /src", "\"$REF\" \"$ROOT/src\"", StringComparison.Ordinal)
+                .Replace("cd /src", "cd \"$ROOT/src\"", StringComparison.Ordinal);
             await File.WriteAllTextAsync(Path.Combine(root, "run.sh"), $$"""
                 set -e
-                : > "$ROOT/ssh"; : > "$ROOT/check"
+                : > "$ROOT/ssh"; : > "$ROOT/check"; : > "$ROOT/ref"
+                olve_bundle_input() { echo "$ROOT/input/build-and-package"; }
+                olve_fetch_repo() { echo "$2" > "$ROOT/ref"; }
+                curl() { case "$*" in *mise.run*) return 0 ;; esac; [ "$HEALTHY" = 1 ]; }
+                sleep() { :; }
                 ssh() { printf '%s\n' "$@" >> "$ROOT/ssh"; [ "$CA_READABLE" = 1 ] && printf -- '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n'; return 0; }
-                mise() { echo /mise/python3; }
+                mise() { case "$1" in which) echo /mise/python3 ;; run) echo "the API suite ran" ;; esac; }
                 timeout() {
                   case " $* " in
                     *" ssh "*) while [ "$1" != ssh ]; do shift; done; "$@"; return ;;
@@ -214,9 +250,7 @@ public class BetaCheckTests
                   env | grep '^BETA_CHECK_' >> "$ROOT/check"
                   return "$CHECK_EXIT"
                 }
-                HOME=$ROOT ARM_API_BASE_URL=http://100.100.117.17:18792
-                INPUT_DIR=$ROOT/input/build-and-package VERSION=2026.10.12.4 REF=0123abc
-                cd "$ROOT/src"
+                HOME=$ROOT REPO=OliverVea/Olve.AgentRuntimeManager
                 {{part}}
                 """);
             var info = new ProcessStartInfo("sh", [Path.Combine(root, "run.sh")]) { RedirectStandardOutput = true, RedirectStandardError = true };
@@ -225,11 +259,12 @@ public class BetaCheckTests
             info.Environment["SSH_PRIVATE_KEY"] = key;
             info.Environment["CA_READABLE"] = caReadable ? "1" : "0";
             info.Environment["CHECK_EXIT"] = checkExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            info.Environment["HEALTHY"] = healthy ? "1" : "0";
             using var process = Process.Start(info)!;
             var output = await process.StandardOutput.ReadToEndAsync() + await process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
             return (process.ExitCode, output, await File.ReadAllTextAsync(Path.Combine(root, "ssh")),
-                await File.ReadAllTextAsync(Path.Combine(root, "check")));
+                await File.ReadAllTextAsync(Path.Combine(root, "check")), await File.ReadAllTextAsync(Path.Combine(root, "ref")));
         }
         finally
         {
