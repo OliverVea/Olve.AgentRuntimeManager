@@ -1,5 +1,6 @@
 import type { CreateSession } from "@arm/client";
 import { checkEnvRows, type EnvRow } from "../env/env-names.js";
+import { checkRepoRows, type RepoRow } from "../repos/repo-rows.js";
 import { parseModel } from "./format.js";
 
 /** What the composer's fields hold, as typed. */
@@ -12,6 +13,8 @@ export type NewSessionFields = {
   env?: readonly EnvRow[];
   /** The registered, non-default variables picked for it. */
   useEnv?: readonly string[];
+  /** The session's repos: a clone URL and an optional ref each; blank rows are ignored. */
+  repos?: readonly RepoRow[];
 };
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
@@ -42,10 +45,14 @@ export function newSession(
   if (!timeout.ok) return timeout;
   const env = checkEnvRows(fields.env ?? []);
   if (!env.env) return { ok: false, problem: env.problems.find(Boolean) ?? "Check the env." };
+  const repos = checkRepoRows(fields.repos ?? []);
+  if (!repos.repos)
+    return { ok: false, problem: repos.problems.find(Boolean)?.text ?? "Check the repos." };
   const caller = fields.caller.trim() || fallbackCaller;
   const body: CreateSession = { prompt, ...model, caller };
   if (timeout.value !== undefined) body.timeoutSeconds = timeout.value;
   if (Object.keys(env.env).length) body.env = env.env;
   if (fields.useEnv?.length) body.useEnv = [...fields.useEnv];
+  if (repos.repos.length) body.repos = repos.repos;
   return { ok: true, value: body };
 }

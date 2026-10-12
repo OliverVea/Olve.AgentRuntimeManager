@@ -37,6 +37,26 @@ describe("newSession", () => {
     expect(bare.ok && ("env" in bare.value || "useEnv" in bare.value)).toBe(false);
   });
 
+  it("takes the session's repos, trimmed, leaving out blank rows and empty refs", () => {
+    const parsed = newSession(
+      {
+        ...fields,
+        repos: [
+          { url: " git@github.com:o/a.git ", ref: "" },
+          { url: "", ref: "" },
+          { url: "https://host/b", ref: " v1 " },
+        ],
+      },
+      "oliver",
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { repos: [{ url: "git@github.com:o/a.git" }, { url: "https://host/b", ref: "v1" }] },
+    });
+    const bare = newSession({ ...fields, repos: [{ url: " ", ref: "" }] }, "oliver");
+    expect(bare.ok && "repos" in bare.value).toBe(false);
+  });
+
   it.each([
     [{ prompt: "  " }, "Say what the agent should do."],
     [{ model: "fake" }, "The model is provider/model, e.g. claude/sonnet."],
@@ -57,6 +77,16 @@ describe("newSession", () => {
       "A is given twice.",
     ],
     [{ env: [{ name: "", value: "orphan" }] }, "Give this value a name."],
+    [{ repos: [{ url: "", ref: "main" }] }, "Give this ref a clone URL."],
+    [
+      {
+        repos: [
+          { url: "git@github.com:a/tools.git", ref: "" },
+          { url: "https://github.com/b/tools", ref: "" },
+        ],
+      },
+      "Another repo above would also go in the folder tools.",
+    ],
   ])("rejects %o", (change, problem) => {
     expect(newSession({ ...fields, ...change }, "oliver")).toEqual({ ok: false, problem });
   });

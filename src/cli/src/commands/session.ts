@@ -47,7 +47,11 @@ export function formatSession(s: Session): string {
     ["timeoutSeconds", s.timeoutSeconds],
     ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
-    ["repos", s.repos?.length ? s.repos.map((r) => (r.ref ? `${r.url}#${r.ref}` : r.url)).join(", ") : undefined],
+    // One line per repo: as given, then the folder and branch ARM gave it.
+    ...(s.repos ?? []).map(
+      (r, i) =>
+        [i === 0 ? "repos" : "", `${r.ref ? `${r.url}#${r.ref}` : r.url}  folder ${r.folder}  branch ${r.branch}`] as const,
+    ),
     ["attempts", s.attempts],
     ["retriesLeft", s.retriesLeft],
     ["createdAt", s.createdAt],
@@ -200,7 +204,7 @@ export const sessionGroup: CommandGroup = {
     },
     {
       name: "get",
-      summary: "Show one session",
+      summary: "Show one session (each of its repos with the folder and branch ARM gave it)",
       args: [idArg],
       options: {},
       async run({ args, client }) {

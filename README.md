@@ -161,6 +161,13 @@ that can't be removed then (the repository busy past the wait) are kept in the d
 after each failure, until removed (after 20 attempts they're given up, logged as an error). Two repos that would share a folder, a blank `url` or a
 `ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
 provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
+A session returns its `repos` as given, each with the `folder` and `branch` ARM gives it (from
+`RepoNames`, the rules the checkout itself uses, worked out when the session is read: present from
+creation, also while it's queued, and for sessions stored before these fields existed, so nothing
+was migrated). Clients show them and never work them out: `arm session get` (one line per repo),
+and the web UI's session page (Details, a `repos` row). The web UI's composer has a `repos` button
+next to `env`, opening a panel of rows (a clone URL and an optional ref each), checked as the
+server checks them before anything is sent.
 
 A provider that refuses an agent before it did anything (Claude: the API's 401/403, a usage limit's
 429, a 5xx/529 or no connection) pauses, and `GET /api/providers/health` (`arm provider health`)

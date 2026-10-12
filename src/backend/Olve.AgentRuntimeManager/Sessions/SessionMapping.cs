@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -18,7 +19,15 @@ public static class SessionMapping
         TimeoutSeconds = session.TimeoutSeconds,
         Env = session.Env,
         UseEnv = session.UseEnv,
-        Repos = session.Repos?.Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref }).ToList(),
+        // Folder and branch are worked out when read, by the rules the checkout uses (RepoNames), so
+        // sessions stored before they were returned have them too.
+        Repos = session.Repos?.Select(r => new SessionRepo
+        {
+            Url = r.Url,
+            Ref = r.Ref,
+            Folder = RepoNames.Folder(r.Url) ?? "",
+            Branch = RepoNames.Branch(session.Id),
+        }).ToList(),
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

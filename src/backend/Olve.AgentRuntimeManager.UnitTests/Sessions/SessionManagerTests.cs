@@ -357,6 +357,20 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task Repos_AreReturnedWithTheFolderAndBranchTheCheckoutUses()
+    {
+        var request = Request() with { Repos = [new CreateSessionRepo { Url = "git@github.com:o/a.git" }, new CreateSessionRepo { Url = "https://x/b/", Ref = "v1" }] };
+
+        var session = Record(_sessions.Create(request));
+
+        // Read back from the store, as an older session (stored with only url and ref) is.
+        var repos = _database.Store().Get(session.Id)!.ToDto(2).Repos!;
+        var branch = $"arm/{session.Id.ToString()[..8]}";
+        await Assert.That(repos.Select(r => (r.Folder, r.Branch))).IsEquivalentTo([("a", branch), ("b", branch)]);
+        await Assert.That(repos.Select(r => r.Folder)).IsEquivalentTo(request.Repos!.Select(r => RepoNames.Folder(r.Url)!));
+    }
+
+    [Test]
     public async Task Repos_GoToARecoveredSession()
     {
         var request = Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] };
