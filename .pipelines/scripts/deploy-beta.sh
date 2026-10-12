@@ -64,11 +64,11 @@ if [ -n "$CLAUDE_FILE" ]; then
   # Checked first: inside the pipe below, a missing one wouldn't stop the step.
   [ -n "${ARM_BETA_OIDC_CLIENT_SECRET:-}" ] || { echo "ARM_BETA_OIDC_CLIENT_SECRET is not set: can't check beta" >&2; exit 1; }
   SECRET_B64=$(printf '%s' "$ARM_BETA_OIDC_CLIENT_SECRET" | base64 | tr -d '\n')
-fi
-if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
   case "$VERSION" in
     ''|*[!0-9A-Za-z._-]*) echo "unexpected version '$VERSION': not checking beta" >&2; exit 1 ;;
   esac
+fi
+if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
   echo "Running the beta checks..."
   { printf 'PRESET = {"BETA_CHECK_VERSION": "%s", "BETA_CHECK_CLIENT_SECRET_B64": "%s"}\n' "$VERSION" "$SECRET_B64"
     cat "$INPUT_DIR/vm/beta-check.py"; } |
@@ -78,4 +78,8 @@ elif [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/claude-check.sh" ]; then
   { printf 'VERSION=%s\nCLIENT_SECRET_B64=%s\n' "$VERSION" "$SECRET_B64"
     cat "$INPUT_DIR/vm/claude-check.sh"; } |
     ssh -o StrictHostKeyChecking=no $SSH_BOUNDED "$HOST" "$VM_SSH bash -s"
+elif [ -n "$CLAUDE_FILE" ]; then
+  # Every bundle with Claude Code has one of the two: a check gone missing must not let prod follow.
+  echo "This bundle has Claude Code but no beta check (vm/beta-check.py): not confirming beta" >&2
+  exit 1
 fi

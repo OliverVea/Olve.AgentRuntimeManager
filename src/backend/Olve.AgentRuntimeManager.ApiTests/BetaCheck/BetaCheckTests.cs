@@ -18,7 +18,7 @@ public class BetaCheckTests
 {
     private static readonly string[] Checks =
     [
-        "health", "server info", "auth", "provider health", "earlier runs", "event stream", "tool session",
+        "health", "server info", "auth", "earlier runs", "provider health", "event stream", "tool session",
         "conversation", "activity", "continue", "kill", "delete", "lifecycle events", "record",
     ];
 
@@ -43,7 +43,7 @@ public class BetaCheckTests
         }
 
         await Assert.That(first.Output).Contains($"killed session {leftover}");
-        await Assert.That(first.Output).Contains("ok   delete: a completed fake session");
+        await Assert.That(first.Output).Contains("(deleting it was refused while it worked, 409) deleted once it completed, then 404");
         await Assert.That(first.Output).Contains($"Beta check passed for {LocalArm.Version} (3 model turns)");
         var sessions = await arm.CheckSessionsAsync();
         // The leftover (killed by the check), the continued one, the killed one and the record; the deleted one is gone.
@@ -93,7 +93,7 @@ public class BetaCheckTests
         var run = await arm.RunCheckAsync();
 
         await Assert.That(run.ExitCode).IsEqualTo(0).Because(run.ToString());
-        await Assert.That(run.Output).Contains("ok   delete: the killed session (no fake provider");
+        await Assert.That(run.Output).Contains("ok   delete: the killed session ");
         await Assert.That(run.Output).Contains("ok   record: no fake provider, so no record");
         await Assert.That((await arm.CheckSessionsAsync()).Select(s => s.Status)).IsEquivalentTo(["completed"]);
     }
@@ -131,6 +131,16 @@ public class BetaCheckTests
     }
 
     [Test]
+    public async Task DeployBeta_ABundleWithoutItsCheck_FailsSayingSo()
+    {
+        var sent = await DeployBetaAsync("secret", withCheck: false);
+
+        await Assert.That(sent.ExitCode).IsNotEqualTo(0);
+        await Assert.That(sent.Output).Contains("no beta check (vm/beta-check.py): not confirming beta");
+        await Assert.That(sent.Stdin).IsEmpty();
+    }
+
+    [Test]
     public async Task DeployBeta_WithoutTheSecret_FailsSayingSo()
     {
         var sent = await DeployBetaAsync(secret: "");
@@ -141,13 +151,17 @@ public class BetaCheckTests
     }
 
     /// <summary>deploy-beta.sh's part that runs the check, with `ssh` recording its arguments and stdin.</summary>
-    private static async Task<(int ExitCode, string Output, string Arguments, string Stdin)> DeployBetaAsync(string secret)
+    private static async Task<(int ExitCode, string Output, string Arguments, string Stdin)> DeployBetaAsync(string secret, bool withCheck = true)
     {
         var root = Directory.CreateTempSubdirectory("arm-deploy-beta-").FullName;
         try
         {
             Directory.CreateDirectory(Path.Combine(root, "vm"));
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "beta-check.py"), Path.Combine(root, "vm", "beta-check.py"));
+            if (withCheck)
+            {
+                File.Copy(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "beta-check.py"), Path.Combine(root, "vm", "beta-check.py"));
+            }
+
             var script = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "deploy-beta.sh"));
             var part = script[script.IndexOf("# ARM's beta checks", StringComparison.Ordinal)..];
             await File.WriteAllTextAsync(Path.Combine(root, "run.sh"), $$"""

@@ -63,7 +63,8 @@ RUN_TAG = "BETA_CHECK_RUN"
 NONCE_VARIABLE = "BETA_CHECK_NONCE"
 # The record of a passing run (a `fake` session's prompt, with the version).
 RECORD_PROMPT = "Beta checks passed for {version}: the beta check's record. fake:sleep=100ms"
-DELETE_PROMPT = "A session the beta check deletes. fake:sleep=100ms"
+# Runs a moment, so that deleting it while it works is refused first.
+DELETE_PROMPT = "A session the beta check deletes. fake:sleep=3s"
 
 # What the first session runs. Its output, not the agent's words, decides: who it ran as, and
 # which variables reached it (ARM's own configuration must not: Auth__Authority is in ARM's
@@ -339,8 +340,9 @@ def processes():
                 stat = stat_file.read()
             with open(f"/proc/{name}/cmdline", "rb") as cmdline_file:
                 command = cmdline_file.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
-            uid = os.stat(f"/proc/{name}").st_uid
-        except OSError:
+            with open(f"/proc/{name}/status") as status_file:
+                uid = next(int(line.split()[1]) for line in status_file if line.startswith("Uid:"))
+        except (OSError, StopIteration, ValueError):
             continue
         # The command name (field 2) is in parentheses and may hold spaces: count from after it.
         fields = stat[stat.rindex(")") + 2:].split()
@@ -792,7 +794,9 @@ def check_kill(ctx):
                               f"(its agent didn't stay in the command: see its conversation)")
         if (reason := ctx.refused(session)) is not None:
             raise CheckFailed(f"session {session_id}: {reason}")
-        if session["status"] == "working" and bash_results(ctx.conversation_of(session_id)):
+        calls = bash_results(ctx.conversation_of(session_id)) if session["status"] == "working" else []
+        # The command asked for (in the background too, though asked not to), or any call under way.
+        if any(marker in str((call.get("input") or {}).get("command")) or result is None for call, result in calls):
             break
         if time.monotonic() >= deadline:
             raise CheckFailed(f"session {session_id} is {session['status']} but its agent called no Bash within "
@@ -823,7 +827,6 @@ def check_kill(ctx):
     if agent_uid != expected_uid:
         raise CheckFailed(f"session {session_id}'s agent runs as uid {agent_uid}, not {ctx.settings.agent_user} ({expected_uid})")
     try:
-        ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(409,))
         killed = ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
                               {"caller": CALLER, "reason": "The beta check kills a working session."})
     except CheckFailed:
@@ -846,8 +849,8 @@ def check_kill(ctx):
             raise CheckFailed(f"{len(left)} processes of killed session {session_id} still run after {ctx.settings.kill_seconds}s: {describe(left)}")
         time.sleep(0.5)
     command_seen = sum(marker in command for (*_, command) in before.values())
-    return (f"session {session_id} (agent as {ctx.settings.agent_user}) refused deletion while working, then killed "
-            f"in its command; its {len(before)} processes ({command_seen} named by the command) are gone")
+    return (f"session {session_id} (agent as {ctx.settings.agent_user}) killed in its command; "
+            f"its {len(before)} processes ({command_seen} named by the command) are gone")
 
 
 def check_delete(ctx):
@@ -856,16 +859,17 @@ def check_delete(ctx):
     ctx.fake = any(h.get("provider") == "fake" for h in health)
     if ctx.fake:
         session_id = ctx.create_fake_session(DELETE_PROMPT)
+        ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(409,))
         ended = ctx.wait_ended(session_id, 15)
         if ended["status"] != "completed":
             raise CheckFailed(f"fake session {session_id} ended {ended['status']}: {ended.get('error') or ''}")
-        what = "a completed fake session"
+        what = "fake session {} (deleting it was refused while it worked, 409) deleted once it completed"
     else:
-        session_id, what = ctx.kill_session, "the killed session (no fake provider: its folder stays on disk)"
+        session_id, what = ctx.kill_session, "the killed session {} (no fake provider: its folder stays on disk) deleted"
     ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204,))
     ctx.api.call("GET", f"/api/sessions/{session_id}", expect=(404,))
     ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(404,))
-    return f"{what} ({session_id}) deleted (then 404)"
+    return what.format(session_id) + ", then 404"
 
 
 def check_events(ctx):
@@ -912,8 +916,8 @@ CHECKS = [
     Check("health", check_health),
     Check("server info", check_server_info),
     Check("auth", check_auth),
-    Check("provider health", check_provider_health),
     Check("earlier runs", check_earlier_runs),
+    Check("provider health", check_provider_health, sessions=True),
     Check("event stream", open_events, sessions=True),
     Check("tool session", check_tool_session, turns=1, sessions=True),
     Check("conversation", check_conversation, sessions=True),
