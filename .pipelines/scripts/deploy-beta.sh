@@ -61,7 +61,9 @@ SSH_BOUNDED="-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountM
 VM_SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $SSH_BOUNDED arm@192.168.122.50"
 SECRET_B64=""
 if [ -n "$CLAUDE_FILE" ]; then
-  SECRET_B64=$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')
+  # Checked first: inside the pipe below, a missing one wouldn't stop the step.
+  [ -n "${ARM_BETA_OIDC_CLIENT_SECRET:-}" ] || { echo "ARM_BETA_OIDC_CLIENT_SECRET is not set: can't check beta" >&2; exit 1; }
+  SECRET_B64=$(printf '%s' "$ARM_BETA_OIDC_CLIENT_SECRET" | base64 | tr -d '\n')
 fi
 if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
   case "$VERSION" in

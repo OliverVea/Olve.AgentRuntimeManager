@@ -56,6 +56,7 @@ import urllib.request
 CALLER = "deploy-beta"
 # Marks a session as this check's (its own env, returned with it): which version started it.
 TAG = "BETA_CHECK_VERSION"
+RUN_TAG = "BETA_CHECK_RUN"
 # Registered as a default variable only while the first session is created (sessions take the
 # registered values when they're created), so it reaches that agent and, at most, a session
 # someone else creates in that moment.
@@ -286,6 +287,7 @@ class Events:
                 elif line == "" and data:
                     self._dispatch("\n".join(data))
                     data = []
+            self.error = "the server ended the event stream"
         except Exception as error:  # the thread's end is reported by the checks that wait on it
             self.error = self.error or f"the event stream broke: {error}"
         finally:
@@ -386,6 +388,15 @@ def leftovers(before, supervisor, markers):
     return left
 
 
+def ancestors(pid):
+    """The processes above `pid` (its parent, theirs, …): sudo and the supervisor's, for an agent."""
+    table, found = processes(), set()
+    while pid in table and table[pid][0] not in found and table[pid][0] > 1:
+        pid = table[pid][0]
+        found.add(pid)
+    return found
+
+
 def describe(found):
     return "; ".join(f"{pid} {short(command, 80)}" for pid, (*_, command) in sorted(found.items()))
 
@@ -399,6 +410,7 @@ class Context:
         self.api = api
         self.events = None
         self.already_passed = False
+        # This run's: its sessions carry it too (RUN_TAG), so cleanup finds even one whose create answer was lost.
         self.nonce = secrets.token_hex(8)
         self.nonce_registered = False
         self.created = []
@@ -414,15 +426,18 @@ class Context:
     def create_session(self, prompt, timeout_seconds):
         created = self.api.call("POST", "/api/sessions", {
             "prompt": prompt, "provider": self.settings.provider, "model": self.settings.model,
-            "caller": CALLER, "timeoutSeconds": timeout_seconds, "env": {TAG: self.settings.version},
+            "caller": CALLER, "timeoutSeconds": timeout_seconds, "env": self.tags(),
         }, expect=(201, 202))
         self.created.append(created["id"])
         return created["id"]
 
+    def tags(self):
+        return {TAG: self.settings.version, RUN_TAG: self.nonce}
+
     def create_fake_session(self, prompt):
         created = self.api.call("POST", "/api/sessions", {
             "prompt": prompt, "provider": "fake", "model": "fake", "caller": CALLER, "timeoutSeconds": 60,
-            "env": {TAG: self.settings.version},
+            "env": self.tags(),
         }, expect=(201, 202))
         self.created.append(created["id"])
         return created["id"]
@@ -653,11 +668,10 @@ def conversation_problems(conversation, prompts):
             problems.append("the Bash call has no result")
         elif result.get("seq", 0) < call.get("seq", 0) or result.get("isError"):
             problems.append(f"the Bash call's result is out of order or failed: {short(result)}")
-        else:
-            first_end = turn_ends[0].get("seq", 0) if turn_ends else 0
-            if not any(e.get("kind") == "text" and e.get("text") and result["seq"] < e.get("seq", 0) < first_end
-                       for e in entries):
-                problems.append("no text from the agent after the Bash result in its first turn")
+    # Where in its turn the agent says something is its own choice: only that it does is checked.
+    first_end = turn_ends[0].get("seq", 0) if turn_ends else 0
+    if not any(e.get("kind") == "text" and e.get("text") and e.get("seq", 0) < first_end for e in entries):
+        problems.append("no text from the agent in its first turn")
     return problems
 
 
@@ -702,11 +716,11 @@ def activity_problems(lines, conversation):
            for line in lines if line.get("kind") != "text"]
     if len(lines) < 50 and got != expected:
         problems.append(f"its tool and error lines are {got}, the conversation's {expected}")
-    tools = [i for i, line in enumerate(lines) if line.get("kind") == "tool" and str(line.get("text")).startswith("Bash → ")]
-    if not tools:
+    if not any(line.get("kind") == "tool" and str(line.get("text")).startswith("Bash → ") for line in lines):
         problems.append("no 'Bash → …' line")
-    elif not any(line.get("kind") == "text" for line in lines[tools[0] + 1:]):
-        problems.append("no line of the agent's text after its Bash call")
+    said = any(e.get("kind") == "text" and not e.get("parentToolId") for e in conversation.get("entries") or [])
+    if len(lines) < 50 and said and not any(line.get("kind") == "text" for line in lines):
+        problems.append("no line of the agent's text")
     return problems
 
 
@@ -786,15 +800,21 @@ def check_kill(ctx):
         time.sleep(1)
     supervisor = read_supervisor(ctx, session_id)
     markers = [session_id, marker]
-    # The command's own processes show up a moment after the call does (unless the agent changed it).
+    # The command's own processes show up a moment after the call does: named by its marker, or
+    # (if the agent changed the command) at least something running under the agent.
+    agent = supervisor.get("agentPid")
     deadline = time.monotonic() + 10
     while True:
         before = session_processes(supervisor, markers)
-        if any(marker in command for (*_, command) in before.values()) or time.monotonic() >= deadline:
+        if any(marker in command for (*_, command) in before.values()):
+            break
+        if time.monotonic() >= deadline:
+            if not set(before) - {agent, supervisor.get("supervisorPid")} - ancestors(agent):
+                raise CheckFailed(f"session {session_id}'s agent called Bash, but nothing ran under it within 10s: "
+                                  f"no command to kill")
             break
         time.sleep(0.5)
     # The leftover check below is only as good as this: it must see the running agent.
-    agent = supervisor.get("agentPid")
     if agent not in before:
         raise CheckFailed(f"session {session_id}'s agent (pid {agent}) isn't among its processes in /proc: "
                           f"the leftover check would see nothing")
@@ -802,9 +822,16 @@ def check_kill(ctx):
     expected_uid = pwd.getpwnam(ctx.settings.agent_user).pw_uid
     if agent_uid != expected_uid:
         raise CheckFailed(f"session {session_id}'s agent runs as uid {agent_uid}, not {ctx.settings.agent_user} ({expected_uid})")
-    ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(409,))
-    killed = ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
-                          {"caller": CALLER, "reason": "The beta check kills a working session."})
+    try:
+        ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(409,))
+        killed = ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
+                              {"caller": CALLER, "reason": "The beta check kills a working session."})
+    except CheckFailed:
+        now = http("GET", f"{ctx.api.base}/api/sessions/{session_id}", headers=ctx.api.auth)[1] or {}
+        if now.get("status") in ENDED - {"killed"}:
+            raise CheckFailed(f"session {session_id} ended {now['status']} on its own just before it was killed "
+                              f"(its agent didn't stay in the command: see its conversation)")
+        raise
     got = (killed.get("status"), killed.get("killSource"), killed.get("killCaller"))
     if got != ("killed", "user", CALLER):
         raise CheckFailed(f"the kill answered status/source/caller {got}, expected ('killed', 'user', {CALLER!r})")
@@ -903,22 +930,37 @@ CHECKS = [
 
 
 def cleanup(ctx):
-    """Whatever happened: no default variable left registered, none of this run's sessions running."""
+    """
+    Whatever happened: no default variable left registered, none of this run's sessions running
+    (those it knows, and any its tag finds). Each step on its own: one failing (or the run's time
+    running out in the middle) doesn't skip the others.
+    """
     problems = []
+
+    def step(what, action):
+        try:
+            action()
+        except (CheckFailed, TimeUp, Stopped) as error:
+            problems.append(f"could not {what}: {error or type(error).__name__}")
+
+    def stop(session_id):
+        status, session = http("GET", f"{ctx.api.base}/api/sessions/{session_id}", headers=ctx.api.auth)
+        if status == 200 and session["status"] not in ENDED:
+            ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
+                         {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
+            say(f"cleanup: killed session {session_id}", stop=False)
+
+    def find_ours():
+        page = ctx.api.call("POST", "/api/sessions/search", {"caller": CALLER, "status": ["queued", "working"], "limit": 100})
+        for session in page["items"]:
+            if (session.get("env") or {}).get(RUN_TAG) == ctx.nonce and session["id"] not in ctx.created:
+                ctx.created.append(session["id"])
+
     if ctx.nonce_registered:
-        try:
-            ctx.api.call("DELETE", f"/api/env/{NONCE_VARIABLE}", expect=(204, 404))
-        except CheckFailed as error:
-            problems.append(f"could not remove {NONCE_VARIABLE}: {error}")
-    for session_id in ctx.created:
-        try:
-            status, session = http("GET", f"{ctx.api.base}/api/sessions/{session_id}", headers=ctx.api.auth)
-            if status == 200 and session["status"] not in ENDED:
-                ctx.api.call("POST", f"/api/sessions/{session_id}/kill",
-                             {"caller": CALLER, "reason": "The beta check stopped."}, expect=(200, 409))
-                say(f"cleanup: killed session {session_id}", stop=False)
-        except CheckFailed as error:
-            problems.append(f"could not stop session {session_id}: {error}")
+        step(f"remove {NONCE_VARIABLE}", lambda: ctx.api.call("DELETE", f"/api/env/{NONCE_VARIABLE}", expect=(204, 404)))
+    step("search for this run's sessions", find_ours)
+    for session_id in list(ctx.created):
+        step(f"stop session {session_id}", lambda: stop(session_id))
     return problems
 
 
@@ -964,8 +1006,8 @@ def main():
     try:
         settings = Settings({**os.environ, **globals().get("PRESET", {})})
         token = settings.token or client_credentials_token(settings)
-    except CheckFailed as error:
-        say(f"FAIL setup: {error}\nBeta check FAILED", stop=False)
+    except (CheckFailed, TimeUp) as error:
+        say(f"FAIL setup: {error or 'stopped: the run is out of time'}\nBeta check FAILED", stop=False)
         return 1
     try:
         return run(Context(settings, Api(settings.api, token)), CHECKS)

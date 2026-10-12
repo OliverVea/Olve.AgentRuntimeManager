@@ -70,7 +70,7 @@ class ConversationTests(unittest.TestCase):
             "the Bash call has no result": lambda c: c["entries"][3].update(toolId="t2"),
             "out of order or failed": lambda c: c["entries"][3].update(isError=True),
             "has no toolId or command": lambda c: c["entries"][2].update(input={}),
-            "no text from the agent after the Bash result": lambda c: c["entries"][4].update(kind="thinking"),
+            "no text from the agent in its first turn": lambda c: c["entries"][4].update(kind="thinking"),
         }
         for expected, change in cases.items():
             with self.subTest(expected):
@@ -113,7 +113,7 @@ class ActivityTests(unittest.TestCase):
             "longer than 200": [activity()[0], {"kind": "text", "text": long_line}],
             "the conversation's [('tool', 'Bash')]": [{"kind": "tool", "text": "Read → x"}, activity()[1]],
             "no 'Bash → …' line": [{"kind": "text", "text": "hello"}],
-            "no line of the agent's text after its Bash call": [activity()[1], activity()[0]],
+            "no line of the agent's text": [activity()[0]],
         }
         for expected, lines in cases.items():
             with self.subTest(expected):

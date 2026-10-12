@@ -68,6 +68,7 @@ public class BetaCheckTests
     [Arguments("ok", "BETA_CHECK_SAME_USER=0", "the user ARM (and this check) runs as")]
     [Arguments("leak", "BETA_CHECK_KILL_SECONDS=2", "FAIL kill: 2 processes of killed session")]
     [Arguments("orphan", "BETA_CHECK_KILL_SECONDS=2", "FAIL kill: 1 processes of killed session")]
+    [Arguments("idle-call", "", "called Bash, but nothing ran under it within 10s: no command to kill")]
     [Arguments("logged-out", "", "FAIL provider health: the claude provider is unauthorized")]
     [Arguments("ok", "BETA_CHECK_VERSION=2026.1.1.1", "FAIL server info: ARM says it is version '2026.10.12.1' in 'beta', expected '2026.1.1.1' in 'beta'")]
     public async Task Check_WhenSomethingIsWrong_FailsSayingWhat_AndLeavesNothingRunning(string mode, string setting, string expected)
@@ -104,6 +105,7 @@ public class BetaCheckTests
 
         var run = await arm.RunCheckAsync("BETA_CHECK_TURN_SECONDS=3");
 
+        await Assert.That(run.ExitCode).IsEqualTo(1).Because(run.ToString());
         await Assert.That(run.Output).Contains("cleanup: killed session");
         await Assert.That((await arm.CheckSessionsAsync()).Select(s => s.Status)).IsEquivalentTo(["killed"]);
     }
@@ -111,7 +113,36 @@ public class BetaCheckTests
     [Test]
     public async Task DeployBeta_SendsTheCheckWithItsSecretOnStdin_NeverAsAnArgument()
     {
-        // deploy-beta.sh's part that runs the check, with `ssh` recording its arguments and stdin.
+        const string Secret = "s3cr+t/with \"quotes\", 'apostrophes' and $dollars";
+
+        var sent = await DeployBetaAsync(Secret);
+
+        await Assert.That(sent.ExitCode).IsEqualTo(0).Because(sent.Output);
+        await Assert.That(sent.Arguments).Contains("timeout -k 15 210 python3 -u -");
+        await Assert.That(sent.Arguments + sent.Output).DoesNotContain("s3cr");
+        var preset = sent.Stdin[..sent.Stdin.IndexOf('\n', StringComparison.Ordinal)];
+        await Assert.That(preset).StartsWith("PRESET = ");
+        using var settings = JsonDocument.Parse(preset["PRESET = ".Length..]);
+        await Assert.That(settings.RootElement.GetProperty("BETA_CHECK_VERSION").GetString()).IsEqualTo("2026.10.12.4");
+        await Assert.That(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(
+            settings.RootElement.GetProperty("BETA_CHECK_CLIENT_SECRET_B64").GetString()!))).IsEqualTo(Secret);
+        await Assert.That(sent.Stdin[(preset.Length + 1)..])
+            .IsEqualTo(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "beta-check.py")));
+    }
+
+    [Test]
+    public async Task DeployBeta_WithoutTheSecret_FailsSayingSo()
+    {
+        var sent = await DeployBetaAsync(secret: "");
+
+        await Assert.That(sent.ExitCode).IsNotEqualTo(0);
+        await Assert.That(sent.Output).Contains("ARM_BETA_OIDC_CLIENT_SECRET is not set");
+        await Assert.That(sent.Stdin).IsEmpty();
+    }
+
+    /// <summary>deploy-beta.sh's part that runs the check, with `ssh` recording its arguments and stdin.</summary>
+    private static async Task<(int ExitCode, string Output, string Arguments, string Stdin)> DeployBetaAsync(string secret)
+    {
         var root = Directory.CreateTempSubdirectory("arm-deploy-beta-").FullName;
         try
         {
@@ -119,32 +150,21 @@ public class BetaCheckTests
             File.Copy(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "beta-check.py"), Path.Combine(root, "vm", "beta-check.py"));
             var script = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "deploy-beta.sh"));
             var part = script[script.IndexOf("# ARM's beta checks", StringComparison.Ordinal)..];
-            const string Secret = "s3cr+t/with \"quotes\", 'apostrophes' and $dollars";
             await File.WriteAllTextAsync(Path.Combine(root, "run.sh"), $$"""
                 set -e
+                : > "$ROOT/args"; : > "$ROOT/stdin"
                 ssh() { printf '%s\n' "$@" > "$ROOT/args"; cat > "$ROOT/stdin"; }
                 INPUT_DIR=$ROOT CLAUDE_FILE=$ROOT/claude-version.txt VERSION=2026.10.12.4 HOST=bulwark
                 {{part}}
                 """);
             var info = new ProcessStartInfo("sh", [Path.Combine(root, "run.sh")]) { RedirectStandardOutput = true, RedirectStandardError = true };
             info.Environment["ROOT"] = root;
-            info.Environment["ARM_BETA_OIDC_CLIENT_SECRET"] = Secret;
+            info.Environment["ARM_BETA_OIDC_CLIENT_SECRET"] = secret;
             using var process = Process.Start(info)!;
             var output = await process.StandardOutput.ReadToEndAsync() + await process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
-
-            await Assert.That(process.ExitCode).IsEqualTo(0).Because(output);
-            var arguments = await File.ReadAllTextAsync(Path.Combine(root, "args"));
-            var stdin = await File.ReadAllTextAsync(Path.Combine(root, "stdin"));
-            await Assert.That(arguments).Contains("timeout -k 15 210 python3 -u -");
-            await Assert.That(arguments + output).DoesNotContain("s3cr");
-            var preset = stdin[..stdin.IndexOf('\n', StringComparison.Ordinal)];
-            await Assert.That(preset).StartsWith("PRESET = ");
-            using var settings = JsonDocument.Parse(preset["PRESET = ".Length..]);
-            await Assert.That(settings.RootElement.GetProperty("BETA_CHECK_VERSION").GetString()).IsEqualTo("2026.10.12.4");
-            await Assert.That(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(
-                settings.RootElement.GetProperty("BETA_CHECK_CLIENT_SECRET_B64").GetString()!))).IsEqualTo(Secret);
-            await Assert.That(stdin[(preset.Length + 1)..]).IsEqualTo(await File.ReadAllTextAsync(Path.Combine(root, "vm", "beta-check.py")));
+            return (process.ExitCode, output,
+                await File.ReadAllTextAsync(Path.Combine(root, "args")), await File.ReadAllTextAsync(Path.Combine(root, "stdin")));
         }
         finally
         {
