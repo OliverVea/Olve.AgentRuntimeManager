@@ -37,4 +37,11 @@ public interface IAgentProvider
     /// Entries never change or move, so their positions are stable. Empty when there's none.
     /// </summary>
     IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId) => [];
+
+    /// <summary>
+    /// The same conversation newest entry first, for readers that need only its end (a session's
+    /// activity, M5f): a provider that keeps it in a file reads it from the end, only as far as
+    /// it's enumerated.
+    /// </summary>
+    IEnumerable<ConversationEntryRecord> ConversationNewestFirst(Guid sessionId) => Conversation(sessionId).Reverse();
 }

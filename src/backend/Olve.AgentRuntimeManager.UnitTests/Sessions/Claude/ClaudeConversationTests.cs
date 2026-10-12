@@ -1,5 +1,7 @@
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Sessions.Supervision;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
 
@@ -49,6 +51,36 @@ public class ClaudeConversationTests
         await Assert.That(entries[5]).IsEqualTo(entries[5] with { Text = "no such file\n[image]", ToolId = "t2", IsError = true });
         await Assert.That(entries[6].ParentToolId).IsEqualTo("t9");
         await Assert.That(entries[7]).IsEqualTo(entries[7] with { Text = "Fixed.", IsError = false });
+    }
+
+    [Test]
+    public async Task NewestFirst_FromTheOutputsEnd_IsTheSameEntriesReversed()
+    {
+        string[] lines =
+        [
+            """{"type":"user","message":{"role":"user","content":"Fix the build"},"isReplay":true,"timestamp":"2026-09-27T10:00:00Z"}""",
+            """{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Look first."},{"type":"text","text":"Checking: naïve 😀."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},"timestamp":"2026-09-27T10:00:01Z"}""",
+            """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt","is_error":true}]}}""",
+            """{"type":"result","subtype":"success","is_error":false,"result":"Fixed."}""",
+        ];
+        var output = Path.Combine(Directory.CreateTempSubdirectory("arm-newest-first-").FullName, "output.jsonl");
+        await File.WriteAllTextAsync(output, string.Join("\n", lines) + "\n{\"type\":\"assistant\",\"mess");
+
+        try
+        {
+            // Inputs compared as JSON text (each read has its own document).
+            static object Shape(ConversationEntryRecord e) => e with { Input = null, Tool = $"{e.Tool} {e.Input?.GetRawText()}" };
+            var newestFirst = ClaudeConversation.ReadNewestFirst(OutputLines.Backwards(output, chunkSize: 7)).Select(Shape).ToList();
+
+            // Read line by line, a turn's end has no time of its own; everything else is the same.
+            await Assert.That(newestFirst).IsEquivalentTo(
+                ClaudeConversation.Read(lines).Reverse().Select(e => Shape(e.Kind == ConversationEntryKind.TurnEnd ? e with { At = null } : e)),
+                TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(output)!, recursive: true);
+        }
     }
 
     [Test]

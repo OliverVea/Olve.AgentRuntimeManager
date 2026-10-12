@@ -233,6 +233,20 @@ public sealed class SessionManager : IDisposable
         return _providers.TryGetValue(session.Provider, out var provider) ? provider.Conversation(id) : [];
     }
 
+    /// <summary>
+    /// A session and its conversation newest entry first, read only as far as it's enumerated (its
+    /// activity, M5f); null if there's no such session.
+    /// </summary>
+    public (SessionRecord Session, IEnumerable<ConversationEntryRecord> NewestFirst)? LatestConversation(Guid id)
+    {
+        if (Get(id) is not { } session)
+        {
+            return null;
+        }
+
+        return (session, _providers.TryGetValue(session.Provider, out var provider) ? provider.ConversationNewestFirst(id) : []);
+    }
+
     /// <summary>Sessions matching every given filter, newest first, one page at a time.</summary>
     public SessionQueryResult Search(SessionSearch search, int limit, int offset)
     {

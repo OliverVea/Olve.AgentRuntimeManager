@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Sessions.Activities;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
@@ -37,5 +38,6 @@ public static class SessionServices
         services.AddSingleton<ISessionMessagesSendHandler, SendMessageHandler>();
         services.AddSingleton<IProvidersHealthListHandler, ListProviderHealthHandler>();
         services.AddSingleton<ISessionConversationGetHandler, GetConversationHandler>();
+        services.AddSingleton<ISessionActivityGetHandler, GetActivityHandler>();
     }
 }

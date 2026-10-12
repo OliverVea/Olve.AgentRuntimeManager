@@ -14,7 +14,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 ///   <item><c>fake:down=unreachable</c> (or <c>limited</c>, <c>unauthorized</c>): the provider refuses
 ///   the agent at once, as if its API were down; <c>fake:down=unreachable:2</c> only on the first 2
 ///   attempts. A <c>limited</c> provider is back after the run's delay (<c>fake:sleep=…</c>).</item>
-///   <item><c>fake:say=…</c> and <c>fake:tool=…</c>: what its conversation shows (<see cref="FakeTurn"/>).</item>
+///   <item><c>fake:say=…</c>, <c>fake:tool=…</c> and the like: what its conversation shows (<see cref="FakeTurn"/>).</item>
 /// </list>
 /// An unknown directive or a bad value is an error: the agent fails to start.
 /// </summary>
@@ -34,7 +34,7 @@ public sealed partial record FakeScript(TimeSpan Delay, bool Hang, int ExitCode,
                 ("exit", { } v) when int.TryParse(v, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var code) => script with { ExitCode = code },
                 ("fail", { } v) => script with { Failure = v.Replace('_', ' ') },
                 ("down", { } v) => ParseDown(script, v),
-                ("say" or "tool", not null) => script,
+                ("say" or "tool" or "toolerror" or "think" or "notice" or "subagent", not null) => script,
                 _ => throw new FormatException($"Unknown fake directive '{match.Value}'."),
             };
         }

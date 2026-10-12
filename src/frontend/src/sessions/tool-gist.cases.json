@@ -1,0 +1,17 @@
+[
+  { "input": { "command": "npx mise run ci" }, "gist": "npx mise run ci" },
+  {
+    "input": { "command": "cd /w && npx mise run ci", "description": "Run the gate" },
+    "gist": "Run the gate"
+  },
+  { "input": { "command": "cd /w && export X=1; ls ; git status" }, "gist": "ls && git status" },
+  { "input": { "command": "cd /w" }, "gist": "cd /w" },
+  { "input": { "command": "make\nmake test" }, "gist": "make" },
+  { "input": { "file_path": "src/spec/main.tsp", "limit": 20 }, "gist": "src/spec/main.tsp" },
+  { "input": { "pattern": "TODO", "path": "src" }, "gist": "TODO" },
+  { "input": { "url": "https://example.com/a", "prompt": "Read it" }, "gist": "https://example.com/a" },
+  { "input": { "command": 3, "file_path": "a.txt" }, "gist": "a.txt" },
+  { "input": { "query": "née", "n": 2 }, "gist": "{\"query\":\"née\",\"n\":2}" },
+  { "input": "abc", "gist": "\"abc\"" },
+  { "gist": "{}" }
+]

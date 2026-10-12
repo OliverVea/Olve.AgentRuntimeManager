@@ -93,7 +93,21 @@ conversation is in the API (M5b). It uses the machine's Claude Code login (or
 thinking, tool calls and results, each turn's end; a subagent's entries carry `parentToolId`), plus
 counts. Its provider reads it on request: `claude` from the session's `output.jsonl` (agents run with
 `--replay-user-messages`, so what they're told is in it too), `fake` from memory, scripted with
-`fake:say=…` and `fake:tool=…`.
+`fake:say=…`, `fake:tool=…` (`fake:toolerror=…` for one that fails), `fake:think=…`,
+`fake:notice=…` and `fake:subagent=…`.
+
+`GET /api/sessions/{id}/activity?limit=N` (`arm session activity <id>`, M5f;
+`Sessions/Activities/`) is what a session's agent did most recently, for people to glance at (the
+web UI's Overview shows it on working sessions' cards): the latest `limit` lines (default 3, 1–50),
+oldest first, picked in code from the conversation. A line is a `text` (the first line of what the
+agent said, without Markdown markers), a `tool` (`Bash → npx mise run ci`: the tool's name and its
+input in short, by the same rules as the web UI's session page: description, else command without
+`cd`/`export`/`eval`, file path, pattern or URL, else the input as JSON) or an `error` (a failed
+tool result or turn, in its line that says what went wrong; for a failed session, its error last).
+Thinking, notices, prompts, results and turn ends that didn't fail, and subagents' entries are left
+out. Every line is one line of at most 200 characters, cut with `…`. It reads the conversation from
+its end, only as far as it needs: `claude` reads `output.jsonl` backwards in 64 KB chunks, so a long
+conversation costs no more than its last few events.
 
 `POST /api/sessions/{id}/messages` (`arm session message <id> "…"`, M11) tells a session's agent
 something. While it works, the message goes straight to the agent, which sees it after its current
