@@ -148,6 +148,35 @@ public static partial class Posix
         }
     }
 
+    [LibraryImport("libc", EntryPoint = "realpath", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial nint RealPathCall(string path, nint resolved);
+
+    [LibraryImport("libc", EntryPoint = "free")]
+    private static partial void Free(nint pointer);
+
+    /// <summary>
+    /// <paramref name="path"/> with every link in it resolved (<c>realpath(3)</c>); for a path that
+    /// doesn't exist (yet), its nearest existing parent's, with the rest as given.
+    /// </summary>
+    public static string RealPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var pointer = RealPathCall(full, 0);
+        if (pointer != 0)
+        {
+            try
+            {
+                return Marshal.PtrToStringUTF8(pointer)!;
+            }
+            finally
+            {
+                Free(pointer);
+            }
+        }
+
+        return Path.GetDirectoryName(full) is { } parent && parent != full ? Path.Combine(RealPath(parent), Path.GetFileName(full)) : full;
+    }
+
     /// <summary>The device and inode of what's at <paramref name="path"/> (not followed); null if nothing is there.</summary>
     public static (ulong Device, ulong Inode)? Identity(string path) =>
         Lstat(path) is { } identity ? (identity.Device, identity.Inode) : null;
@@ -157,6 +186,25 @@ public static partial class Posix
 
     [LibraryImport("libc", EntryPoint = "flock", SetLastError = true)]
     private static partial int FlockCall(int fd, int operation);
+
+    /// <summary>
+    /// Creates an empty file at <paramref name="path"/>, only if nothing (not even a link) is there:
+    /// <c>O_CREAT | O_EXCL</c>, which never follows a link. True if made or already there.
+    /// For marks ARM leaves in a folder an agent can write (docs/AGENT-USER.md).
+    /// </summary>
+    public static bool CreateMark(string path)
+    {
+        var noFollow = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x8000 : 0x20000;
+        const int writeOnly = 0x1, create = 0x40, exclusive = 0x80, closeOnExec = 0x80000, exists = 17; // O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, EEXIST
+        var fd = OpenWithMode(path, writeOnly | create | exclusive | noFollow | closeOnExec, Convert.ToInt32("640", 8));
+        if (fd >= 0)
+        {
+            Close(fd);
+            return true;
+        }
+
+        return Marshal.GetLastPInvokeError() == exists;
+    }
 
     /// <summary>
     /// Opens (creating it, <c>0644</c>) a lock file for <see cref="TryLock"/>, with <c>open(2)</c> itself:

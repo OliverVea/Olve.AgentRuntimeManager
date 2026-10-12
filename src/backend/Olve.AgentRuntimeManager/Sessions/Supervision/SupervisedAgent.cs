@@ -35,7 +35,16 @@ public sealed class SupervisedAgent
     private readonly Channel<SupervisorMessage> _urgent = Channel.CreateUnbounded<SupervisorMessage>();
 
     /// <summary>Until when a supervisor may hold off its hello (a checkout); a run that hasn't started its agent by then fails.</summary>
-    private readonly DateTimeOffset _helloDeadline;
+    private readonly TimeSpan _helloTimeout;
+
+    /// <summary>Set at the first connection: until then, the connect timeout is the bound.</summary>
+    private DateTimeOffset? _helloDeadline;
+
+    /// <summary>
+    /// How long a line already on its way gets once the hello's deadline passed: a hello parsed just
+    /// then means the agent started, and it isn't killed for being a moment late.
+    /// </summary>
+    private static readonly TimeSpan HelloGrace = TimeSpan.FromSeconds(1);
     private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _detach = new();
 
@@ -49,7 +58,7 @@ public sealed class SupervisedAgent
         _folder = folder;
         _runId = runId;
         _connectTimeout = connectTimeout;
-        _helloDeadline = DateTimeOffset.UtcNow + connectTimeout + helloTimeout;
+        _helloTimeout = connectTimeout + helloTimeout;
         _ = Task.Run(RunAsync);
     }
 
@@ -77,7 +86,23 @@ public sealed class SupervisedAgent
     public void CloseInput() => _outgoing.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.CloseInput });
 
     /// <summary>Kills the agent, or stops the checkout before it (for this run only: the message carries its id).</summary>
-    public void Kill() => _urgent.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.Kill, RunId = _runId });
+    /// <remarks>
+    /// The mark first (<see cref="SupervisorFiles.KillMark"/>): it's there before this returns, so a
+    /// supervisor not reached yet still never starts the agent. Then the message, for an agent that runs.
+    /// </remarks>
+    public void Kill()
+    {
+        try
+        {
+            Posix.CreateMark(Path.Combine(_folder, SupervisorFiles.KillMark(_runId)));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The message still goes.
+        }
+
+        _urgent.Writer.TryWrite(new SupervisorMessage { Type = SupervisorMessage.Kill, RunId = _runId });
+    }
 
     /// <summary>
     /// Lets go of the supervisor without stopping the agent, as a server that exits does: the
@@ -209,19 +234,13 @@ public sealed class SupervisedAgent
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(detached);
         // One writer at a time on the stream: the kill, the attach and the rest.
         using var sending = new SemaphoreSlim(1, 1);
-        // Until the hello, reading is bounded by its deadline.
-        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(detached);
-        if (!AgentStarted)
-        {
-            var left = _helloDeadline - DateTimeOffset.UtcNow;
-            waiting.CancelAfter(left > TimeSpan.Zero ? left : TimeSpan.Zero);
-        }
-
+        // Until the hello, reading is bounded by its deadline, counted from the first connection.
+        _helloDeadline ??= DateTimeOffset.UtcNow + _helloTimeout;
         var urgent = PumpAsync(_urgent, stream, sending, stop.Token);
         Task? writing = null;
         try
         {
-            while (await reader.ReadLineAsync(waiting.Token) is { } json)
+            while (await ReadLineAsync(reader, detached) is { } json)
             {
                 var message = JsonSerializer.Deserialize(json, SupervisorJsonContext.Default.SupervisorMessage);
                 switch (message?.Type)
@@ -232,7 +251,6 @@ public sealed class SupervisedAgent
                             return Followed.Foreign;
                         }
 
-                        waiting.CancelAfter(Timeout.InfiniteTimeSpan);
                         AgentStarted = true;
                         _offset ??= message.OutputStart;
                         _stderrStart ??= message.StderrStart;
@@ -252,9 +270,10 @@ public sealed class SupervisedAgent
 
             return Followed.Dropped;
         }
-        catch (OperationCanceledException) when (!detached.IsCancellationRequested && waiting.IsCancellationRequested)
+        catch (TimeoutException)
         {
             // No hello in time: kill whatever it's doing (the checkout), and say so.
+            Kill();
             using var flushing = new CancellationTokenSource(_connectTimeout);
             try
             {
@@ -279,6 +298,32 @@ public sealed class SupervisedAgent
             {
                 await writing;
             }
+        }
+    }
+
+    /// <summary>
+    /// The next line from the supervisor; before the hello, bounded by its deadline (and the grace for
+    /// a line already on its way), past which <see cref="TimeoutException"/>. The read itself isn't
+    /// cancelled at the deadline: a line it brings in the grace is still read.
+    /// </summary>
+    private async Task<string?> ReadLineAsync(StreamReader reader, CancellationToken detached)
+    {
+        var read = reader.ReadLineAsync(detached).AsTask();
+        if (AgentStarted)
+        {
+            return await read;
+        }
+
+        var left = _helloDeadline!.Value - DateTimeOffset.UtcNow;
+        try
+        {
+            return await read.WaitAsync(left > TimeSpan.Zero ? left : TimeSpan.Zero, detached);
+        }
+        catch (TimeoutException)
+        {
+            // Observed later either way (the stream goes with the connection).
+            _ = read.ContinueWith(t => t.Exception, TaskScheduler.Default);
+            return await read.WaitAsync(HelloGrace, detached);
         }
     }
 

@@ -7,12 +7,17 @@ namespace Olve.AgentRuntimeManager.Supervisor;
 [UnsupportedOSPlatform("windows")]
 internal static class Worktrees
 {
-    /// <summary>Whether <paramref name="path"/> is a worktree <paramref name="shared"/> has (<c>git worktree list</c>).</summary>
+    /// <summary>
+    /// Whether <paramref name="path"/> is a worktree <paramref name="shared"/> has (<c>git worktree
+    /// list</c>). Compared with links resolved on both sides: git lists real paths, and the work
+    /// root may be reached through a link.
+    /// </summary>
     public static async Task<bool> IsRegisteredAsync(Git git, string shared, string path)
     {
         var list = await git.RunAsync("-C", shared, "worktree", "list", "--porcelain");
-        var full = Path.GetFullPath(path);
-        return list.Succeeded && list.Output.Split('\n').Any(line => line == $"worktree {full}");
+        var real = Posix.RealPath(path);
+        return list.Succeeded && list.Output.Split('\n')
+            .Any(line => line.StartsWith("worktree ", StringComparison.Ordinal) && Posix.RealPath(line["worktree ".Length..]) == real);
     }
 
     /// <summary>

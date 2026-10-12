@@ -34,6 +34,9 @@ public sealed record SupervisorLaunch
     /// <summary>The longest any one git command of a checkout may take; then it's killed and the checkout fails.</summary>
     public TimeSpan GitTimeout { get; init; } = DefaultGitTimeout;
 
+    /// <summary>The longest the whole checkout may take; unset: <see cref="CheckoutLimit"/> of the repos and git timeout.</summary>
+    public TimeSpan? CheckoutTimeout { get; init; }
+
     public static readonly TimeSpan DefaultGitTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>

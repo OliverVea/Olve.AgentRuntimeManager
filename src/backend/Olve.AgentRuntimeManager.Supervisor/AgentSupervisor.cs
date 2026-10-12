@@ -33,8 +33,8 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     /// <summary>Stops the checkout at a kill.</summary>
     private readonly CancellationTokenSource _stopCheckout = new();
 
-    /// <summary>The socket this run bound (device, inode): it removes only that, not a newer run's.</summary>
-    private (ulong Device, ulong Inode)? _socket;
+    /// <summary>When this run's socket was made: a run socket of the session made later is a newer run's.</summary>
+    private DateTime _socketMade;
     private SupervisorMessage _hello = null!;
     private ArmConnection? _connection;
     private long _outputStart;
@@ -65,7 +65,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             var checkoutError = await CheckoutAsync();
             lock (_gate)
             {
-                if (_killRequested)
+                if (_killRequested || KillMarked())
                 {
                     checkoutError = Killed;
                 }
@@ -157,17 +157,16 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
     private const string SupersededError = "Another run of this session started before this one's agent did; it didn't start.";
 
-    /// <summary>Whether the socket path is another run's now (a newer supervisor of the same session bound it).</summary>
-    private bool Superseded() => Posix.Identity(launch.SocketPath) != _socket;
+    /// <summary>
+    /// Whether a newer run of the session has started (killed, then continued): its socket is there,
+    /// made after this one's. Such a run doesn't start its agent, nor write the session's <c>exit.json</c>
+    /// (the newer run's).
+    /// </summary>
+    private bool Superseded() =>
+        SupervisorSockets.OtherRuns(launch.SocketPath).Any(other => File.GetLastWriteTimeUtc(other) > _socketMade);
 
-    /// <summary>Removes the run's socket, unless a newer run of the session has its own there.</summary>
-    private void DeleteSocket()
-    {
-        if (!Superseded())
-        {
-            File.Delete(launch.SocketPath);
-        }
-    }
+    /// <summary>Removes the run's socket (its own: no other run uses the name).</summary>
+    private void DeleteSocket() => File.Delete(launch.SocketPath);
 
     /// <summary>
     /// The run ends without an agent (a checkout that failed, a command that didn't start): the exit
@@ -175,7 +174,15 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     /// </summary>
     private async Task<int> NotStartedAsync(int exitCode, string error, CancellationTokenSource stop, Socket listener, Task accepting)
     {
-        WriteExit(exitCode, error);
+        if (Superseded())
+        {
+            _log.Write($"run {launch.RunId}: a newer run of the session started; not writing exit.json ({error})");
+        }
+        else
+        {
+            WriteExit(exitCode, error);
+        }
+
         _ready.TrySetResult(false);
         await stop.CancelAsync();
         listener.Dispose();
@@ -189,6 +196,27 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         return 1;
     }
 
+    /// <summary>Whether ARM left the kill mark for this run (it may not have reached the socket yet).</summary>
+    private bool KillMarked() => Posix.ExistsNoFollow(Path.Combine(launch.Folder, SupervisorFiles.KillMark(launch.RunId)));
+
+    /// <summary>Stops the checkout when the kill mark appears (polled: ARM may not be connected to say so).</summary>
+    private async Task WatchKillMarkAsync(CancellationToken done)
+    {
+        try
+        {
+            while (!KillMarked())
+            {
+                await Task.Delay(100, done);
+            }
+
+            Kill();
+        }
+        catch (OperationCanceledException)
+        {
+            // The checkout ended first.
+        }
+    }
+
     /// <summary>The session's repositories, checked out in its workplace (M5e); the first error, if one failed.</summary>
     private async Task<string?> CheckoutAsync()
     {
@@ -197,8 +225,24 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             return null;
         }
 
+        using var done = new CancellationTokenSource();
+        var watching = WatchKillMarkAsync(done.Token);
+        try
+        {
+            return await CheckOutReposAsync();
+        }
+        finally
+        {
+            await done.CancelAsync();
+            await watching;
+        }
+    }
+
+    private async Task<string?> CheckOutReposAsync()
+    {
+
         // A kill stops it, and so does running past its limit (each git command is bounded too).
-        var limit = SupervisorLaunch.CheckoutLimit(launch.Repos.Count, launch.GitTimeout);
+        var limit = launch.CheckoutTimeout ?? SupervisorLaunch.CheckoutLimit(launch.Repos.Count, launch.GitTimeout);
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(_stopCheckout.Token);
         bounded.CancelAfter(limit);
         var checkout = new RepoCheckout(new Git(launch.Environment, launch.GitTimeout, bounded.Token), _log);
@@ -297,7 +341,7 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         // The group too: an agent running as its own user (docs/AGENT-USER.md) has ARM in its group.
         // Who may talk on it is checked per connection (ClientUid).
         File.SetUnixFileMode(launch.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
-        _socket = Posix.Identity(launch.SocketPath);
+        _socketMade = File.GetLastWriteTimeUtc(launch.SocketPath);
         listener.Listen(4);
         return listener;
     }
