@@ -22,7 +22,7 @@ Settings, from the environment, or from a PRESET dict deploy-beta.sh puts in fro
   BETA_CHECK_AGENT_USER         the user agents must run as (default Supervisor__User); it must
                                 not be the check's own (ARM's), unless BETA_CHECK_SAME_USER=1
                                 (a local ARM without an agent user, in the tests)
-  BETA_CHECK_TURN_SECONDS       how long one turn may take (default 60)
+  BETA_CHECK_TURN_SECONDS       how long one turn may take (default 50)
   BETA_CHECK_KILL_SECONDS       how long a killed session's processes may take to go (default 15)
   BETA_CHECK_PROVIDER / _MODEL  default claude / haiku
 
@@ -100,6 +100,10 @@ class Stopped(BaseException):
     """No one reads the output any more (the step went away): stop, and clean up."""
 
 
+class TimeUp(BaseException):
+    """The run's time is up (the step's `timeout` sent TERM): stop, say where, and clean up."""
+
+
 _output_gone = False
 
 
@@ -153,8 +157,11 @@ class Settings:
         self.environment = get("BETA_CHECK_ENVIRONMENT", "beta")
         self.provider = get("BETA_CHECK_PROVIDER", "claude")
         self.model = get("BETA_CHECK_MODEL", "haiku")
-        self.turn_seconds = int(get("BETA_CHECK_TURN_SECONDS", "60"))
-        self.kill_seconds = int(get("BETA_CHECK_KILL_SECONDS", "15"))
+        try:
+            self.turn_seconds = int(get("BETA_CHECK_TURN_SECONDS", "50"))
+            self.kill_seconds = int(get("BETA_CHECK_KILL_SECONDS", "15"))
+        except ValueError:
+            raise CheckFailed("BETA_CHECK_TURN_SECONDS and BETA_CHECK_KILL_SECONDS must be whole seconds")
         self.work_root = self.config.get("Providers__Claude__WorkRoot")
         if not self.work_root:
             raise CheckFailed(f"{env_file} has no Providers__Claude__WorkRoot: the sessions' folders can't be found")
@@ -254,9 +261,9 @@ class Events:
         self._open = threading.Event()
         self.error = None
 
-    def start(self, seconds=15):
+    def start(self, seconds=10):
         threading.Thread(target=self._read, daemon=True).start()
-        if not self._open.wait(seconds):
+        if not self._open.wait(seconds) or self.error:
             raise CheckFailed(self.error or f"the event stream sent no heartbeat within {seconds}s (it sends one on connect)")
 
     def of(self, session_id):
@@ -270,6 +277,7 @@ class Events:
             if response.status != 200 or not kind.startswith("text/event-stream"):
                 self.error = f"GET /api/events answered {response.status} {kind}"
                 return
+            # (A heartbeat opens it; an error, or the stream ending, sets `_open` too, below.)
             data = []
             for raw in response:
                 line = raw.decode("utf-8", "replace").rstrip("\r\n")
@@ -280,6 +288,8 @@ class Events:
                     data = []
         except Exception as error:  # the thread's end is reported by the checks that wait on it
             self.error = self.error or f"the event stream broke: {error}"
+        finally:
+            self._open.set()  # whoever waits for it to open learns now that it didn't
 
     def _dispatch(self, data):
         try:
@@ -563,8 +573,9 @@ def lockdown(ctx, session_id):
 def check_tool_session(ctx):
     """Turn 1: the agent runs a command; its output says who it ran as and what reached it."""
     settings = ctx.settings
-    ctx.api.call("PUT", f"/api/env/{NONCE_VARIABLE}", {"value": ctx.nonce, "default": True})
+    # Before the PUT: if its answer is lost, it may still have been registered.
     ctx.nonce_registered = True
+    ctx.api.call("PUT", f"/api/env/{NONCE_VARIABLE}", {"value": ctx.nonce, "default": True})
     try:
         ctx.tool_session = ctx.create_session(ctx.tool_prompt, settings.turn_seconds * 2 + 60)
     finally:
@@ -622,7 +633,8 @@ def conversation_problems(conversation, prompts):
         problems.append(f"it doesn't end with a turn that succeeded: {short(entries[-1])}")
     counts = {
         "turns": len(turn_ends),
-        "messages": len(told),
+        # As ARM counts them: every prompt, a subagent's task too.
+        "messages": sum(e.get("kind") == "prompt" for e in entries),
         "toolCalls": sum(e.get("kind") == "tool_call" for e in entries),
     }
     for key, count in counts.items():
@@ -738,7 +750,7 @@ def check_continue(ctx):
             f"{len(conversation['entries'])} entries, {conversation['turns']} turns, {conversation['messages']} messages")
 
 
-def read_supervisor(ctx, session_id, seconds=15):
+def read_supervisor(ctx, session_id, seconds=10):
     path = os.path.join(ctx.folder(session_id), "supervisor.json")
     deadline = time.monotonic() + seconds
     while True:
@@ -756,31 +768,29 @@ def check_kill(ctx):
     marker = f"beta-check-{ctx.nonce}"
     command = KILL_COMMAND.format(marker=marker)
     ctx.kill_session = session_id = ctx.create_session(KILL_PROMPT.format(command=command), 180)
-    # Until its agent is in a Bash call (bounded); a session that is only working is killed too.
-    in_call = False
+    # Until its agent has called Bash (bounded): in the call, or (if it ran it in the background,
+    # though asked not to) with the command still running; either way it's killed mid-command.
     deadline = time.monotonic() + ctx.settings.turn_seconds
-    while time.monotonic() < deadline:
+    while True:
         session = ctx.session(session_id)
         if session["status"] in ENDED:
             raise CheckFailed(f"session {session_id} ended {session['status']} on its own before it could be killed "
                               f"(its agent didn't stay in the command: see its conversation)")
         if (reason := ctx.refused(session)) is not None:
             raise CheckFailed(f"session {session_id}: {reason}")
-        if session["status"] == "working":
-            calls = bash_results(ctx.conversation_of(session_id))
-            if any(result is None for _, result in calls):
-                in_call = True
-                break
+        if session["status"] == "working" and bash_results(ctx.conversation_of(session_id)):
+            break
+        if time.monotonic() >= deadline:
+            raise CheckFailed(f"session {session_id} is {session['status']} but its agent called no Bash within "
+                              f"{ctx.settings.turn_seconds}s: nothing to kill in the middle of a command")
         time.sleep(1)
-    if ctx.session(session_id)["status"] != "working":
-        raise CheckFailed(f"session {session_id} didn't start working within {ctx.settings.turn_seconds}s")
     supervisor = read_supervisor(ctx, session_id)
     markers = [session_id, marker]
-    # The command's own processes show up a moment after the call does.
+    # The command's own processes show up a moment after the call does (unless the agent changed it).
     deadline = time.monotonic() + 10
     while True:
         before = session_processes(supervisor, markers)
-        if not in_call or any(marker in command for (*_, command) in before.values()) or time.monotonic() >= deadline:
+        if any(marker in command for (*_, command) in before.values()) or time.monotonic() >= deadline:
             break
         time.sleep(0.5)
     # The leftover check below is only as good as this: it must see the running agent.
@@ -808,10 +818,9 @@ def check_kill(ctx):
         if time.monotonic() >= deadline:
             raise CheckFailed(f"{len(left)} processes of killed session {session_id} still run after {ctx.settings.kill_seconds}s: {describe(left)}")
         time.sleep(0.5)
-    what = "in its Bash call" if in_call else "before it called a tool"
     command_seen = sum(marker in command for (*_, command) in before.values())
-    return (f"session {session_id} (agent as {ctx.settings.agent_user}) refused deletion while working, then killed {what}; "
-            f"its {len(before)} processes ({command_seen} of them the command's) are gone")
+    return (f"session {session_id} (agent as {ctx.settings.agent_user}) refused deletion while working, then killed "
+            f"in its command; its {len(before)} processes ({command_seen} named by the command) are gone")
 
 
 def check_delete(ctx):
@@ -820,7 +829,7 @@ def check_delete(ctx):
     ctx.fake = any(h.get("provider") == "fake" for h in health)
     if ctx.fake:
         session_id = ctx.create_fake_session(DELETE_PROMPT)
-        ended = ctx.wait_ended(session_id, 30)
+        ended = ctx.wait_ended(session_id, 15)
         if ended["status"] != "completed":
             raise CheckFailed(f"fake session {session_id} ended {ended['status']}: {ended.get('error') or ''}")
         what = "a completed fake session"
@@ -843,7 +852,7 @@ def check_events(ctx):
             ("session.killed", {"source": "user", "caller": CALLER}),
         ],
     }
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 5
     while True:
         problems = {sid: event_problems(ctx.events.of(sid), wanted) for sid, wanted in expected.items()}
         problems = {sid: p for sid, p in problems.items() if p}
@@ -860,7 +869,7 @@ def check_record(ctx):
     if not ctx.fake:
         return "no fake provider, so no record: a retried deploy of this version checks again"
     session_id = ctx.create_fake_session(RECORD_PROMPT.format(version=ctx.settings.version))
-    ended = ctx.wait_ended(session_id, 30)
+    ended = ctx.wait_ended(session_id, 15)
     if ended["status"] != "completed":
         raise CheckFailed(f"the record, fake session {session_id}, ended {ended['status']}: {ended.get('error') or ''}")
     return f"session {session_id} records it in ARM's history (a retried deploy of {ctx.settings.version} starts no sessions)"
@@ -923,6 +932,8 @@ def run(ctx, checks):
                 say(f"ok   {check.name}: {check.run(ctx)}")
             except CheckFailed as error:
                 failed = (check, str(error))
+            except TimeUp:
+                failed = (check, "stopped here: the run's time is up (the step's timeout)")
             except Exception as error:  # a bug here, or ARM answering something unexpected
                 failed = (check, f"unexpected {type(error).__name__}: {error}")
             if failed:
@@ -944,8 +955,12 @@ def run(ctx, checks):
 
 
 def main():
-    # A TERM (the step's timeout) still cleans up.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit("Beta check FAILED: stopped (timeout)"))
+    def time_up(*_):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # once: the cleanup that follows isn't cut short
+        raise TimeUp()
+
+    # A TERM (the step's timeout) says where it stopped, and still cleans up.
+    signal.signal(signal.SIGTERM, time_up)
     try:
         settings = Settings({**os.environ, **globals().get("PRESET", {})})
         token = settings.token or client_credentials_token(settings)
@@ -954,7 +969,7 @@ def main():
         return 1
     try:
         return run(Context(settings, Api(settings.api, token)), CHECKS)
-    except Stopped:
+    except (Stopped, TimeUp):
         return 1
 
 

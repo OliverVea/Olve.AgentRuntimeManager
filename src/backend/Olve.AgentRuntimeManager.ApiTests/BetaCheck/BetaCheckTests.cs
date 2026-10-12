@@ -109,6 +109,50 @@ public class BetaCheckTests
     }
 
     [Test]
+    public async Task DeployBeta_SendsTheCheckWithItsSecretOnStdin_NeverAsAnArgument()
+    {
+        // deploy-beta.sh's part that runs the check, with `ssh` recording its arguments and stdin.
+        var root = Directory.CreateTempSubdirectory("arm-deploy-beta-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "vm"));
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "beta-check.py"), Path.Combine(root, "vm", "beta-check.py"));
+            var script = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "BetaCheck", "deploy-beta.sh"));
+            var part = script[script.IndexOf("# ARM's beta checks", StringComparison.Ordinal)..];
+            const string Secret = "s3cr+t/with \"quotes\", 'apostrophes' and $dollars";
+            await File.WriteAllTextAsync(Path.Combine(root, "run.sh"), $$"""
+                set -e
+                ssh() { printf '%s\n' "$@" > "$ROOT/args"; cat > "$ROOT/stdin"; }
+                INPUT_DIR=$ROOT CLAUDE_FILE=$ROOT/claude-version.txt VERSION=2026.10.12.4 HOST=bulwark
+                {{part}}
+                """);
+            var info = new ProcessStartInfo("sh", [Path.Combine(root, "run.sh")]) { RedirectStandardOutput = true, RedirectStandardError = true };
+            info.Environment["ROOT"] = root;
+            info.Environment["ARM_BETA_OIDC_CLIENT_SECRET"] = Secret;
+            using var process = Process.Start(info)!;
+            var output = await process.StandardOutput.ReadToEndAsync() + await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+            await Assert.That(process.ExitCode).IsEqualTo(0).Because(output);
+            var arguments = await File.ReadAllTextAsync(Path.Combine(root, "args"));
+            var stdin = await File.ReadAllTextAsync(Path.Combine(root, "stdin"));
+            await Assert.That(arguments).Contains("timeout -k 15 210 python3 -u -");
+            await Assert.That(arguments + output).DoesNotContain("s3cr");
+            var preset = stdin[..stdin.IndexOf('\n', StringComparison.Ordinal)];
+            await Assert.That(preset).StartsWith("PRESET = ");
+            using var settings = JsonDocument.Parse(preset["PRESET = ".Length..]);
+            await Assert.That(settings.RootElement.GetProperty("BETA_CHECK_VERSION").GetString()).IsEqualTo("2026.10.12.4");
+            await Assert.That(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(
+                settings.RootElement.GetProperty("BETA_CHECK_CLIENT_SECRET_B64").GetString()!))).IsEqualTo(Secret);
+            await Assert.That(stdin[(preset.Length + 1)..]).IsEqualTo(await File.ReadAllTextAsync(Path.Combine(root, "vm", "beta-check.py")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task CheckLogic_PassesItsOwnTests()
     {
         var info = new ProcessStartInfo("python3")

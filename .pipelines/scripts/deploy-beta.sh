@@ -53,17 +53,27 @@ done
 # ARM's beta checks, in the VM as arm (src/deploy/vm/beta-check.py): real sessions through ARM,
 # three Haiku turns per bundle (none when a retried deploy's version already passed), each check
 # saying what it proved or what failed. The machine client's secret travels inside the script on
-# stdin (a PRESET in front of it), never on a command line or in an environment; the VM's
-# `timeout` bounds the whole run (the checks' own waits are bounded too). Bundles from before
-# Claude Code was deployed have no checks (and no Claude Code).
+# stdin (a PRESET in front of it), never on a command line or in an environment. Bounded: the
+# checks' own waits, the VM's `timeout` for the whole run (about a minute when all is well), and
+# ssh keepalives for the hops. A bundle from before the beta checks gets its own check (one joke
+# session, claude-check.sh); one from before Claude Code was deployed has none (nor Claude Code).
+SSH_BOUNDED="-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+VM_SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $SSH_BOUNDED arm@192.168.122.50"
+SECRET_B64=""
+if [ -n "$CLAUDE_FILE" ]; then
+  SECRET_B64=$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')
+fi
 if [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/beta-check.py" ]; then
   case "$VERSION" in
     ''|*[!0-9A-Za-z._-]*) echo "unexpected version '$VERSION': not checking beta" >&2; exit 1 ;;
   esac
   echo "Running the beta checks..."
-  { printf 'PRESET = {"BETA_CHECK_VERSION": "%s", "BETA_CHECK_CLIENT_SECRET_B64": "%s"}\n' \
-      "$VERSION" "$(printf '%s' "${ARM_BETA_OIDC_CLIENT_SECRET:?}" | base64 | tr -d '\n')"
+  { printf 'PRESET = {"BETA_CHECK_VERSION": "%s", "BETA_CHECK_CLIENT_SECRET_B64": "%s"}\n' "$VERSION" "$SECRET_B64"
     cat "$INPUT_DIR/vm/beta-check.py"; } |
-    ssh -o StrictHostKeyChecking=no "$HOST" \
-      "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR arm@192.168.122.50 timeout -k 15 270 python3 -u -"
+    ssh -o StrictHostKeyChecking=no $SSH_BOUNDED "$HOST" "$VM_SSH timeout -k 15 210 python3 -u -"
+elif [ -n "$CLAUDE_FILE" ] && [ -f "$INPUT_DIR/vm/claude-check.sh" ]; then
+  echo "Confirming the claude provider on beta (this bundle's check)..."
+  { printf 'VERSION=%s\nCLIENT_SECRET_B64=%s\n' "$VERSION" "$SECRET_B64"
+    cat "$INPUT_DIR/vm/claude-check.sh"; } |
+    ssh -o StrictHostKeyChecking=no $SSH_BOUNDED "$HOST" "$VM_SSH bash -s"
 fi
