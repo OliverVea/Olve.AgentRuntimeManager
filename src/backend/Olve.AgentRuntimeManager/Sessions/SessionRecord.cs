@@ -31,7 +31,7 @@ public sealed record SessionRecord
     /// </summary>
     public IReadOnlyDictionary<string, string>? AgentEnv { get; init; }
 
-    /// <summary>The git repositories checked out for its agent (M5e), as given.</summary>
+    /// <summary>The git repositories checked out for its agent (M5e), as given, each with its folder and branch.</summary>
     public IReadOnlyList<RepoRecord>? Repos { get; init; }
 
     /// <summary>

@@ -22,11 +22,12 @@ public static class PersistenceServices
         services.AddSingleton<IWorktreeRemovalStore, EfWorktreeRemovalStore>();
     }
 
-    /// <summary>Brings the schema up to date; run before the app serves requests.</summary>
+    /// <summary>Brings the schema and stored data up to date; run before the app serves requests.</summary>
     public static async Task MigrateDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var db = await services.GetRequiredService<IDbContextFactory<ArmDbContext>>().CreateDbContextAsync(cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
+        await StoredRepoNames.FillAsync(db, cancellationToken);
         // Readers don't wait for the writer (a setting of the file, so once is enough).
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
     }

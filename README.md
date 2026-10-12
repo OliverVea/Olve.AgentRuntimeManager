@@ -161,10 +161,11 @@ that can't be removed then (the repository busy past the wait) are kept in the d
 after each failure, until removed (after 20 attempts they're given up, logged as an error). Two repos that would share a folder, a blank `url` or a
 `ref` that is blank, holds spaces or starts with `-` are a 400 `INVALID_REQUEST`. Only the `claude`
 provider has a workplace: the `fake` provider stores a session's `repos` and checks nothing out.
-A session returns its `repos` as given, each with the `folder` and `branch` ARM gives it (from
-`RepoNames`, the rules the checkout itself uses, worked out when the session is read: present from
-creation, also while it's queued, and for sessions stored before these fields existed, so nothing
-was migrated). Clients show them and never work them out: `arm session get` (one line per repo),
+A session returns its `repos` as given, each with the `folder` and `branch` ARM gives it: named
+once by `RepoNames.Record` when the session is created, stored with it, and used as stored by the
+checkout and the API (present from creation, also while it's queued). Sessions stored before
+these were kept (and deleted sessions' worktrees still to be removed) are named once at startup,
+when the database is brought up to date (`StoredRepoNames`). Clients show them and never work them out: `arm session get` (one line per repo),
 and the web UI's session page (Details, a `repos` row). The web UI's composer has a `repos` button
 next to `env`, opening a panel of rows (a clone URL and an optional ref each), checked as the
 server checks them before anything is sent.

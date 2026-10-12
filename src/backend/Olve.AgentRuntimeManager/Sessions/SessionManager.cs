@@ -193,9 +193,10 @@ public sealed class SessionManager : IDisposable
                 return new CreateOutcome.QueueFull(_options.MaxQueueSize);
             }
 
+            var id = Guid.NewGuid();
             var session = new SessionRecord
             {
-                Id = Guid.NewGuid(),
+                Id = id,
                 Status = SessionStatus.Queued,
                 Prompt = request.Prompt,
                 Provider = request.Provider,
@@ -205,7 +206,7 @@ public sealed class SessionManager : IDisposable
                 Env = request.Env,
                 UseEnv = request.UseEnv,
                 AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
-                Repos = request.Repos?.Select(r => new RepoRecord(r.Url, r.Ref)).ToList(),
+                Repos = request.Repos?.Select(r => RepoNames.Record(id, r.Url, r.Ref)).ToList(),
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);

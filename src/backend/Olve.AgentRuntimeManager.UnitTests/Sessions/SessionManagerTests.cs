@@ -347,9 +347,8 @@ public class SessionManagerTests : IDisposable
     public async Task Repos_AreStoredAsGiven_AndGoToEveryLaunch()
     {
         var request = Request() with { Repos = [new CreateSessionRepo { Url = "git@github.com:o/a.git" }, new CreateSessionRepo { Url = "https://x/b", Ref = "v1" }] };
-        RepoRecord[] expected = [new("git@github.com:o/a.git"), new("https://x/b", "v1")];
-
         var session = Record(_sessions.Create(request));
+        RepoRecord[] expected = [RepoNames.Record(session.Id, "git@github.com:o/a.git"), RepoNames.Record(session.Id, "https://x/b", "v1")];
 
         await Assert.That(_database.Store().Get(session.Id)!.Repos).IsEquivalentTo(expected);
         await Assert.That(_provider.RunOf(session.Id).Launch.Repos).IsEquivalentTo(expected);
@@ -363,7 +362,9 @@ public class SessionManagerTests : IDisposable
 
         var session = Record(_sessions.Create(request));
 
-        // Read back from the store, as an older session (stored with only url and ref) is.
+        // Stored with them when created, and returned as stored.
+        await Assert.That(_database.Store().Get(session.Id)!.Repos!.Select(r => (r.Folder, r.Branch)))
+            .IsEquivalentTo([("a", $"arm/{session.Id.ToString()[..8]}"), ("b", $"arm/{session.Id.ToString()[..8]}")]);
         var repos = _database.Store().Get(session.Id)!.ToDto(2).Repos!;
         var branch = $"arm/{session.Id.ToString()[..8]}";
         await Assert.That(repos.Select(r => (r.Folder, r.Branch))).IsEquivalentTo([("a", branch), ("b", branch)]);
@@ -378,7 +379,7 @@ public class SessionManagerTests : IDisposable
 
         var provider = Restart((p, r) => p.Reattach(r, resumed: true));
 
-        await Assert.That(provider.Recoveries.Single(r => r.SessionId == working.Id).Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+        await Assert.That(provider.Recoveries.Single(r => r.SessionId == working.Id).Repos).IsEquivalentTo([RepoNames.Record(working.Id, "https://x/b")]);
     }
 
     [Test]
@@ -393,7 +394,7 @@ public class SessionManagerTests : IDisposable
         _sessions.Delete(without.Id);
 
         await Assert.That(_provider.RemovedRepos.Select(r => r.SessionId)).IsEquivalentTo([withRepos.Id]);
-        await Assert.That(_provider.RemovedRepos.Single().Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+        await Assert.That(_provider.RemovedRepos.Single().Repos).IsEquivalentTo([RepoNames.Record(withRepos.Id, "https://x/b")]);
     }
 
     [Test]
@@ -491,7 +492,7 @@ public class SessionManagerTests : IDisposable
         await Assert.That(_database.Store().Get(session.Id)).IsNull();
         await Assert.That(triedTooEarly).IsEqualTo(1);
         await Assert.That(keptAfterAFailure.Attempts).IsEqualTo(2);
-        await Assert.That(keptAfterAFailure.Repos).IsEquivalentTo([new RepoRecord("https://x/b")]);
+        await Assert.That(keptAfterAFailure.Repos).IsEquivalentTo([RepoNames.Record(session.Id, "https://x/b")]);
         await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(3);
         await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
     }

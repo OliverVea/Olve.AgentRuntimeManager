@@ -48,7 +48,7 @@ public class ClaudeRepoTests
     public async Task OneRepo_IsAWorktreeOnTheSessionsBranch_AndTheAgentStartsInTheWorkplace()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -68,7 +68,7 @@ public class ClaudeRepoTests
     {
         var alpha = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var beta = TestGit.Origin(Path.Combine(_root, "origin", "beta.git"));
-        var launch = Launch(new RepoRecord(alpha), new RepoRecord($"file://{beta}"));
+        var launch = Launch(new Repo(alpha), new Repo($"file://{beta}"));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -87,7 +87,7 @@ public class ClaudeRepoTests
         var feature = TestGit.Commit(origin, "feature.txt", "feature");
         TestGit.Run(origin, "checkout", "--quiet", "main");
         TestGit.Commit(origin, "main.txt", "later on main");
-        var launch = Launch(new RepoRecord(origin, "feature"));
+        var launch = Launch(new Repo(origin, "feature"));
 
         await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -102,7 +102,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var first = TestGit.Head(origin);
         TestGit.Commit(origin, "second.txt", "second");
-        var launch = Launch(new RepoRecord(origin, first));
+        var launch = Launch(new Repo(origin, first));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -117,7 +117,7 @@ public class ClaudeRepoTests
         var tagged = TestGit.Head(origin);
         TestGit.Run(origin, "tag", "v1");
         TestGit.Commit(origin, "second.txt", "second");
-        var launch = Launch(new RepoRecord(origin, "v1"));
+        var launch = Launch(new Repo(origin, "v1"));
 
         await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -128,7 +128,7 @@ public class ClaudeRepoTests
     public async Task UnknownRef_FailsTheSession_WithWhy_AndTheAgentNeverStarts()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
-        var launch = Launch(new RepoRecord(origin, "no-such-ref"));
+        var launch = Launch(new Repo(origin, "no-such-ref"));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -141,7 +141,7 @@ public class ClaudeRepoTests
     public async Task NoSuchRepository_FailsTheSession_WithGitsError()
     {
         var missing = Path.Combine(_root, "origin", "missing");
-        var launch = Launch(new RepoRecord(missing));
+        var launch = Launch(new Repo(missing));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -160,7 +160,7 @@ public class ClaudeRepoTests
         TestGit.Require();
         // ssh that never answers: git runs GIT_SSH_COMMAND through the shell, so this sleeps.
         var sleeper = $"sleep 60.{Random.Shared.Next(100_000, 999_999)}";
-        var launch = Launch(new RepoRecord("ssh://arm.invalid/hangs.git")) with
+        var launch = Launch(new Repo("ssh://arm.invalid/hangs.git")) with
         {
             Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{sleeper};:" },
         };
@@ -187,7 +187,7 @@ public class ClaudeRepoTests
         // An "ssh" that fails at once but leaves a process holding git's stderr, not its protocol (like an ssh
         // ControlMaster with ControlPersist): git exits, its pipes stay open.
         var lingerer = $"sleep 59.{Random.Shared.Next(100_000, 999_999)}";
-        var launch = Launch(new RepoRecord("ssh://arm.invalid/lingers.git")) with
+        var launch = Launch(new Repo("ssh://arm.invalid/lingers.git")) with
         {
             Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{lingerer} >/dev/null & echo 'no route to arm.invalid' >&2; exit 255;:" },
         };
@@ -210,7 +210,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
 
@@ -237,7 +237,7 @@ public class ClaudeRepoTests
         // What a kill given before ARM is connected to the supervisor leaves: the mark only.
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
 
@@ -255,7 +255,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
         var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
@@ -279,7 +279,7 @@ public class ClaudeRepoTests
         TestGit.Require();
         var gate = new GatedSsh(_root);
         var missing = Path.Combine(_root, "origin", "missing");
-        var launch = Launch(new RepoRecord(GatedSsh.Url(missing))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(missing))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
         var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
@@ -303,9 +303,9 @@ public class ClaudeRepoTests
         var provider = Provider();
         var url = GatedSsh.Url(origin);
         gate.Release();
-        await provider.Start(Launch(new RepoRecord(url)) with { Env = gate.Env }).Completion.WaitAsync(Guard);
+        await provider.Start(Launch(new Repo(url)) with { Env = gate.Env }).Completion.WaitAsync(Guard);
         var slow = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(url)) with { Env = slow.Env };
+        var launch = Launch(new Repo(url)) with { Env = slow.Env };
         var run = provider.Start(launch);
         await slow.ReachedAsync(Guard);
 
@@ -323,7 +323,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var (before, provider) = Server();
         _ = provider.Start(launch);
         await gate.ReachedAsync(Guard);
@@ -350,7 +350,7 @@ public class ClaudeRepoTests
         var linked = Path.Combine(_root, "linked-sessions");
         Directory.CreateSymbolicLink(linked, real);
         var provider = Provider(workRoot: linked);
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         var run = provider.Start(launch);
         await run.Completion.WaitAsync(Guard);
         var worktree = Path.Combine(linked, launch.SessionId.ToString(), "work", "alpha");
@@ -369,7 +369,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var first = new GatedSsh(_root);
         first.Release();
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = first.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = first.Env };
         var (_, provider) = Server();
         var run = provider.Start(launch);
         await run.Completion.WaitAsync(Guard);
@@ -413,7 +413,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var older = new GatedSsh(_root);
         var newer = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = older.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = older.Env };
         var provider = Provider();
         _ = provider.Start(launch);
         await older.ReachedAsync(Guard);
@@ -440,7 +440,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
         var url = GatedSsh.Url(origin);
-        var launch = Launch(new RepoRecord(url)) with { Env = gate.Env };
+        var launch = Launch(new Repo(url)) with { Env = gate.Env };
 
         var outcome = await Provider(checkoutTimeout: TimeSpan.FromSeconds(2)).Start(launch).Completion.WaitAsync(Promptly);
 
@@ -454,7 +454,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var gate = new GatedSsh(_root);
-        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var (before, provider) = Server();
         _ = provider.Start(launch);
         await gate.ReachedAsync(Guard);
@@ -492,10 +492,10 @@ public class ClaudeRepoTests
         var gate = new GatedSsh(_root);
         var url = GatedSsh.Url(origin);
         var provider = Provider();
-        var first = Launch(new RepoRecord(url)) with { Env = gate.Env };
+        var first = Launch(new Repo(url)) with { Env = gate.Env };
         var firstRun = provider.Start(first);
         await gate.ReachedAsync(Guard);
-        var second = Launch(new RepoRecord(url)) with { Env = gate.Env };
+        var second = Launch(new Repo(url)) with { Env = gate.Env };
 
         var secondRun = provider.Start(second);
         await Until(() => Log(second).Contains("waiting for", StringComparison.Ordinal));
@@ -513,7 +513,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         using var held = HoldLock(origin);
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
 
         var outcome = await Provider(gitTimeout: TimeSpan.FromSeconds(1)).Start(launch).Completion.WaitAsync(Guard);
 
@@ -526,7 +526,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var held = HoldLock(origin);
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         var run = Provider().Start(launch);
         await Until(() => Log(launch).Contains("waiting for", StringComparison.Ordinal));
 
@@ -543,7 +543,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         Directory.CreateDirectory(Path.Combine(SharedRoot, RepoNames.Shared(origin) + ".lock"));
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
 
         var outcome = await Provider(gitTimeout: TimeSpan.FromSeconds(1)).Start(launch).Completion.WaitAsync(Guard);
 
@@ -558,8 +558,8 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
-        var launch = Launch(new RepoRecord(origin));
+        await provider.Start(Launch(new Repo(origin))).Completion.WaitAsync(Guard);
+        var launch = Launch(new Repo(origin));
         var shared = Shared("alpha");
         var worktree = Path.Combine(Workplace(launch), "alpha");
         // What an attempt killed in `git worktree add` leaves: the branch (with its owner), and a
@@ -584,7 +584,7 @@ public class ClaudeRepoTests
     public async Task SomethingElseInTheWorktreesPlace_FailsTheCheckout_AndIsLeftAlone()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         var worktree = Path.Combine(Workplace(launch), "alpha");
         Directory.CreateDirectory(worktree);
         await File.WriteAllTextAsync(Path.Combine(worktree, "mine.txt"), "not a worktree");
@@ -601,11 +601,11 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var first = Launch(new RepoRecord(origin));
+        var first = Launch(new Repo(origin));
         await provider.Start(first).Completion.WaitAsync(Guard);
         // Another session whose id starts with the same 8 characters.
         var id = Guid.Parse(first.SessionId.ToString()[..8] + Guid.NewGuid().ToString()[8..]);
-        var second = Launch(new RepoRecord(origin)) with { SessionId = id, ProviderSessionId = id };
+        var second = LaunchFor(id, new Repo(origin));
 
         var outcome = await provider.Start(second).Completion.WaitAsync(Guard);
 
@@ -619,9 +619,9 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var first = Launch(new RepoRecord(origin));
+        var first = Launch(new Repo(origin));
         await provider.Start(first).Completion.WaitAsync(Guard);
-        var second = Launch(new RepoRecord(origin, Branch(first)));
+        var second = Launch(new Repo(origin, Branch(first)));
 
         var outcome = await provider.Start(second).Completion.WaitAsync(Guard);
 
@@ -634,7 +634,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var first = TestGit.Head(origin);
         TestGit.Commit(origin, "second.txt", "second");
-        var launch = Launch(new RepoRecord(origin, first[..9]));
+        var launch = Launch(new Repo(origin, first[..9]));
 
         var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
 
@@ -647,13 +647,13 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        await provider.Start(Launch(new Repo(origin))).Completion.WaitAsync(Guard);
         var pushed = TestGit.Commit(origin, "later.txt", "pushed later");
         // A fetch that died mid-update left its ref lock behind, a while ago.
         var stale = Path.Combine(Shared("alpha"), "refs", "remotes", "origin", "main.lock");
         await File.WriteAllTextAsync(stale, "");
         File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddHours(-1));
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
 
         var outcome = await provider.Start(launch).Completion.WaitAsync(Guard);
 
@@ -667,7 +667,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        await provider.Start(Launch(new Repo(origin))).Completion.WaitAsync(Guard);
         // What an agent could plant in the copy every session shares.
         var ran = Path.Combine(_root, "hook-ran");
         foreach (var hook in (string[])["post-checkout", "reference-transaction"])
@@ -677,7 +677,7 @@ public class ClaudeRepoTests
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        var outcome = await provider.Start(Launch(new RepoRecord(origin))).Completion.WaitAsync(Guard);
+        var outcome = await provider.Start(Launch(new Repo(origin))).Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(File.Exists(ran)).IsFalse();
@@ -689,7 +689,7 @@ public class ClaudeRepoTests
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var library = TestGit.Origin(Path.Combine(_root, "origin", "library"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         await provider.Start(launch).Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
         TestGit.Run(worktree, "-c", "protocol.file.allow=always", "submodule", "--quiet", "add", library, "library");
@@ -705,7 +705,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         await provider.Start(launch).Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
         // Its .git file broken (by the agent, say): git no longer takes it for a worktree.
@@ -723,7 +723,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         await provider.Start(launch).Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
 
@@ -743,8 +743,8 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var first = Launch(new RepoRecord(origin));
-        var second = Launch(new RepoRecord(origin));
+        var first = Launch(new Repo(origin));
+        var second = Launch(new Repo(origin));
 
         var runs = new[] { provider.Start(first), provider.Start(second) };
         var outcomes = await Task.WhenAll(runs.Select(r => r.Completion)).WaitAsync(Guard);
@@ -760,11 +760,11 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var first = Launch(new RepoRecord(origin));
+        var first = Launch(new Repo(origin));
         await provider.Start(first).Completion.WaitAsync(Guard);
         var pushed = TestGit.Commit(origin, "later.txt", "pushed later");
 
-        var second = Launch(new RepoRecord(origin));
+        var second = Launch(new Repo(origin));
         await provider.Start(second).Completion.WaitAsync(Guard);
 
         await Assert.That(TestGit.Head(Path.Combine(Workplace(second), "alpha"))).IsEqualTo(pushed);
@@ -776,7 +776,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         var run = provider.Start(launch);
         await run.Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
@@ -800,7 +800,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         await provider.Start(launch).Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
         await File.WriteAllTextAsync(Path.Combine(worktree, "notes.txt"), "uncommitted");
@@ -818,7 +818,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         await provider.Start(launch).Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
         Directory.Delete(worktree, recursive: true);
@@ -833,7 +833,7 @@ public class ClaudeRepoTests
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
         var provider = Provider();
-        var launch = Launch(new RepoRecord(origin));
+        var launch = Launch(new Repo(origin));
         var run = provider.Start(launch);
         await run.Completion.WaitAsync(Guard);
         var worktree = Path.Combine(Workplace(launch), "alpha");
@@ -922,11 +922,14 @@ public class ClaudeRepoTests
         return new ClaudeProvider(Options.Create(options), supervisors, repos, NullLogger<ClaudeProvider>.Instance);
     }
 
-    private static AgentLaunch Launch(params RepoRecord[] repos)
-    {
-        var id = Guid.NewGuid();
-        return new(id, "Say READY", "sonnet", 1, id, Guid.NewGuid(), Repos: repos);
-    }
+    private static AgentLaunch Launch(params Repo[] repos) => LaunchFor(Guid.NewGuid(), repos);
+
+    /// <summary>A launch of the session <paramref name="id"/>, its repos named as a new session's are.</summary>
+    private static AgentLaunch LaunchFor(Guid id, params Repo[] repos) =>
+        new(id, "Say READY", "sonnet", 1, id, Guid.NewGuid(), Repos: [.. repos.Select(r => RepoNames.Record(id, r.Url, r.Ref))]);
+
+    /// <summary>A repository as a session is created with it.</summary>
+    private sealed record Repo(string Url, string? Ref = null);
 
     private string Workplace(AgentLaunch launch) => Path.Combine(_root, "sessions", launch.SessionId.ToString(), "work");
 
