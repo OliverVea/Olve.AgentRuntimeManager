@@ -230,6 +230,24 @@ public class ClaudeRepoTests
     }
 
     [Test]
+    public async Task AKillMark_StopsTheCheckout_WithoutTheKillMessage_AndTheAgentNeverStarts()
+    {
+        // What a kill given before ARM is connected to the supervisor leaves: the mark only.
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new RepoRecord(GatedSsh.Url(origin))) with { Env = gate.Env };
+        var run = Provider().Start(launch);
+        await gate.ReachedAsync(Guard);
+
+        await Assert.That(Posix.CreateMark(Path.Combine(Folder(launch), SupervisorFiles.KillMark(launch.RunId)))).IsTrue();
+        var outcome = await run.Completion.WaitAsync(Promptly);
+
+        await Assert.That(outcome).IsEqualTo(new AgentOutcome.Failed("Killed before its agent started."));
+        await Assert.That(AgentStarted(launch)).IsFalse();
+        await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
+    }
+
+    [Test]
     public async Task Kill_DuringAFetch_LeavesTheSharedCopyAndNoBranch()
     {
         var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));

@@ -122,7 +122,7 @@ public class ClaudeRepoSessionTests : IDisposable
     {
         // At once, so supervisors start, connect and end out of step: two runs of a session meet
         // (their sockets, the kill reaching the old one before it starts an agent).
-        var sessions = await Task.WhenAll(Enumerable.Range(0, 6).Select(async i =>
+        var sessions = await Task.WhenAll(Enumerable.Range(0, 10).Select(async i =>
         {
             var origin = TestGit.Origin(Path.Combine(_root, "origin", $"o{i}", "alpha"));
             var gate = new GatedSsh(_root);
