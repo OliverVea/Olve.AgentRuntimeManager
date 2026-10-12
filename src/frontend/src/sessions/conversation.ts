@@ -5,12 +5,18 @@ import { duration } from "./format.js";
 /** Lines of a tool result shown before "Show all". */
 export const RESULT_LINES = 12;
 
-/** URLs become links; not trailing punctuation or a closing backtick. Runs on escaped HTML. */
-function linkify(html: string): string {
-  return html.replace(
-    /https?:\/\/[^\s<"`]*[^\s<"`.,;:)]/g,
-    (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`,
-  );
+/**
+ * URLs become links; not trailing punctuation or a closing backtick, and not what follows an
+ * escaped quote or bracket (`&quot;`, `&gt;`). A URL cut short (ending in `…`, as long lines are)
+ * stays text: its link would lead elsewhere. Runs on escaped HTML.
+ */
+export function linkify(html: string): string {
+  return html.replace(/https?:\/\/[^\s<"`]*[^\s<"`.,;:)]/g, (match) => {
+    const quote = match.search(/&(?:quot|gt|lt|#39);?/);
+    const url = (quote < 0 ? match : match.slice(0, quote)).replace(/[.,;:)]+$/, "");
+    if (!/^https?:\/\/[^/]/.test(url) || url.endsWith("…")) return match;
+    return `<a href="${url}" target="_blank" rel="noopener">${url}</a>${match.slice(url.length)}`;
+  });
 }
 
 /** `code`, **bold** and links in one escaped line. */
@@ -57,13 +63,19 @@ type Input = Record<string, unknown>;
 const inputOf = (call: ConversationEntry): Input =>
   call.input && typeof call.input === "object" ? (call.input as Input) : {};
 
-/** What a tool call is about, in one line: its description, command, file, pattern or URL. */
+/**
+ * What a tool call is about, in one line: its description (unless blank), command, file, pattern or URL. The
+ * server picks a session's activity by the same rules (`ToolGist`, M5f); both are tested against
+ * `tool-gist.cases.json`, so every client shows the same line. This copy stays: the conversation
+ * has the input, not a line made from it.
+ */
 export function gist(call: ConversationEntry): string {
   const i = inputOf(call);
   const text = (key: string) => (typeof i[key] === "string" ? (i[key] as string) : undefined);
   const command = text("command");
+  const description = text("description");
   return (
-    text("description") ??
+    (description?.trim() ? description : undefined) ??
     (command !== undefined ? shellGist(command) : undefined) ??
     text("file_path") ??
     text("pattern") ??
@@ -72,14 +84,18 @@ export function gist(call: ConversationEntry): string {
   );
 }
 
-/** One line of a result: the first with something in it, or for an error the one that says what went wrong. */
+/**
+ * One line of a result: the first with something in it, or for an error the one that says what went
+ * wrong (not a count of none: `0 errors`).
+ */
 export function preview(result: ConversationEntry): string {
   const lines = (result.text ?? "")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
   const line = result.isError
-    ? (lines.find((l) => /error|fatal|denied|failed|exception/i.test(l)) ?? lines.at(-1))
+    ? (lines.find((l) => /(?<!\b(?:0|no)\s+)(?:error|fatal|denied|failed|exception)/i.test(l)) ??
+      lines.at(-1))
     : lines[0];
   return line ?? "(no output)";
 }

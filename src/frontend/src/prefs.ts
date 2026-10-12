@@ -23,6 +23,8 @@ export type Prefs = {
   times: "relative" | "absolute";
   /** The session page's transcript: thinking and notices shown, every tool call open. */
   transcript: { thinking: boolean; tools: boolean; notices: boolean };
+  /** The Overview's logs (M5f): long lines wrapped, whole logs shown, unless a card says otherwise. */
+  log: { wrap: boolean; expand: boolean };
 };
 
 const key = "arm-prefs";
@@ -31,6 +33,7 @@ export const initialPrefs: Prefs = {
   defaults: { model: "claude/sonnet", caller: "" },
   times: "relative",
   transcript: { thinking: false, tools: false, notices: false },
+  log: { wrap: false, expand: false },
 };
 
 export function loadPrefs(storage: Storage | undefined = safeStorage()): Prefs {
@@ -43,6 +46,7 @@ export function loadPrefs(storage: Storage | undefined = safeStorage()): Prefs {
       ...saved,
       defaults: { ...initialPrefs.defaults, ...saved.defaults },
       transcript: { ...initialPrefs.transcript, ...saved.transcript },
+      log: { ...initialPrefs.log, ...saved.log },
     };
   } catch {
     return initialPrefs;

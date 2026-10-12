@@ -116,6 +116,10 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         return File.Exists(output) ? ClaudeConversation.Read(SupervisedAgent.ReadLines(output, 0), ReportUnknown) : [];
     }
 
+    /// <summary>The session's conversation newest first, read from the end of its raw output only as far as it's enumerated.</summary>
+    public IEnumerable<ConversationEntryRecord> ConversationNewestFirst(Guid sessionId) =>
+        ClaudeConversation.ReadNewestFirst(OutputLines.Backwards(Path.Combine(Folder(options.Value, sessionId), SupervisorFiles.Output)), ReportUnknown);
+
     /// <summary>
     /// Whether Claude Code is logged in, as its agents would be (the same environment and
     /// configuration folder): <c>claude auth status</c>, which reads the credentials without using

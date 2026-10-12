@@ -1,4 +1,5 @@
 import {
+  sessionActivityGet,
   sessionConversationGet,
   sessionMessagesSend,
   sessionsCreate,
@@ -18,6 +19,7 @@ import { UsageError } from "../errors";
 import { commaListOf, dateTime, integer, keyValues, repeated, text, textOrDefault } from "../options";
 import { formatKeyValue, formatTable, localDateTime, truncate } from "../output";
 import type { CommandContext, CommandGroup, OptionValues } from "../registry";
+import { formatActivity } from "./activity";
 import { formatConversation } from "./conversation";
 
 /** Every session status (typed, so a status added to the contract fails to compile here). */
@@ -205,6 +207,22 @@ export const sessionGroup: CommandGroup = {
       async run({ args, client }) {
         const conversation = await unwrap(sessionConversationGet({ client, path: { id: args.id! } }), client);
         return { json: conversation, pretty: formatConversation(conversation) };
+      },
+    },
+    {
+      name: "activity",
+      summary: "Show what a session's agent did most recently: its words, the tools it called and what failed, oldest first",
+      args: [idArg],
+      options: {
+        limit: { type: "string", description: "How many lines, the latest ones: 1–50 (default 3)", valueName: "N" },
+      },
+      async run({ args, options, client }) {
+        const limit = integer(options, "limit", { min: 1, max: 50 });
+        const activity = await unwrap(
+          sessionActivityGet({ client, path: { id: args.id! }, ...(limit === undefined ? {} : { query: { limit } }) }),
+          client,
+        );
+        return { json: activity, pretty: formatActivity(activity) };
       },
     },
     {

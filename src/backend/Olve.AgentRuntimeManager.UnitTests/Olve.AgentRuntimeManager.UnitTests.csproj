@@ -16,6 +16,8 @@
   <ItemGroup>
     <None Include="Sessions/Claude/Stub/**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Sessions/Supervision/Stub/**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The tool-call gist cases the web UI is tested against too (ToolGistTests). -->
+    <None Include="../../frontend/src/sessions/tool-gist.cases.json" Link="Sessions/Activities/tool-gist.cases.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

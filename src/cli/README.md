@@ -14,6 +14,7 @@ arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-s
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
+arm session activity <id> [--limit N]
 arm session message <id> <text> [--caller X]
 arm session kill <id> [--caller X] [--reason TEXT]
 arm session delete <id>
@@ -87,6 +88,15 @@ file is. `ARM_HOME` moves the folder (default `~/.arm`).
 `Queued session <id> at position N.` when it is waiting for one (202); with `--json` it prints the
 session either way (`status` and `queuePosition` tell them apart). `arm session list` pages newest
 first; its footer says which matches are shown and the `--offset` of the next page.
+
+## Activity
+
+`arm session activity <id>` shows what a session's agent did most recently, oldest first, one line
+each: `› ` what it said (its first line), `⚙ ` a tool it called (`⚙ Bash → npx mise run ci`) and
+`! ` what failed (a tool call, a turn, or, last, why the session failed). `--limit N` asks for the
+latest N lines (1–50, default 3); `--json` prints `{ "lines": [{ "kind", "text" }] }`. Lines are
+short (at most 200 characters) and leave out thinking and results; `arm session conversation <id>`
+has everything.
 
 ## Messages
 

@@ -1,9 +1,52 @@
-import type { ProviderHealth, Session } from "@arm/client";
+import type { ActivityLine, ProviderHealth, Session } from "@arm/client";
 import { escapeHtml } from "../base-element.js";
+import { linkify } from "../sessions/conversation.js";
 import { clock, isEnded, modelLabel, relative, runningTime, shortId } from "../sessions/format.js";
 import { isPaused, waitingText } from "../sessions/provider-health.js";
 
 export type TimesAs = "relative" | "absolute";
+
+/** A working session's log column: its latest activity (undefined until read), wrapped, expanded. */
+export type LogView = { lines: readonly ActivityLine[] | undefined; wrap: boolean; open: boolean };
+
+/**
+ * Lines a log shows, and so asks for: 3, 8 wrapped (the box keeps its height; older lines leave at
+ * the top), and expanded up to 20.
+ */
+export const LOG_LINES = { shown: 3, wrapped: 8, expanded: 20 } as const;
+
+/** How many lines a log with these settings shows (and is read for). */
+export function logLimit(log: { wrap: boolean; open: boolean }): number {
+  return log.open ? LOG_LINES.expanded : log.wrap ? LOG_LINES.wrapped : LOG_LINES.shown;
+}
+
+/** One of a card's log buttons: its classes, title and icon. */
+export type ToggleState = { className: string; title: string; icon: string };
+
+/**
+ * The card's expand and wrap buttons. Expand is offered once the box is full (more may be behind
+ * it: a collapsed card reads only what it shows); wrap once there's a line. A queued card keeps
+ * both slots, hidden, so the icons line up.
+ */
+export function logToggles(log: LogView | undefined): { expand: ToggleState; wrap: ToggleState } {
+  const count = log?.lines?.length ?? 0;
+  const open = !!log?.open;
+  const wrap = !!log?.wrap;
+  return {
+    expand: {
+      className: `${open ? "on" : ""}${log && (open || count >= LOG_LINES.shown) ? "" : " off"}`,
+      title: open
+        ? `Show the last ${LOG_LINES.shown} lines`
+        : `Show more of the log (up to ${LOG_LINES.expanded} lines)`,
+      icon: icon(open ? "collapse" : "expand"),
+    },
+    wrap: {
+      className: `${wrap ? "on" : ""}${log && count ? "" : " off"}`,
+      title: wrap ? "Don't wrap long lines" : "Wrap long lines",
+      icon: icon("wrap"),
+    },
+  };
+}
 
 const icon = (name: string) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 
@@ -65,15 +108,35 @@ export function note(session: Session): string {
   }
 }
 
+/** A working session's latest activity, filling its box from the bottom; links in it work. */
+export function logBox(log: LogView): string {
+  const all = log.lines ?? [];
+  const lines = all.slice(-logLimit(log));
+  const body = lines.length
+    ? lines
+        .map(
+          (l) =>
+            `<div data-kind="${l.kind}" title="${escapeHtml(l.text)}">${linkify(escapeHtml(l.text))}</div>`,
+        )
+        .join("")
+    : log.lines
+      ? `<div class="quiet">no output yet</div>`
+      : "";
+  return `<div class="log${log.open ? " open" : ""}${log.wrap ? " wrap" : ""}">${body}</div>`;
+}
+
 /**
  * One session card: status · time · outcome (and, queued, what it waits for), the task, then
- * id · model · caller (· ended). `health` is its provider's.
+ * id · model · caller (· ended). `health` is its provider's. A working session's card also shows
+ * its log (`log`, M5f) with expand and wrap; a queued one keeps the column (and the icons' slots)
+ * empty, so the Overview's cards line up; an ended one has neither.
  */
 export function sessionCard(
   session: Session,
   times: TimesAs,
   now: number,
   health?: ProviderHealth,
+  log?: LogView,
 ): string {
   const ended = isEnded(session);
   const title = escapeHtml(timeTitle(session, times, now));
@@ -95,6 +158,12 @@ export function sessionCard(
         }</button>`
       : "",
   ];
+  const working = session.status === "working" && log !== undefined;
+  const { expand, wrap } = logToggles(working ? log : undefined);
+  const toggles = ended
+    ? ""
+    : `<button class="${expand.className}" data-expand="${id}" title="${expand.title}" aria-label="Expand the log">${expand.icon}</button>` +
+      `<button class="${wrap.className}" data-wrap="${id}" title="${wrap.title}" aria-label="Wrap the log's lines">${wrap.icon}</button>`;
   const stop = ended
     ? `<button class="stop" data-delete="${id}" title="Delete session" aria-label="Delete session">${icon("trash")}</button>`
     : session.status === "queued"
@@ -106,8 +175,13 @@ export function sessionCard(
         <div class="r1">${r1.join(`<span class="sep">·</span>`)}</div>
         <div class="task" title="${escapeHtml(session.prompt)}">${escapeHtml(session.prompt)}</div>
         <div class="info">${info.join("")}</div>
-      </div>
-      <div class="icons">${stop}</div>
+      </div>${
+        ended
+          ? ""
+          : `
+      <div class="logcol">${working ? logBox(log) : ""}</div>`
+      }
+      <div class="icons">${toggles}${stop}</div>
     </div>`;
 }
 
@@ -144,9 +218,51 @@ export const cardStyles = `
   .info .id:hover { color: var(--accent); }
 
   .icons { display: flex; align-items: center; gap: 1px; align-self: start; padding: 5px 6px 0 0; }
-  .icons button { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--danger); padding: 0; }
-  .icons button:hover { background: var(--danger-soft); color: var(--danger); }
+  .icons button { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); padding: 0; }
+  .icons button:hover { background: var(--hover); color: var(--text); }
+  .icons button.on { color: var(--accent); }
+  .icons button.stop:hover { background: var(--danger-soft); color: var(--danger); }
   .icons svg.i { width: 15px; height: 15px; }
+  .icons .off { visibility: hidden; }
+  /* Shown on hover (or keyboard focus), or when switched on; always on touch screens. */
+  .icons button { opacity: 0; transition: opacity .12s; }
+  .card:hover .icons button, .icons button:focus-visible, .icons button.on, .icons button.stop { opacity: 1; }
+  /* Stop (and delete) is always shown, in red. */
+  .icons button.stop { color: var(--danger); }
+  @media (hover: none) { .icons button { opacity: 1; } }
+
+  /* ---- the log column (M5f): | details | log | icons | on the Overview's cards ---- */
+  .card.working, .card.queued { grid-template-columns: minmax(250px, 30%) 1fr auto; }
+  .card.working .details, .card.queued .details { border-right: 1px solid var(--line); }
+  .logcol { padding: 8px 14px; min-width: 0; position: relative; cursor: text; user-select: text; }
+  .log { font: 12.5px var(--mono); color: var(--dim); height: calc(3 * var(--row)); display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+  .log > div { line-height: var(--row); white-space: nowrap; overflow: hidden; flex: none; padding-left: 16px; position: relative; }
+  .log > div::before { position: absolute; left: 0; top: 0; width: 12px; text-align: center; }
+  .log [data-kind="text"] { color: var(--text); } .log [data-kind="text"]::before { content: "›"; color: var(--faint); }
+  .log [data-kind="tool"] { color: var(--accent); }
+  .log [data-kind="tool"]::before { content: ""; top: 5px; height: 12px; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E") center / contain no-repeat; }
+  .log a { color: var(--accent); }
+  .log [data-kind="error"] { color: var(--failed); } .log [data-kind="error"]::before { content: "!"; font-weight: 700; }
+  .log .quiet { color: var(--faint); font: italic 13px system-ui, sans-serif; padding-left: 0; }
+  .log .quiet::before { content: none; }
+  /* Unwrapped lines that don't fit fade at the right edge (.overflows is measured after render). */
+  .log > div.overflows { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 4em), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 4em), transparent); }
+  /* Wrap only changes how lines break; the box keeps its height and older lines leave at the top. */
+  .log.wrap > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .log.wrap > div.overflows { -webkit-mask-image: none; mask-image: none; }
+  .log.wrap.clipped:not(.open) { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1.2em); mask-image: linear-gradient(to bottom, transparent, #000 1.2em); }
+  /* Expand is what makes it grow. */
+  .log.open { height: auto; min-height: calc(3 * var(--row)); }
+
+  @media (max-width: 720px) {
+    .card.working, .card.queued { grid-template-columns: 1fr auto; }
+    .card.working .details, .card.queued .details { border-right: 0; grid-column: 1; grid-row: 1; }
+    .icons { grid-column: 2; grid-row: 1; }
+    .logcol { grid-column: 1 / -1; border-top: 1px solid var(--line); }
+    .card.queued .logcol { display: none; }
+  }
 
   .empty { color: var(--dim); text-align: center; padding: 34px; }
   .error { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--danger-soft); color: var(--danger); font-size: 13px; }

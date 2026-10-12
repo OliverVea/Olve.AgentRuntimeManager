@@ -31,12 +31,14 @@ src/frontend/
 ├─ src/
 │  ├─ main.ts                 entry: wires the page (auth, header, composer, dialogs, options, routes)
 │  ├─ styles.css              the page's styles and the colour tokens (light + dark)
-│  ├─ prefs.ts                what this browser remembers (defaults for new sessions, theme, times)
+│  ├─ prefs.ts                what this browser remembers (defaults for new sessions, theme, times, logs)
 │  ├─ base-element.ts         BaseElement — the explicit-render seam + escapeHtml
 │  ├─ api-client.ts           client factory over the generated SDK (+ Bearer auth)
 │  ├─ api-errors.ts           ApiError / unwrap: SDK results → exceptions with the HTTP status
 │  ├─ sessions/
 │  │  ├─ session-store.ts     the sessions, from a snapshot + the event stream (see Live updates)
+│  │  ├─ activity-store.ts    working sessions' latest activity for the cards' logs, each re-read every 3 s (M5f)
+│  │  ├─ tool-gist.cases.json a tool call in short: cases the server's activity is tested against too
 │  │  ├─ new-session.ts       the composer's fields → a create request (validation)
 │  │  └─ format.ts            durations, times, ids, provider/model
 │  ├─ env/                     environment variables (M5d)
@@ -147,7 +149,8 @@ The shipped tests cover `BaseElement` (including the "no auto-render on attribut
 hard rule), `escapeHtml`, the client factory (Bearer attach, 401 → refresh → replay), the
 composer's validation, the `SessionStore` over the real generated client and a scripted backend
 (snapshot + stream, buffering, stale events, History paging, reconnecting, errors) and
-`<session-list>` (cards, outcomes, "load older", what a click or key asks for), and the env
+`<session-list>` (cards, outcomes, "load older", what a click or key asks for, the log column),
+the `ActivityStore` (what it reads, when it re-reads and stops), and the env
 name rules, the composer's env panel and the Environment variables dialog.
 
 ## Lint & format

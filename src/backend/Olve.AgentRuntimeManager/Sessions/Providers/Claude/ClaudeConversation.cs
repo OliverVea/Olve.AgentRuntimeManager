@@ -61,6 +61,14 @@ public static class ClaudeConversation
         return entries;
     }
 
+    /// <summary>
+    /// The same entries newest first, from the output's lines newest first (as
+    /// <see cref="Supervision.OutputLines.Backwards"/> reads them), lazily: each line is read on its
+    /// own, so a turn's end has no time unless its event has one.
+    /// </summary>
+    public static IEnumerable<ConversationEntryRecord> ReadNewestFirst(IEnumerable<string> linesNewestFirst, Action<string>? unknown = null) =>
+        linesNewestFirst.SelectMany(line => Read([line], unknown).Reverse());
+
     /// <summary>A user event: a message to the agent (a prompt), or tool results.</summary>
     private static IEnumerable<ConversationEntryRecord> User(JsonNode? content, DateTimeOffset? at, string? parent, ConversationEntryKind message, Action<string> unknown)
     {

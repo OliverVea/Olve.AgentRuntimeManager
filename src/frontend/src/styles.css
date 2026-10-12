@@ -413,6 +413,11 @@ section.opt .field input,
 section.opt .field select {
   width: 100%;
 }
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 @media (max-width: 720px) {
   header {

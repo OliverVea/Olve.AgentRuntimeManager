@@ -19,6 +19,7 @@ import { EnvDialog } from "./env/env-dialog.js";
 import { EnvPanel } from "./env/env-panel.js";
 import { EnvRegistry } from "./env/env-registry.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
+import { ActivityStore } from "./sessions/activity-store.js";
 import { parseModel, shortId } from "./sessions/format.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
 import { isPaused, timesText, untilText, willQueueText } from "./sessions/provider-health.js";
@@ -35,6 +36,7 @@ const client = createApiClient(baseUrl, {
   onUnauthorized: auth.refresh,
 });
 const store = new SessionStore(client);
+const activity = new ActivityStore(client, store);
 const envRegistry = new EnvRegistry(client);
 let prefs: Prefs = loadPrefs();
 
@@ -48,7 +50,9 @@ const icon = (name: string) => `<svg class="i"><use href="#i-${name}"/></svg>`;
 customElements.define(SessionList.tagName, SessionList);
 const list = $<SessionList>("#list");
 list.store = store;
+list.activity = activity;
 list.times = prefs.times;
+list.logDefaults = prefs.log;
 customElements.define(SessionPage.tagName, SessionPage);
 const page = $<SessionPage>("#page");
 page.times = prefs.times;
@@ -182,12 +186,14 @@ function renderAuthState(): void {
   signedIn = now;
   if (now) {
     store.start();
+    readActivity();
     void envRegistry.load();
     void loadServerInfo();
     fillComposer();
     route();
   } else {
     store.stop();
+    activity.stop();
     envRegistry.clear();
     $("#env").innerHTML = "";
     closeProviders();
@@ -314,6 +320,13 @@ function setView(view: View): void {
   for (const b of document.querySelectorAll<HTMLElement>("[data-view]")) {
     b.classList.toggle("on", b.dataset.view === view);
   }
+  readActivity();
+}
+
+/** Working sessions' activity is read while the Overview shows (it stops itself while the page is hidden). */
+function readActivity(): void {
+  if (signedIn && list.view === "overview" && !list.hidden) activity.start();
+  else activity.stop();
 }
 $("#views").addEventListener("click", (e) => {
   const view = (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view;
@@ -456,6 +469,8 @@ $("#open-options").addEventListener("click", () => {
   caller.placeholder = fallbackCaller();
   $<HTMLInputElement>("#o-timeout").value = prefs.defaults.timeoutSeconds?.toString() ?? "";
   $<HTMLSelectElement>("#o-theme").value = prefs.theme ?? "";
+  $<HTMLInputElement>("#o-wrap").checked = prefs.log.wrap;
+  $<HTMLInputElement>("#o-expand").checked = prefs.log.expand;
   $("#options-problem").textContent = "";
   const dialog = $<HTMLDialogElement>("#options-dialog");
   const form = dialog.querySelector("form");
@@ -482,10 +497,15 @@ $("#open-options").addEventListener("click", () => {
           timeoutSeconds: timeout.value,
         },
         theme: theme || undefined,
+        log: {
+          wrap: $<HTMLInputElement>("#o-wrap").checked,
+          expand: $<HTMLInputElement>("#o-expand").checked,
+        },
       };
       savePrefs(prefs);
       applyTheme();
       fillComposer();
+      list.logDefaults = prefs.log;
     };
   }
   dialog.showModal();
@@ -501,6 +521,7 @@ async function route(): Promise<void> {
   const id = location.hash.match(/^#\/sessions\/(.+)$/)?.[1];
   for (const el of [$("#composer"), $("#views"), list]) el.hidden = !!id;
   $("#detail").hidden = !id;
+  readActivity();
   clearTimeout(pageTimer);
   if (id !== pageId) {
     page.reset();

@@ -12,6 +12,7 @@ import {
   topLevel,
   turnStart,
 } from "./conversation.js";
+import gistCases from "./tool-gist.cases.json";
 
 const entry = (
   seq: number,
@@ -40,6 +41,26 @@ describe("conversation helpers", () => {
       shellGist('cd /work && export PATH=$HOME/bin:$PATH; eval "$(mise env)"; mise run ci > log'),
     ).toBe("mise run ci > log");
     expect(shellGist("cd /work")).toBe("cd /work");
+  });
+
+  it("gist follows the rules the server's activity follows too (the shared cases)", () => {
+    expect(gistCases.length).toBeGreaterThan(5);
+    for (const c of gistCases as Array<{ input?: unknown; gist: string }>) {
+      expect(gist(entry(1, "tool_call", { tool: "X", input: c.input })), JSON.stringify(c)).toBe(
+        c.gist,
+      );
+    }
+  });
+
+  it("preview of an error doesn't take a count of none for the cause", () => {
+    expect(
+      preview(
+        entry(2, "tool_result", { isError: true, text: "0 errors, 3 warnings\nfatal: boom" }),
+      ),
+    ).toBe("fatal: boom");
+    expect(preview(entry(2, "tool_result", { isError: true, text: "TypeError: x" }))).toBe(
+      "TypeError: x",
+    );
   });
 
   it("gist prefers a description, then the command's gist, a file, a pattern", () => {
