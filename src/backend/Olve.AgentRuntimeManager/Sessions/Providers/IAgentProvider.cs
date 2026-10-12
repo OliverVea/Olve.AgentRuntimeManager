@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
@@ -37,4 +38,13 @@ public interface IAgentProvider
     /// Entries never change or move, so their positions are stable. Empty when there's none.
     /// </summary>
     IReadOnlyList<ConversationEntryRecord> Conversation(Guid sessionId) => [];
+
+    /// <summary>
+    /// A session that named <paramref name="repos"/> was deleted (M5e): remove its worktrees from the
+    /// shared copies (their branches stay). Best effort, and never for a session still running. The
+    /// default has no workplace, so nothing to remove.
+    /// </summary>
+    void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos)
+    {
+    }
 }

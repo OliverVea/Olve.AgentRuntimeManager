@@ -81,6 +81,9 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                     b.Property<string>("ProviderSessionId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Repos")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("RunId")
                         .HasColumnType("TEXT");
 

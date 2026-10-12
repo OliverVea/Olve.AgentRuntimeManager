@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -29,6 +30,9 @@ public sealed record SessionRecord
     /// defaults, the ones it asked for, and its own (winning). Every launch, retry and resume uses it.
     /// </summary>
     public IReadOnlyDictionary<string, string>? AgentEnv { get; init; }
+
+    /// <summary>The git repositories checked out for its agent (M5e), as given.</summary>
+    public IReadOnlyList<RepoRecord>? Repos { get; init; }
 
     /// <summary>
     /// Messages held for its agent (M11), in the order they came: sent while it was queued, or

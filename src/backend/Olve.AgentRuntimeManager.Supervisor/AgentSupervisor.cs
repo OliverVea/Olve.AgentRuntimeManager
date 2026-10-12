@@ -33,6 +33,9 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     private SupervisorMessage? _exited;
     private bool _inputClosed;
 
+    /// <summary>True once the agent has started (and <see cref="_hello"/> is set), false if the run ended without it.</summary>
+    private readonly TaskCompletionSource<bool> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public async Task<int> RunAsync()
     {
         Directory.CreateDirectory(launch.Folder);
@@ -40,16 +43,25 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         await using var stderr = new FileStream(Path.Combine(launch.Folder, SupervisorFiles.Stderr), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         _outputStart = _outputEnd = output.Position;
 
+        // Listening before the checkout, which can take minutes: ARM connects and waits for the hello,
+        // which comes once the agent has started (else ARM would take a slow clone for a lost supervisor).
+        using var stop = new CancellationTokenSource();
+        using var listener = Listen();
+        var accepting = AcceptAsync(listener, stop.Token);
         try
         {
-            CreateWorkingDirectory();
+            CreateWorkplace();
+            if (await CheckoutAsync() is { } checkoutError)
+            {
+                return await NotStartedAsync(127, checkoutError, stop, listener, accepting);
+            }
+
             _agent = Process.Start(StartInfo()) ?? throw new InvalidOperationException($"'{launch.Command}' did not start.");
         }
         catch (Exception exception)
         {
             _log.Write($"run {launch.RunId}: could not start the agent: {exception.Message}");
-            WriteExit(127, exception.Message);
-            return 1;
+            return await NotStartedAsync(127, exception.Message, stop, listener, accepting);
         }
 
         _log.Write($"run {launch.RunId}: agent {_agent.Id} started");
@@ -71,11 +83,9 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             SupervisorPid = info.SupervisorPid, AgentPid = info.AgentPid, OutputStart = info.OutputStart, StderrStart = info.StderrStart,
         };
 
+        _ready.TrySetResult(true);
         var stdoutPump = PumpOutputAsync(output);
         var stderrPump = PumpStderrAsync(stderr);
-        using var stop = new CancellationTokenSource();
-        using var listener = Listen();
-        var accepting = AcceptAsync(listener, stop.Token);
         // After the pumps and the socket: an agent that writes before it has read a large prompt
         // must not block this (nor keep ARM from connecting).
         var input = WriteInitialInputAsync();
@@ -111,6 +121,46 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         return 0;
     }
 
+    /// <summary>
+    /// The run ends without an agent (a checkout that failed, a command that didn't start): the exit
+    /// file first, then the socket closes, so an ARM waiting for the hello finds the exit.
+    /// </summary>
+    private async Task<int> NotStartedAsync(int exitCode, string error, CancellationTokenSource stop, Socket listener, Task accepting)
+    {
+        WriteExit(exitCode, error);
+        _ready.TrySetResult(false);
+        await stop.CancelAsync();
+        listener.Dispose();
+        File.Delete(launch.SocketPath);
+        await accepting;
+        lock (_gate)
+        {
+            _connection?.Dispose();
+        }
+
+        return 1;
+    }
+
+    /// <summary>The session's repositories, checked out in its workplace (M5e); the first error, if one failed.</summary>
+    private async Task<string?> CheckoutAsync()
+    {
+        if (launch.Repos.Count == 0)
+        {
+            return null;
+        }
+
+        var checkout = new RepoCheckout(new Git(launch.Environment, launch.GitTimeout), _log);
+        foreach (var repo in launch.Repos)
+        {
+            if (await checkout.CheckoutAsync(repo) is { } error)
+            {
+                return error;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>A message from the attached ARM.</summary>
     internal async Task HandleAsync(ArmConnection connection, SupervisorMessage message)
     {
@@ -135,18 +185,19 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
     }
 
     /// <summary>
-    /// Makes the agent's working directory if it's new, as the agent's user: its own, so git trusts
+    /// Makes the agent's workplace if it's new, as the agent's user: its own, so git trusts
     /// a repository right in it (docs/AGENT-USER.md). Shared with the group, as ARM shares the session's folder.
     /// </summary>
-    private void CreateWorkingDirectory()
+    private void CreateWorkplace()
     {
-        if (Directory.Exists(launch.WorkingDirectory))
+        var workplace = launch.Workplace ?? launch.WorkingDirectory;
+        if (Directory.Exists(workplace))
         {
             return;
         }
 
-        Directory.CreateDirectory(launch.WorkingDirectory);
-        File.SetUnixFileMode(launch.WorkingDirectory, File.GetUnixFileMode(launch.WorkingDirectory)
+        Directory.CreateDirectory(workplace);
+        File.SetUnixFileMode(workplace, File.GetUnixFileMode(workplace)
             | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.SetGroup);
     }
@@ -223,8 +274,28 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             }
 
             previous?.Dispose();
-            connection.Start(_hello);
+            _ = StartWhenReadyAsync(connection);
         }
+    }
+
+    /// <summary>Greets a connection once the agent has started; closes it if the run ended without one.</summary>
+    private async Task StartWhenReadyAsync(ArmConnection connection)
+    {
+        if (!await _ready.Task)
+        {
+            connection.Dispose();
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (connection != _connection)
+            {
+                return;
+            }
+        }
+
+        connection.Start(_hello);
     }
 
     /// <summary>Sends the output from <paramref name="offset"/> on, then every new line as it comes.</summary>

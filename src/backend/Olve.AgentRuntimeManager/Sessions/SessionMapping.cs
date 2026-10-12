@@ -18,6 +18,7 @@ public static class SessionMapping
         TimeoutSeconds = session.TimeoutSeconds,
         Env = session.Env,
         UseEnv = session.UseEnv,
+        Repos = session.Repos?.Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref }).ToList(),
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

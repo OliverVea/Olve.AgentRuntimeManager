@@ -8,6 +8,9 @@ using Olve.AgentRuntimeManager.Supervisor.Protocol;
 // `olve-arm-supervisor kill <process group> <pid>`: SIGKILLs an orphaned run's process group and
 // agent, for an ARM whose agents run as another user (docs/AGENT-USER.md): ARM runs this as that
 // user, so it can signal exactly what that user can. Exit code 1: something there that it couldn't signal.
+// `olve-arm-supervisor remove-worktree <shared copy> <worktree>`: removes a deleted session's
+// worktree (M5e) from the shared copy of its repository, its branch kept, as the user who made it
+// (ARM runs this as the agent user, like `kill`). Exit code 1: it couldn't.
 // Unix only: sockets and file modes, setsid, process groups (ARM runs on Linux).
 if (OperatingSystem.IsWindows())
 {
@@ -32,6 +35,24 @@ if (args is ["kill", ..])
     if (!groupGone || !agentGone)
     {
         await Console.Error.WriteLineAsync($"olve-arm-supervisor: could not signal process group {groupId} (errno {groupError}) or pid {agentPid} (errno {agentError}).");
+        return 1;
+    }
+
+    return 0;
+}
+
+if (args is ["remove-worktree", ..])
+{
+    if (args is not [_, var shared, var worktree] || !Path.IsPathFullyQualified(shared) || !Path.IsPathFullyQualified(worktree))
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: remove-worktree <shared copy> <worktree>, both absolute paths.");
+        return 2;
+    }
+
+    var error = await RepoWorktree.RemoveAsync(shared, worktree);
+    if (error is not null)
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: {error}");
         return 1;
     }
 

@@ -38,6 +38,12 @@ public sealed class SupervisedAgent
         _ = Task.Run(RunAsync);
     }
 
+    /// <summary>
+    /// Why the run ended without an agent (a checkout that failed, M5e; a command that didn't start),
+    /// from its <c>exit.json</c>; null while running and when the agent did start. Set before <see cref="Exit"/> completes.
+    /// </summary>
+    public string? StartError { get; private set; }
+
     /// <summary>The agent's exit code, once all its output has been read out; faults with <see cref="SupervisorLostException"/>.</summary>
     public Task<int> Exit => _exit.Task;
 
@@ -252,6 +258,7 @@ public sealed class SupervisedAgent
             }
         }
 
+        StartError = exit.Error;
         _lines.Writer.TryComplete();
         _exit.TrySetResult(exit.ExitCode);
     }

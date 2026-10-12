@@ -3,6 +3,7 @@ using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Providers;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -190,6 +191,7 @@ public sealed class SessionManager : IDisposable
                 Env = request.Env,
                 UseEnv = request.UseEnv,
                 AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
+                Repos = request.Repos?.Select(r => new RepoRecord(r.Url, r.Ref)).ToList(),
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);
@@ -351,9 +353,13 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    /// <summary>Deletes a session that has ended.</summary>
+    /// <summary>
+    /// Deletes a session that has ended, and then its worktrees (M5e; through its provider, not under
+    /// the lock: that runs git).
+    /// </summary>
     public DeleteOutcome Delete(Guid id)
     {
+        SessionRecord deleted;
         lock (_gate)
         {
             if (_sessions.TryGetValue(id, out var active))
@@ -361,14 +367,28 @@ public sealed class SessionManager : IDisposable
                 return new DeleteOutcome.NotEnded(active);
             }
 
-            if (_store.Get(id) is null)
+            if (_store.Get(id) is not { } ended)
             {
                 return new DeleteOutcome.NotFound();
             }
 
             _store.Delete(id);
-            return new DeleteOutcome.Deleted();
+            deleted = ended;
         }
+
+        if (deleted.Repos is { Count: > 0 } repos && _providers.TryGetValue(deleted.Provider, out var provider))
+        {
+            try
+            {
+                provider.RemoveRepos(id, repos);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Session {SessionId}: could not remove its worktrees", id);
+            }
+        }
+
+        return new DeleteOutcome.Deleted();
     }
 
     /// <summary>Stops the timeouts and provider wake-ups; the agents themselves are left running (gentle restart, M5a).</summary>
@@ -399,7 +419,7 @@ public sealed class SessionManager : IDisposable
         var resumeRunId = Guid.NewGuid();
         try
         {
-            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv)) is { } agent
+            return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv, session.Repos)) is { } agent
                 ? (agent, agent.Resumed ? resumeRunId : runId)
                 : null;
         }
@@ -444,7 +464,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             run = _providers[session.Provider].Start(new AgentLaunch(
-                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume));
+                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos));
         }
         catch (Exception exception)
         {

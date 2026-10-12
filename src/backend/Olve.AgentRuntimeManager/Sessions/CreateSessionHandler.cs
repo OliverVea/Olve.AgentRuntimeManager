@@ -1,11 +1,13 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Variables;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
 /// <summary>
 /// <c>POST /api/sessions</c>: the new session's id, 201 when started, 202 when queued. Its agent's
-/// environment is resolved here, from the registered variables and the request's own.
+/// environment is resolved here, from the registered variables and the request's own; its
+/// <c>repos</c> are checked here too (M5e: a blank URL, two in one folder).
 /// </summary>
 public sealed class CreateSessionHandler(SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env) : ISessionsCreateHandler
 {
@@ -25,6 +27,11 @@ public sealed class CreateSessionHandler(SessionManager sessions, IdempotencySto
 
     private SessionsCreateResponse Create(CreateSession body)
     {
+        if (RepoErrors.Check(body.Repos) is { } repoProblem)
+        {
+            return new SessionsCreateResponse.BadRequest(repoProblem);
+        }
+
         var (agentEnv, problem) = SessionEnv.Resolve(body, env);
         if (problem is not null)
         {

@@ -6,6 +6,7 @@ using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Persistence;
@@ -190,7 +191,7 @@ public class ClaudeRecoveryTests
             Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = _root };
-        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, NullLogger<ClaudeProvider>.Instance));
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));
     }
 
     /// <summary>Starts an agent on a first server, once its supervisor has it running.</summary>
@@ -249,4 +250,8 @@ public class ClaudeRecoveryTests
             await Task.Delay(20, timeout.Token);
         }
     }
+
+    /// <summary>The sessions' repositories: shared copies under the test's folder.</summary>
+    private RepoCheckouts Repos(Supervisors supervisors) =>
+        new(Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos") }), supervisors, NullLogger<RepoCheckouts>.Instance);
 }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
@@ -14,7 +15,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// connectors, skills or memory. Only the login is shared. It has Claude Code's built-in tools,
 /// without permission prompts: the VM is the sandbox until ARM's own tools replace them (M5d, M10).
 /// </summary>
-public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supervisors supervisors, ILogger<ClaudeProvider> logger) : IAgentProvider
+public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supervisors supervisors, RepoCheckouts repos, ILogger<ClaudeProvider> logger) : IAgentProvider
 {
     public const string ProviderName = "claude";
 
@@ -44,7 +45,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
             ? (["--resume", resume], resume)
             : (new[] { "--session-id", launch.ProviderSessionId.ToString() }, launch.ProviderSessionId.ToString());
         var input = launch.Input.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
-        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env);
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env, launch.Repos);
         logger.LogInformation("Session {SessionId}: {Started} Claude Code (attempt {Attempt}, run {RunId}, {Messages} messages)",
             launch.SessionId, launch.Resume is null ? "started" : "resumed", launch.Attempt, launch.RunId, launch.Messages?.Count ?? 0);
         // The first is taken up before any turn can end: the run waits for the others.
@@ -89,9 +90,13 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
-        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env);
+        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env, recovery.Repos);
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
+
+    /// <summary>Removes a deleted session's worktrees from the shared copies (M5e).</summary>
+    public void RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> sessionRepos) =>
+        repos.Remove(sessionId, Workplace(options.Value, sessionId), sessionRepos);
 
     /// <summary>What Claude Code's output held that the conversation doesn't know, each logged once.</summary>
     private readonly HashSet<string> _unknownSeen = [];
@@ -171,17 +176,20 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
     /// <summary>
     /// Starts the agent under a supervisor, in the session's folder, with <paramref name="input"/>
     /// as its first messages (each with its uuid) and the session's <paramref name="env"/> in its environment.
+    /// The supervisor checks out <paramref name="sessionRepos"/> in the workplace first (M5e; those
+    /// already there are kept), and the agent starts in the repository when there's exactly one.
     /// </summary>
     private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session,
-        IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env)
+        IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env, IReadOnlyList<RepoRecord>? sessionRepos)
     {
         var settings = options.Value;
         var folder = Directory.CreateDirectory(Folder(settings, sessionId)).FullName;
         // Made by Supervisors.Launch, or with an agent user by the supervisor, as that user (docs/AGENT-USER.md).
-        var workDirectory = Path.Combine(folder, "work");
+        var workDirectory = Workplace(settings, sessionId);
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
             ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env),
-            [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))]);
+            [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))],
+            repos.Plan(sessionId, workDirectory, sessionRepos), RepoCheckouts.AgentDirectory(workDirectory, sessionRepos), repos.GitTimeout);
     }
 
     /// <summary>
@@ -265,6 +273,9 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
     }
 
     private static string Folder(ClaudeProviderOptions settings, Guid sessionId) => Path.Combine(WorkRoot(settings), sessionId.ToString());
+
+    /// <summary>The agent's workplace in the session's folder: where its repositories are checked out.</summary>
+    private static string Workplace(ClaudeProviderOptions settings, Guid sessionId) => Path.Combine(Path.GetFullPath(Folder(settings, sessionId)), "work");
 
     private static string WorkRoot(ClaudeProviderOptions settings) =>
         settings.WorkRoot is { Length: > 0 } root

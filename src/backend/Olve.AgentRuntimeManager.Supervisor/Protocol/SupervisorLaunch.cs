@@ -15,7 +15,26 @@ public sealed record SupervisorLaunch
     public required string Command { get; init; }
     public required IReadOnlyList<string> Arguments { get; init; }
     public required IReadOnlyDictionary<string, string> Environment { get; init; }
+    /// <summary>Where the agent starts: the workplace, or a repository's worktree in it.</summary>
     public required string WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// The session's workplace, made (by the supervisor, as the agent's user) if it's new, with the
+    /// <see cref="Repos"/> checked out in it. Unset: <see cref="WorkingDirectory"/> (a launch from before repos).
+    /// </summary>
+    public string? Workplace { get; init; }
+
+    /// <summary>
+    /// Repositories to check out in the workplace before the agent starts (M5e); one that's already
+    /// there is left as it is. A checkout that fails ends the run without an agent (<c>exit.json</c>
+    /// with the error).
+    /// </summary>
+    public IReadOnlyList<SupervisorRepo> Repos { get; init; } = [];
+
+    /// <summary>The longest any one git command of a checkout may take; then it's killed and the checkout fails.</summary>
+    public TimeSpan GitTimeout { get; init; } = DefaultGitTimeout;
+
+    public static readonly TimeSpan DefaultGitTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Lines written to the agent's stdin as soon as it starts (its prompt), so a server that goes

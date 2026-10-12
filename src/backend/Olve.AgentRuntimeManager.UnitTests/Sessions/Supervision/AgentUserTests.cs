@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Sessions.Claude;
@@ -492,7 +493,7 @@ public class AgentUserTests
         }), log ?? NullLogger<Supervisors>.Instance);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
-        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, NullLogger<ClaudeProvider>.Instance));
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));
     }
 
     /// <summary>A copy of the sudo stub in the test's folder, so its log (<c>sudo.log</c>) is this test's.</summary>
@@ -534,6 +535,10 @@ public class AgentUserTests
             await Task.Delay(20, timeout.Token);
         }
     }
+
+    /// <summary>The sessions' repositories: shared copies under the test's folder.</summary>
+    private RepoCheckouts Repos(Supervisors supervisors) =>
+        new(Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos") }), supervisors, NullLogger<RepoCheckouts>.Instance);
 }
 
 /// <summary>A sleeping process, killed when disposed.</summary>

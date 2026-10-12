@@ -30,10 +30,14 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// Starts a supervisor running <paramref name="command"/> for a run in <paramref name="workingDirectory"/>
     /// (made here if it's new, or with an agent user by the supervisor, so it's that user's), with <paramref name="input"/>
     /// as the agent's first input. Doesn't wait for it: the launch goes to its stdin (a small pipe
-    /// write), and the returned agent connects in the background.
+    /// write), and the returned agent connects in the background. The supervisor checks out
+    /// <paramref name="repos"/> in the workplace first (M5e), each git command bounded by
+    /// <paramref name="gitTimeout"/>, and starts the agent in <paramref name="agentDirectory"/>
+    /// (default: the workplace).
     /// </summary>
     public SupervisedAgent Launch(Guid sessionId, Guid runId, string folder, string workingDirectory,
-        string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input)
+        string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input,
+        IReadOnlyList<SupervisorRepo>? repos = null, string? agentDirectory = null, TimeSpan? gitTimeout = null)
     {
         var settings = options.Value;
         var socketPath = SocketPath(sessionId);
@@ -69,7 +73,10 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             Command = command,
             Arguments = arguments,
             Environment = account is null ? environment : account.Identify(environment),
-            WorkingDirectory = workingDirectory,
+            WorkingDirectory = agentDirectory ?? workingDirectory,
+            Workplace = workingDirectory,
+            Repos = repos ?? [],
+            GitTimeout = gitTimeout ?? SupervisorLaunch.DefaultGitTimeout,
             Input = input,
             Folder = folder,
             SocketPath = socketPath,
@@ -226,6 +233,48 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             return false;
         }
     }
+
+    /// <summary>
+    /// Removes a deleted session's worktree from the shared copy of its repository (M5e), as the
+    /// user whose it is (the agent user's, like the checkout): the supervisor's <c>remove-worktree</c>.
+    /// The error if it couldn't (bounded: a stuck git mustn't hold the request).
+    /// </summary>
+    public string? RemoveWorktree(string shared, string worktree)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, _account.Value, [Command(settings), "remove-worktree", shared, worktree]);
+        start.RedirectStandardError = true;
+        start.Environment.Clear();
+        foreach (var name in SupervisorEnvironment)
+        {
+            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
+            {
+                start.Environment[name] = value;
+            }
+        }
+
+        try
+        {
+            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(RemoveTimeout))
+            {
+                process.Kill(entireProcessTree: true);
+                return $"removing it took more than {RemoveTimeout.TotalSeconds:0} s";
+            }
+
+            return process.ExitCode == 0 ? null
+                : error.Wait(settings.ConnectTimeout) && error.Result.Trim() is { Length: > 0 } message ? message
+                : $"exit code {process.ExitCode}";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    /// <summary>The supervisor's own git command is bounded at 60 s; this leaves it room to say so.</summary>
+    private static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Support;
@@ -356,7 +357,8 @@ public class ClaudeProviderTests
     {
         var options = new ClaudeProviderOptions { Command = Stub, WorkRoot = _root };
         configure?.Invoke(options);
-        return new ClaudeProvider(Options.Create(options), Supervisors(), NullLogger<ClaudeProvider>.Instance);
+        var supervisors = Supervisors();
+        return new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance);
     }
 
     /// <summary>The real supervisor (built next to the tests), with its sockets under the test's folder.</summary>
@@ -411,4 +413,8 @@ public class ClaudeProviderTests
 
         return path;
     }
+
+    /// <summary>The sessions' repositories: shared copies under the test's folder.</summary>
+    private RepoCheckouts Repos(Supervisors supervisors) =>
+        new(Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos") }), supervisors, NullLogger<RepoCheckouts>.Instance);
 }
