@@ -122,6 +122,15 @@ re-evaluated and scoped when it's picked up.
   ARS), so it needs a better design before it returns.
 - **`suggest_safe`**: the agent proposes an auto-approval pattern alongside an approval request.
 - **Policy export/import** as JSON for sharing.
+- **Protected paths** (2026-10-12): files an agent shouldn't change without a say-so, given per
+  session and per repo: each of a session's `repos` carries its own patterns, e.g.
+  `["docs/VISION.md", ".git/**"]` (defaults per repo can come with a registry of repos). Two
+  places can hold it, and
+  neither is the agent itself (it has a shell, so a rule on its edit tools only stops accidents):
+  a policy on ARM's own file tools, denying the edit or asking for approval when it is tried
+  (M8, M10); and a check in ARM's code when a session ends, listing what its branch changed
+  that matches (with the check of finished branches after M5e). Until then it's the brief and
+  the review.
 
 ## Skills & tools
 
