@@ -222,6 +222,15 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         // group can have while the agent is in it). Not so: whatever has that pid now isn't the run.
         if (!Posix.IsInGroup(info.AgentPid, info.SupervisorPid, info.AgentStartTime))
         {
+            // Unless it's the agent still (its pid and start time), gone from the group: then it runs
+            // on and can't be killed through the group, and a second agent mustn't start.
+            if (Posix.Status(info.AgentPid) is { IsProcess: true, IsRunning: true } status && status.StartTime == info.AgentStartTime)
+            {
+                logger.LogError("Run {RunId}: its orphaned agent {Pid} runs outside its supervisor's process group {Group}; not killed",
+                    info.RunId, info.AgentPid, info.SupervisorPid);
+                return false;
+            }
+
             return true;
         }
 

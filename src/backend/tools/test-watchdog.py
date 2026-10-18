@@ -16,7 +16,9 @@ runs, the run fails here: the dead test app is named, with the processes holding
 else is signalled: the holders are named, not killed (they're found by looking, not proven ours).
 
 Looks only at this user's processes (/proc shows others' descriptors to root only), which is all
-the test run is: the gate runs it as an unprivileged user (tools/as-test-user.sh).
+the test run is: the gate runs it as an unprivileged user (tools/as-test-user.sh). Where there's
+no /proc (macOS), it just runs the command. From a terminal (stdin a tty) `dotnet test` stays in
+the terminal's process group, so Ctrl+C and the terminal reach it as before; it's then ended alone.
 """
 
 import os
@@ -90,18 +92,31 @@ def main():
         print("usage: test-watchdog.py -- <command> [arguments]", file=sys.stderr)
         return 2
     command = sys.argv[sys.argv.index("--") + 1:]
+    if not os.path.isdir("/proc/self/fd"):
+        os.execvp(command[0], command)
+    # A group of its own (to end it with everything it started but the supervisors, which have
+    # theirs), unless it's run from a terminal, whose foreground group it must stay in.
+    own_group = not os.isatty(0)
     # Our own stdout/stderr: a test app that writes straight to them has no pipe of its own to watch.
     shared = {pipe_of("self", 1), pipe_of("self", 2)} - {None}
 
-    test = subprocess.Popen(command, process_group=0)
+    test = subprocess.Popen(command, process_group=0 if own_group else None)
     me = os.getpid()
 
-    def forward(signum, _frame):
+    def end(signum):
+        # Still our child, not reaped (poll() said it runs): its pid, and its group's id, are its own.
         if test.poll() is None:
-            os.killpg(test.pid, signum)
+            if own_group:
+                os.killpg(test.pid, signum)
+            else:
+                test.send_signal(signum)
 
-    signal.signal(signal.SIGINT, forward)
+    def forward(signum, _frame):
+        end(signum)
+
+    signal.signal(signal.SIGINT, forward if own_group else signal.SIG_IGN)
     signal.signal(signal.SIGTERM, forward)
+    signal.signal(signal.SIGHUP, forward)
 
     apps = {}  # pid -> {"start", "command", "pipes", "exited"}
     while test.poll() is None:
@@ -129,10 +144,9 @@ def main():
                   f"waiting for its output, held open by what it left running:\n  test app: {app['command']}", flush=True)
             for holder in held:
                 print(f"  held by {holder}: {command_line(holder)}", flush=True)
-            print("test-watchdog: failing the run instead of waiting (dotnet test and its process group are killed; "
-                  "the processes above are not).", flush=True)
-            # Still our child, not reaped (poll() said it runs): its group id is still its own.
-            os.killpg(test.pid, signal.SIGKILL)
+            print("test-watchdog: failing the run instead of waiting (dotnet test is killed, with its process group "
+                  "if it has its own; the processes above are not).", flush=True)
+            end(signal.SIGKILL)
             test.wait()
             return 1
         time.sleep(POLL)

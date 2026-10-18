@@ -211,8 +211,16 @@ public sealed partial class LocalArm : IAsyncDisposable
         // (named in its log) stay provably its children while their groups are killed. Then ARM's own
         // group, and what's left of a run whose supervisor was gone already (its agent, by supervisor.json).
         TestProcesses.StopOwnGroup(_process);
-        TestProcesses.KillSupervisors(Sessions, StartedSupervisors(), _process.Id);
-        TestProcesses.KillOwnGroup(_process);
+        try
+        {
+            TestProcesses.KillSupervisors(Sessions, StartedSupervisors(), _process.Id);
+        }
+        finally
+        {
+            // Never left stopped.
+            TestProcesses.KillOwnGroup(_process);
+        }
+
         try
         {
             await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
