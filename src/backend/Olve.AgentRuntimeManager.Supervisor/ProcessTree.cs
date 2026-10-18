@@ -10,15 +10,14 @@ internal static class ProcessTree
 {
     /// <summary>
     /// SIGTERM to <paramref name="pid"/> and its descendants (git then removes its own <c>*.lock</c>
-    /// files), and SIGKILL to whatever of them is still there <paramref name="grace"/> later.
+    /// files), and SIGKILL to whatever of them is still there <paramref name="grace"/> later. Each is
+    /// signalled only while it's the very process found (its pid and start time; through a pidfd): one
+    /// that ended meanwhile may have left its pid to another process.
     /// </summary>
     public static async Task StopAsync(int pid, Func<bool> exited, TimeSpan grace)
     {
-        var tree = WithDescendants(pid);
-        foreach (var process in tree)
-        {
-            Posix.Kill(process, Posix.SigTerm);
-        }
+        var tree = Identify(pid);
+        Signal(tree, Posix.SigTerm);
 
         var deadline = DateTimeOffset.UtcNow + grace;
         while (!exited() && DateTimeOffset.UtcNow < deadline)
@@ -26,15 +25,41 @@ internal static class ProcessTree
             await Task.Delay(50);
         }
 
-        // Those it had then and any started meanwhile: the same pids, a moment later (not reused yet).
-        foreach (var process in tree.Union(WithDescendants(pid)))
+        // Those it had then and any started meanwhile below the same process, if it's still there.
+        var root = tree.FirstOrDefault(p => p.Pid == pid);
+        var now = root.StartTime != 0 && Posix.StartTime(pid) == root.StartTime ? Identify(pid) : [];
+        Signal(tree.Union(now).ToList(), Posix.SigKill);
+    }
+
+    /// <summary>
+    /// <paramref name="pid"/> and its descendants that run, each with its start time (a pid and its
+    /// start time name one process), read while it still has the parent it was found under: one that
+    /// ended meanwhile and left its pid to another process isn't taken for it.
+    /// </summary>
+    private static List<(int Pid, long StartTime)> Identify(int pid)
+    {
+        var found = new List<(int Pid, long StartTime)>();
+        foreach (var (process, parent) in Tree(pid))
         {
-            Posix.Kill(process, Posix.SigKill);
+            if (Posix.Status(process) is { IsProcess: true, IsRunning: true } status && (parent is null || status.Parent == parent))
+            {
+                found.Add((process, status.StartTime));
+            }
+        }
+
+        return found;
+    }
+
+    private static void Signal(List<(int Pid, long StartTime)> processes, int signal)
+    {
+        foreach (var (process, startTime) in processes)
+        {
+            Posix.SignalIf(process, signal, status => status.StartTime == startTime);
         }
     }
 
-    /// <summary><paramref name="pid"/> and every process below it, parents first.</summary>
-    public static List<int> WithDescendants(int pid)
+    /// <summary><paramref name="pid"/> and every process below it, parents first, each with the parent it was found under.</summary>
+    private static List<(int Pid, int? Parent)> Tree(int pid)
     {
         var children = new Dictionary<int, List<int>>();
         foreach (var entry in EnumerateProc())
@@ -45,10 +70,11 @@ internal static class ProcessTree
             }
         }
 
-        var result = new List<int> { pid };
+        var result = new List<(int Pid, int? Parent)> { (pid, null) };
         for (var i = 0; i < result.Count; i++)
         {
-            result.AddRange(children.GetValueOrDefault(result[i]) ?? []);
+            var parent = result[i].Pid;
+            result.AddRange((children.GetValueOrDefault(parent) ?? []).Select(child => (child, (int?)parent)));
         }
 
         return result;

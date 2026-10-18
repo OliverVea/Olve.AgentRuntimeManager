@@ -6,7 +6,7 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
-using Olve.AgentRuntimeManager.Supervisor.Protocol;
+using System.Text.RegularExpressions;
 using Olve.AgentRuntimeManager.UnitTests.Support;
 
 namespace Olve.AgentRuntimeManager.ApiTests.BetaCheck;
@@ -25,7 +25,7 @@ public sealed record CheckRun(int ExitCode, string Output)
 /// check (<c>.pipelines/scripts/beta-check.py</c>) against it over HTTP, as test-after-beta does.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-public sealed class LocalArm : IAsyncDisposable
+public sealed partial class LocalArm : IAsyncDisposable
 {
     public const string Version = "2026.10.12.1";
 
@@ -109,7 +109,8 @@ public sealed class LocalArm : IAsyncDisposable
             info.Environment[setting.Split('=', 2)[0]] = setting.Split('=', 2)[1];
         }
 
-        var process = Process.Start(info) ?? throw new InvalidOperationException("ARM did not start.");
+        // In a process group of its own: ended through it, nothing looked for.
+        var process = Process.Start(TestProcesses.InOwnGroup(info)) ?? throw new InvalidOperationException("ARM did not start.");
         var arm = new LocalArm(root, port, process);
         process.OutputDataReceived += (_, e) => arm.Log(e.Data);
         process.ErrorDataReceived += (_, e) => arm.Log(e.Data);
@@ -158,7 +159,7 @@ public sealed class LocalArm : IAsyncDisposable
             info.Environment[name] = value;
         }
 
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("python3 did not start.");
+        using var process = Process.Start(TestProcesses.InOwnGroup(info)) ?? throw new InvalidOperationException("python3 did not start.");
         var output = process.StandardOutput.ReadToEndAsync();
         var errors = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(CheckTimeout);
@@ -168,7 +169,7 @@ public sealed class LocalArm : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            TestProcesses.KillOwnGroup(process);
             throw new TimeoutException($"The beta check took over {CheckTimeout.TotalSeconds}s:\n{await output}{await errors}");
         }
 
@@ -206,18 +207,30 @@ public sealed class LocalArm : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // ARM stopped first, so it neither starts another supervisor nor reaps one: those it started
+        // (named in its log) stay provably its children while their groups are killed. Then ARM's own
+        // group, and what's left of a run whose supervisor was gone already (its agent, by supervisor.json).
+        TestProcesses.StopOwnGroup(_process);
         try
         {
-            _process.Kill(entireProcessTree: true);
-            await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            TestProcesses.KillSupervisors(Sessions, StartedSupervisors(), _process.Id);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
+        finally
         {
-            // Already gone, or the kill is under way.
+            // Never left stopped.
+            TestProcesses.KillOwnGroup(_process);
         }
 
-        TestProcesses.KillSupervisors(Sessions);
-        KillLeftovers();
+        try
+        {
+            await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            // The kill is under way.
+        }
+
+        TestProcesses.KillSupervisors(Sessions, []);
 
         _process.Dispose();
         lock (_log)
@@ -284,29 +297,17 @@ public sealed class LocalArm : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Kills whatever still runs in this ARM's folders (its sessions' workplaces): a stub agent or
-    /// its command that outlived ARM.
-    /// </summary>
-    private void KillLeftovers()
+    /// <summary>The supervisors ARM said it started ("supervisor {Pid} started"), from its log.</summary>
+    private List<int> StartedSupervisors()
     {
-        foreach (var folder in Directory.EnumerateDirectories("/proc"))
+        lock (_log)
         {
-            try
-            {
-                if (int.TryParse(Path.GetFileName(folder), out var pid) && pid != Environment.ProcessId
-                    && File.ResolveLinkTarget(Path.Combine(folder, "cwd"), returnFinalTarget: false)?.FullName is { } cwd
-                    && (cwd == _root || cwd.StartsWith(_root + "/", StringComparison.Ordinal)))
-                {
-                    Posix.Kill(pid, Posix.SigKill);
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // Gone, or not ours.
-            }
+            return [.. StartedLine().Matches(_log.ToString()).Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))];
         }
     }
+
+    [GeneratedRegex(@"supervisor (\d+) started for run")]
+    private static partial Regex StartedLine();
 
     private static int FreePort()
     {

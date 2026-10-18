@@ -29,6 +29,9 @@ public class ClaudeUpgradeTests : IDisposable
     private static readonly string Supervisor = Path.Combine(AppContext.BaseDirectory, "olve-arm-supervisor");
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-upgrade-").FullName;
+
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
     private readonly TestDatabase _database = new();
     private readonly FakeTimeProvider _time = new(DateTimeOffset.UtcNow);
     private readonly EventBus _bus;
@@ -43,7 +46,7 @@ public class ClaudeUpgradeTests : IDisposable
             server.Dispose();
         }
 
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         _database.Dispose();
         Directory.Delete(_root, recursive: true);
     }
@@ -175,7 +178,7 @@ public class ClaudeUpgradeTests : IDisposable
     /// <summary>A server: supervisors, the Claude provider on the stub CLI, the session runtime on the test's database.</summary>
     private ServerParts Server()
     {
-        var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Sockets }), NullLogger<Supervisors>.Instance);
+        var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Sockets }), _started);
         var repos = new RepoCheckouts(Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos") }), supervisors, NullLogger<RepoCheckouts>.Instance);
         var provider = new ClaudeProvider(
             Options.Create(new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") }),

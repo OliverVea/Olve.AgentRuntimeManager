@@ -24,6 +24,9 @@ public class ClaudeRepoSessionTests : IDisposable
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(30);
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-repo-sessions-").FullName;
+
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
     private readonly TestDatabase _database = new();
     private readonly Supervisors _supervisors;
     private readonly ClaudeProvider _provider;
@@ -32,7 +35,7 @@ public class ClaudeRepoSessionTests : IDisposable
     public ClaudeRepoSessionTests()
     {
         _supervisors = new Supervisors(
-            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
         var repos = new RepoCheckouts(
             Options.Create(new RepoOptions { Root = Path.Combine(_root, "repos"), GitTimeout = TimeSpan.FromSeconds(20) }), _supervisors, NullLogger<RepoCheckouts>.Instance);
         _provider = new ClaudeProvider(
@@ -45,7 +48,7 @@ public class ClaudeRepoSessionTests : IDisposable
     {
         _sessions.Dispose();
         _supervisors.Dispose();
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         _database.Dispose();
         Directory.Delete(_root, recursive: true);
     }

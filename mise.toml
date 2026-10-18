@@ -28,8 +28,15 @@ description = "Backend build + unit and API tests (API tests in-process)"
 dir = "src/backend"
 # Nothing may hang CI: a test taking over a minute fails by name (assembly [Timeout]); a testhost
 # silent for 5 minutes is dumped, with the tests still running named (--hangdump), and the whole
-# session ends after 15 (--timeout; a normal run takes about 3).
-run = ["dotnet build", "dotnet test --no-build --timeout 15m --hangdump --hangdump-timeout 5m"]
+# session ends after 15 (--timeout; a normal run takes about 3). A test host that dies (or its
+# hang dump's controller) fails the run a minute later, named, instead of leaving dotnet test
+# waiting for ever on the output of what it left running (tools/test-watchdog.py).
+# As root (the pipeline's gate), the tests run as an unprivileged user (tools/as-test-user.sh),
+# so a wrong signal can't kill root's processes; not as root, as they are.
+run = [
+  "dotnet build",
+  "bash tools/as-test-user.sh python3 tools/test-watchdog.py -- dotnet test --no-build --timeout 15m --hangdump --hangdump-timeout 5m",
+]
 
 [tasks."api:image"]
 description = "API tests against the real Docker image: builds and starts it, runs the suite in base-URL mode (needs Docker)"
