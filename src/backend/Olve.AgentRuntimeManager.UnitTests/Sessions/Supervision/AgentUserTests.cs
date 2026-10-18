@@ -28,6 +28,9 @@ public class AgentUserTests
     private static readonly string Supervisor = Path.Combine(AppContext.BaseDirectory, "olve-arm-supervisor");
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-agent-user-").FullName;
+
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
     private readonly List<Supervisors> _servers = [];
 
     [After(Test)]
@@ -38,7 +41,7 @@ public class AgentUserTests
             server.Dispose();
         }
 
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         Directory.Delete(_root, recursive: true);
     }
 
@@ -173,7 +176,7 @@ public class AgentUserTests
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions
         {
             SocketRoot = Path.Combine(_root, "sockets"), User = OwnAccount().Name, Sudo = "/bin/false",
-        }), NullLogger<Supervisors>.Instance);
+        }), _started);
         _servers.Add(supervisors);
 
         var gone = supervisors.KillOrphan(Info(sleeper.Id, sleeper.Id));
@@ -192,7 +195,7 @@ public class AgentUserTests
         // An agent writes supervisor.json: 0 would be ARM's own process group, 1 (as -1) every process of ARM's user.
         using var sleeper = Sleeper();
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }),
-            NullLogger<Supervisors>.Instance);
+            _started);
         _servers.Add(supervisors);
 
         var gone = supervisors.KillOrphan(supervisorPidZero ? Info(0, sleeper.Id) : Info(sleeper.Id, 1));
@@ -423,7 +426,7 @@ public class AgentUserTests
         {
             var (tid, startTime) = await ThreadOfAsync(info.SupervisorPid);
             var stale = info with { AgentPid = tid, AgentStartTime = startTime };
-            var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            var supervisors = new Supervisors(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
             _servers.Add(supervisors);
 
             var gone = supervisors.KillOrphan(stale);
@@ -651,7 +654,7 @@ public class AgentUserTests
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions
         {
             SocketRoot = Path.Combine(_root, "sockets"), User = account.Name, Sudo = sudo ?? SudoStub(),
-        }), log ?? NullLogger<Supervisors>.Instance);
+        }), log is null ? _started : _started.Passing(log));
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
         return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));

@@ -7,7 +7,8 @@
 # is kept in `input.jsonl`. `stub:turns` replays a recorded run of two messages (two-messages.jsonl,
 # 2.1.283, `--replay-user-messages`): a turn per message, the second once a second message comes,
 # each replay carrying the uuid of the message it was given, like the CLI; `stub:slow` makes the
-# second turn take a second.
+# second turn take a second. `stub:tree <marker>` runs a command of its own, like a tool call,
+# and waits for it (kill tests).
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # `claude auth status --json`: logged in with a token, or a login in the configuration folder
@@ -38,6 +39,11 @@ esac
 case "$prompt" in
   *stub:crash*) echo "Invalid API key · Please run /login" >&2; exit 3 ;;
   *stub:hang*) exec sleep 3600 ;;
+  # Like a tool call: a command of its own (two processes, both named by the marker after `stub:tree`,
+  # with output of their own), waited for.
+  *stub:tree*)
+    marker=$(printf '%s' "$prompt" | sed -n 's/.*stub:tree \([0-9a-f-]*\).*/\1/p')
+    sh -c 'bash -c "exec -a $0-sleep sleep 600"; echo done' "$marker" > tree.log 2>&1 ;;
   *stub:error*) cat "$here/error.jsonl" ;;
   # The API refusing the first request (captured against a local stub API, 2.1.283).
   *stub:unauthorized*) cat "$here/unauthorized.jsonl" ;;

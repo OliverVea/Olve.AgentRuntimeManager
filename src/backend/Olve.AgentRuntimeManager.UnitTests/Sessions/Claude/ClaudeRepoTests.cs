@@ -25,10 +25,13 @@ public class ClaudeRepoTests
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-repos-").FullName;
 
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
+
     [After(Test)]
     public void Cleanup()
     {
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         Directory.Delete(_root, recursive: true);
     }
 
@@ -160,9 +163,10 @@ public class ClaudeRepoTests
         TestGit.Require();
         // ssh that never answers: git runs GIT_SSH_COMMAND through the shell, so this sleeps.
         var sleeper = $"sleep 60.{Random.Shared.Next(100_000, 999_999)}";
+        var pidFile = Path.Combine(_root, "ssh.pid");
         var launch = Launch(new Repo("ssh://arm.invalid/hangs.git")) with
         {
-            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{sleeper};:" },
+            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"echo $$ >> '{pidFile}'; exec {sleeper};:" },
         };
 
         try
@@ -176,7 +180,7 @@ public class ClaudeRepoTests
         }
         finally
         {
-            TestProcesses.KillWithCommandLine(sleeper);
+            KillLeftOver(launch, pidFile);
         }
     }
 
@@ -187,9 +191,13 @@ public class ClaudeRepoTests
         // An "ssh" that fails at once but leaves a process holding git's stderr, not its protocol (like an ssh
         // ControlMaster with ControlPersist): git exits, its pipes stay open.
         var lingerer = $"sleep 59.{Random.Shared.Next(100_000, 999_999)}";
+        var pidFile = Path.Combine(_root, "lingerer.pid");
         var launch = Launch(new Repo("ssh://arm.invalid/lingers.git")) with
         {
-            Env = new Dictionary<string, string> { ["GIT_SSH_COMMAND"] = $"{lingerer} >/dev/null & echo 'no route to arm.invalid' >&2; exit 255;:" },
+            Env = new Dictionary<string, string>
+            {
+                ["GIT_SSH_COMMAND"] = $"{lingerer} >/dev/null & echo $! >> '{pidFile}'; echo 'no route to arm.invalid' >&2; exit 255;:",
+            },
         };
 
         try
@@ -201,7 +209,7 @@ public class ClaudeRepoTests
         }
         finally
         {
-            TestProcesses.KillWithCommandLine(lingerer);
+            KillLeftOver(launch, pidFile);
         }
     }
 
@@ -232,6 +240,25 @@ public class ClaudeRepoTests
     }
 
     [Test]
+    public async Task TestCleanup_KillsASupervisorStillCheckingOut_ThroughItsGroup()
+    {
+        // No supervisor.json yet (its agent hasn't started): the test knows it from its start only.
+        var origin = TestGit.Origin(Path.Combine(_root, "origin", "alpha"));
+        var gate = new GatedSsh(_root);
+        var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
+        _ = Provider().Start(launch);
+        await gate.ReachedAsync(Guard);
+        var supervisor = _started.Of(launch.SessionId).Single();
+        await Assert.That(SupervisorFiles.ReadInfo(Folder(launch))).IsNull();
+
+        TestProcesses.KillSupervisors(_root, _started.Pids);
+
+        // The supervisor and, in its group, the git waiting at the gate.
+        await Until(() => Posix.Status(supervisor) is not { IsRunning: true } status || status.Parent != System.Environment.ProcessId);
+        await Until(() => TestProcesses.WithCommandLine(gate.Fragment).Count == 0);
+    }
+
+    [Test]
     public async Task AKillMark_StopsTheCheckout_WithoutTheKillMessage_AndTheAgentNeverStarts()
     {
         // What a kill given before ARM is connected to the supervisor leaves: the mark only.
@@ -258,13 +285,11 @@ public class ClaudeRepoTests
         var launch = Launch(new Repo(GatedSsh.Url(origin))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
-        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
 
         // Killed outright: it can't remove its own socket.
-        foreach (var supervisor in supervisors)
+        foreach (var supervisor in _started.Of(launch.SessionId))
         {
-            Posix.Kill(-supervisor, Posix.SigKill);
-            Posix.Kill(supervisor, Posix.SigKill);
+            TestProcesses.KillGroupOf(supervisor);
         }
 
         var outcome = await run.Completion.WaitAsync(Guard);
@@ -282,13 +307,13 @@ public class ClaudeRepoTests
         var launch = Launch(new Repo(GatedSsh.Url(missing))) with { Env = gate.Env };
         var run = Provider().Start(launch);
         await gate.ReachedAsync(Guard);
-        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
+        var supervisors = _started.Of(launch.SessionId);
 
         // Its socket's folder goes (as when a test cleans up, or an admin clears /run) while it checks out.
         Directory.Delete(Path.Combine(_root, "sockets"), recursive: true);
         gate.Release();
         var outcome = await run.Completion.WaitAsync(Guard);
-        await Until(() => supervisors.All(pid => Posix.StartTime(pid) is null));
+        await Until(() => supervisors.All(pid => Posix.Status(pid) is not { IsRunning: true } status || status.Parent != System.Environment.ProcessId));
 
         await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
         await Assert.That(((AgentOutcome.Failed)outcome).Error).StartsWith($"Checking out {GatedSsh.Url(missing)} failed: ");
@@ -384,11 +409,9 @@ public class ClaudeRepoTests
         // ARM and the supervisor (with its git) die mid-checkout: this run's agent never started,
         // but the Claude session it resumes exists.
         before.Dispose();
-        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
-        foreach (var supervisor in supervisors)
+        foreach (var supervisor in _started.Of(launch.SessionId))
         {
-            Posix.Kill(-supervisor, Posix.SigKill);
-            Posix.Kill(supervisor, Posix.SigKill);
+            TestProcesses.KillGroupOf(supervisor);
         }
 
         await Until(() => !before.IsListening(launch.SessionId));
@@ -461,11 +484,9 @@ public class ClaudeRepoTests
 
         // ARM and the supervisor (with its git) die mid-checkout: no agent ever ran.
         before.Dispose();
-        var supervisors = TestProcesses.WithCommandLine("olve-arm-supervisor").Where(pid => IsIn(pid, Folder(launch))).ToList();
-        foreach (var supervisor in supervisors)
+        foreach (var supervisor in _started.Of(launch.SessionId))
         {
-            Posix.Kill(-supervisor, Posix.SigKill);
-            Posix.Kill(supervisor, Posix.SigKill);
+            TestProcesses.KillGroupOf(supervisor);
         }
 
         // Gone, not just signalled: a dying one (its other threads exiting) may still take a connection.
@@ -871,16 +892,19 @@ public class ClaudeRepoTests
         return Posix.TryLock(handle) ? handle : throw new InvalidOperationException("The lock is taken.");
     }
 
-    /// <summary>Whether <paramref name="pid"/> runs in <paramref name="folder"/> (a session's supervisor does).</summary>
-    private static bool IsIn(int pid, string folder)
+    /// <summary>
+    /// Kills what a test's "ssh" said it left (each time git ran it, a pid in <paramref name="pidFile"/>),
+    /// if it's still in the process group of the run's supervisor (the supervisor itself may be gone).
+    /// </summary>
+    private void KillLeftOver(AgentLaunch launch, string pidFile)
     {
-        try
+        var pids = File.Exists(pidFile) ? File.ReadAllLines(pidFile).Select(l => int.TryParse(l.Trim(), out var pid) ? pid : 0).Where(pid => pid > 1) : [];
+        foreach (var pid in pids)
         {
-            return new DirectoryInfo($"/proc/{pid}/cwd").LinkTarget == folder;
-        }
-        catch (IOException)
-        {
-            return false;
+            foreach (var supervisor in _started.Of(launch.SessionId))
+            {
+                TestProcesses.KillInGroup(pid, supervisor);
+            }
         }
     }
 
@@ -897,7 +921,7 @@ public class ClaudeRepoTests
     private (Supervisors Supervisors, ClaudeProvider Provider) Server()
     {
         var supervisors = new Supervisors(
-            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
         var repos = new RepoCheckouts(
             Options.Create(new RepoOptions { Root = SharedRoot, GitTimeout = TimeSpan.FromSeconds(20) }), supervisors, NullLogger<RepoCheckouts>.Instance);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
@@ -914,7 +938,7 @@ public class ClaudeRepoTests
     private ClaudeProvider Provider(TimeSpan? gitTimeout = null, string? workRoot = null, TimeSpan? checkoutTimeout = null)
     {
         var supervisors = new Supervisors(
-            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
         var repos = new RepoCheckouts(
             Options.Create(new RepoOptions { Root = SharedRoot, GitTimeout = gitTimeout ?? TimeSpan.FromSeconds(20), CheckoutTimeout = checkoutTimeout }),
             supervisors, NullLogger<RepoCheckouts>.Instance);

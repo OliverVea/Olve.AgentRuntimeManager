@@ -34,13 +34,14 @@ public static class TestGit
         }
 
         info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("git did not start.");
+        // In a process group of its own, so a git that hangs is ended with what it started, through that group.
+        using var process = Process.Start(TestProcesses.InOwnGroup(info)) ?? throw new InvalidOperationException("git did not start.");
         process.StandardInput.Close();
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(Timeout))
         {
-            process.Kill(entireProcessTree: true);
+            TestProcesses.KillOwnGroup(process);
             throw new TimeoutException($"git {string.Join(' ', arguments)} took more than {Timeout.TotalSeconds:0} s.");
         }
 

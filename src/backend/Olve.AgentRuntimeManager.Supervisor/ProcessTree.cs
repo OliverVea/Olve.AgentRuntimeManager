@@ -10,15 +10,14 @@ internal static class ProcessTree
 {
     /// <summary>
     /// SIGTERM to <paramref name="pid"/> and its descendants (git then removes its own <c>*.lock</c>
-    /// files), and SIGKILL to whatever of them is still there <paramref name="grace"/> later.
+    /// files), and SIGKILL to whatever of them is still there <paramref name="grace"/> later. Each is
+    /// signalled only while it's the very process found (its pid and start time; through a pidfd): one
+    /// that ended meanwhile may have left its pid to another process.
     /// </summary>
     public static async Task StopAsync(int pid, Func<bool> exited, TimeSpan grace)
     {
-        var tree = WithDescendants(pid);
-        foreach (var process in tree)
-        {
-            Posix.Kill(process, Posix.SigTerm);
-        }
+        var tree = Identify(WithDescendants(pid));
+        Signal(tree, Posix.SigTerm);
 
         var deadline = DateTimeOffset.UtcNow + grace;
         while (!exited() && DateTimeOffset.UtcNow < deadline)
@@ -26,10 +25,21 @@ internal static class ProcessTree
             await Task.Delay(50);
         }
 
-        // Those it had then and any started meanwhile: the same pids, a moment later (not reused yet).
-        foreach (var process in tree.Union(WithDescendants(pid)))
+        // Those it had then and any started meanwhile below the same process, if it's still there.
+        var root = tree.FirstOrDefault(p => p.Pid == pid);
+        var now = root.StartTime != 0 && Posix.StartTime(pid) == root.StartTime ? Identify(WithDescendants(pid)) : [];
+        Signal(tree.Union(now).ToList(), Posix.SigKill);
+    }
+
+    /// <summary>Each of <paramref name="pids"/> that runs, with its start time (a pid and its start time name one process).</summary>
+    private static List<(int Pid, long StartTime)> Identify(IEnumerable<int> pids) =>
+        [.. pids.Select(p => (Pid: p, StartTime: Posix.StartTime(p))).Where(p => p.StartTime is not null).Select(p => (p.Pid, p.StartTime!.Value))];
+
+    private static void Signal(List<(int Pid, long StartTime)> processes, int signal)
+    {
+        foreach (var (process, startTime) in processes)
         {
-            Posix.Kill(process, Posix.SigKill);
+            Posix.SignalIf(process, signal, status => status.StartTime == startTime);
         }
     }
 

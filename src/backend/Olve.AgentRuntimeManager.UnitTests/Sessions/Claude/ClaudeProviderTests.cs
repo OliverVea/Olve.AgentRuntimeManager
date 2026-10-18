@@ -20,13 +20,16 @@ public class ClaudeProviderTests
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-claude-").FullName;
 
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
+
     /// <summary>How long any wait in a test may take: nothing may hang the test run.</summary>
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(15);
 
     [After(Test)]
     public void Cleanup()
     {
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         Directory.Delete(_root, recursive: true);
     }
 
@@ -246,6 +249,21 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task Kill_InAToolCall_LeavesNothingOfItRunning()
+    {
+        // Seen on the beta check: the supervisor exited as soon as the agent died, ending its
+        // kill of the agent's process tree halfway, and the rest stayed behind, stopped.
+        var marker = Guid.NewGuid().ToString();
+        var run = Provider().Start(Launch($"stub:tree {marker}"));
+        await Until(() => TestProcesses.WithCommandLine(marker).Count == 2);
+
+        run.Kill();
+        await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(10))).IsTypeOf<AgentOutcome.Killed>();
+
+        await Until(() => TestProcesses.WithCommandLine(marker).Count == 0);
+    }
+
+    [Test]
     public async Task Agent_ThatLingersAfterItsTurn_IsStoppedAndStillCompletes()
     {
         var run = Provider(o => o.ExitGrace = TimeSpan.FromMilliseconds(200)).Start(Launch("stub:linger"));
@@ -363,7 +381,7 @@ public class ClaudeProviderTests
 
     /// <summary>The real supervisor (built next to the tests), with its sockets under the test's folder.</summary>
     private Supervisors Supervisors() =>
-        new(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+        new(Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
 
     private static AgentLaunch Launch(string prompt)
     {

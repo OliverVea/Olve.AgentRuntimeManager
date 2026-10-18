@@ -24,6 +24,9 @@ public class ClaudeRecoveryTests
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(15);
 
     private readonly string _root = Directory.CreateTempSubdirectory("arm-restart-").FullName;
+
+    /// <summary>The supervisors this test started: what is its own to kill.</summary>
+    private readonly StartedSupervisors _started = new();
     private readonly List<Supervisors> _servers = [];
 
     [After(Test)]
@@ -34,7 +37,7 @@ public class ClaudeRecoveryTests
             server.Dispose();
         }
 
-        TestProcesses.KillSupervisors(_root);
+        TestProcesses.KillSupervisors(_root, _started.Pids);
         Directory.Delete(_root, recursive: true);
     }
 
@@ -188,7 +191,7 @@ public class ClaudeRecoveryTests
     private (Supervisors Supervisors, ClaudeProvider Provider) Server()
     {
         var supervisors = new Supervisors(
-            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), NullLogger<Supervisors>.Instance);
+            Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = _root };
         return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));

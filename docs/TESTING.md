@@ -17,12 +17,22 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
   beta — no separate image-build-and-test step pre-deploy.
 - **Nothing hangs the gate.** Every wait in a test is bounded (a `Guard`, `WaitAsync`), a test
   that starts processes kills what it started even when it fails (supervisors detach and would
-  outlive it: `TestProcesses.KillSupervisors`), and the run has three nets (`mise.toml`
+  outlive it: `TestProcesses.KillSupervisors`), and the run has four nets (`mise.toml`
   `backend:test`): an assembly-level TUnit `[Timeout]` fails a slow test by name; a testhost that
   is silent for 5 minutes is dumped, naming the tests still running (`--hangdump`, which also
   catches a test blocking its thread, which TUnit's timeout doesn't end); the session ends after 15
-  minutes (`--timeout`). The gate runs as root in a pod: tests must not assume a login user,
+  minutes (`--timeout`); a test host that dies fails the run a minute later, named with what it left
+  holding its output (`tools/test-watchdog.py`: `dotnet test` would otherwise wait for that output,
+  for ever, and the other two nets died with the host). The gate runs as root in a pod; the tests
+  run as an unprivileged user there (`tools/as-test-user.sh`), and must not assume a login user,
   a reaping pid 1 (an orphan may stay a zombie) or an exec-able `/tmp` beyond what they check.
+- **A test kills only what it proves it started.** Both test projects run at once, next to each
+  other's test hosts: nothing is found by looking through `/proc` (by command line or folder) to be
+  killed. A supervisor leads a process group of its own (with its agent and what that starts); a
+  test knows its supervisors from their start (`StartedSupervisors`, or the log of the test's own
+  ARM) and kills their groups after checking each is still that process (`TestProcesses`); a helper
+  a test starts itself (git, the local ARM, the beta check) gets a group of its own (`setsid`) and is
+  ended through it. Signals are logged to the test's output, shown when it fails.
 
 ## Pipeline shape (Olve.Pipelines)
 
