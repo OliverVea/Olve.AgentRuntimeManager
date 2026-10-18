@@ -254,13 +254,33 @@ public class ClaudeProviderTests
         // Seen on the beta check: the supervisor exited as soon as the agent died, ending its
         // kill of the agent's process tree halfway, and the rest stayed behind, stopped.
         var marker = Guid.NewGuid().ToString();
-        var run = Provider().Start(Launch($"stub:tree {marker}"));
-        await Until(() => TestProcesses.WithCommandLine(marker).Count == 2);
+        var launch = Launch($"stub:tree {marker}");
+        var run = Provider().Start(launch);
+        try
+        {
+            await Until(() => TestProcesses.WithCommandLine(marker).Count == 2);
 
-        run.Kill();
-        await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(10))).IsTypeOf<AgentOutcome.Killed>();
+            run.Kill();
+            // The run ends once the supervisor has killed the whole tree (it waits for that): .NET reads
+            // all of /proc for each process in it, some 50 ms here, far slower under gVisor's /proc on a
+            // busy gate. The point is that it ends killed with nothing left, not how fast.
+            await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(45))).IsTypeOf<AgentOutcome.Killed>();
 
-        await Until(() => TestProcesses.WithCommandLine(marker).Count == 0);
+            await Until(() => TestProcesses.WithCommandLine(marker).Count == 0);
+        }
+        catch
+        {
+            // Shown with the failure: the supervisor's timeline (the kill, its length, the exit) and
+            // what of the tree is left, in what state.
+            var log = Path.Combine(Folder(launch), SupervisorFiles.Log);
+            Console.WriteLine($"supervisor.log:\n{(File.Exists(log) ? await File.ReadAllTextAsync(log) : "(none)")}");
+            foreach (var pid in TestProcesses.WithCommandLine(marker))
+            {
+                Console.WriteLine($"left: {pid} {Posix.Status(pid)} '{Posix.CommandLine(pid)}'");
+            }
+
+            throw;
+        }
     }
 
     [Test]

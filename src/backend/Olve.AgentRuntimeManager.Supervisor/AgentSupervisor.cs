@@ -590,6 +590,8 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         _log.Write($"run {launch.RunId}: killing the agent");
         lock (_killing)
         {
+            // How long the tree took (it reads /proc for each process in it): the exit waits for it.
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 agent.Kill(entireProcessTree: true);
@@ -597,6 +599,10 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             catch (InvalidOperationException)
             {
                 // Already exited.
+            }
+            finally
+            {
+                _log.Write($"run {launch.RunId}: the agent's process tree is killed ({Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms)");
             }
         }
     }

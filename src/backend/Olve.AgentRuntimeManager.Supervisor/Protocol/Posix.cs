@@ -421,8 +421,17 @@ public static partial class Posix
             var error = Marshal.GetLastPInvokeError();
             if (error != notImplemented)
             {
-                // EINVAL: a thread's id, not a process's.
-                return error is noSuchProcess ? SignalResult.Gone : error is invalid ? SignalResult.Refused : SignalResult.Failed;
+                // EINVAL: a thread's id, not a process's (Linux). Any other error (gVisor answers a
+                // thread's id with another) leaves no pidfd, so nothing is sent: what /proc says of it
+                // only names the outcome, a thread's id refused like EINVAL's.
+                return error is noSuchProcess ? SignalResult.Gone
+                    : error is invalid ? SignalResult.Refused
+                    : Status(pid) switch
+                    {
+                        null or { IsRunning: false } => SignalResult.Gone,
+                        { IsProcess: false } => SignalResult.Refused,
+                        _ => SignalResult.Failed,
+                    };
             }
         }
 
