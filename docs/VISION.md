@@ -71,7 +71,8 @@ re-evaluated and scoped when it's picked up.
   in the model (thinking and writing, taken from the gaps between steps), in each tool, in builds
   and tests, and in each subagent (broken down inside it too, since its entries are kept), the
   slowest single steps, and a timeline of the session's phases. All from what ARM already stores
-  (every conversation entry is timed and tool calls pair with their results). Done by hand once
+  (tool calls pair with their results; entries are timed where the provider gives a time, so
+  the time gaps cover only those). Done by hand once
   for an 84-minute session: 44% in four review subagents, 33% in the model, 19% in builds and
   tests. With a little more: tokens and cost per session and per step (the provider's raw output
   carries usage, which ARM keeps but doesn't expose), and totals across sessions (which kinds of
