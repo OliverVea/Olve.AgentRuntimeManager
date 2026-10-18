@@ -73,8 +73,21 @@ public class AgentUserTests
 
         await Assert.That(environment).IsEquivalentTo(new Dictionary<string, string>
         {
-            ["HOME"] = "/home/arm-agent", ["USER"] = "arm-agent", ["LOGNAME"] = "arm-agent", ["PATH"] = "/usr/bin",
+            ["HOME"] = "/home/arm-agent", ["USER"] = "arm-agent", ["LOGNAME"] = "arm-agent",
+            ["PATH"] = "/home/arm-agent/.local/bin:/usr/bin",
         });
+    }
+
+    [Test]
+    [Arguments("", "/home/arm-agent/.local/bin")]
+    [Arguments("/usr/bin:/home/arm-agent/.local/bin", "/home/arm-agent/.local/bin:/usr/bin")]
+    [Arguments("/home/arm-agent/.local/bin:/usr/bin", "/home/arm-agent/.local/bin:/usr/bin")]
+    public async Task Identify_PutsTheUsersLocalBinFirstOnPath_Once(string path, string expected)
+    {
+        var environment = new AgentAccount("arm-agent", "/home/arm-agent")
+            .Identify(new Dictionary<string, string> { ["PATH"] = path });
+
+        await Assert.That(environment["PATH"]).IsEqualTo(expected);
     }
 
     [Test]

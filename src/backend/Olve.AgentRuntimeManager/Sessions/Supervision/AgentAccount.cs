@@ -10,7 +10,9 @@ public sealed record AgentAccount(string Name, string Home)
 {
     /// <summary>
     /// The agent's environment as that user: its own <c>HOME</c> (where Claude Code keeps its state,
-    /// mise its toolchains, ssh its keys), <c>USER</c> and <c>LOGNAME</c>, instead of ARM's.
+    /// mise its toolchains, ssh its keys), <c>USER</c> and <c>LOGNAME</c>, instead of ARM's, and its
+    /// <c>~/.local/bin</c> first on <c>PATH</c>, as a login shell has it (the user's tools, such as
+    /// <c>gh</c>, live there; ARM's service <c>PATH</c> doesn't have it).
     /// </summary>
     public IReadOnlyDictionary<string, string> Identify(IReadOnlyDictionary<string, string> environment) =>
         new Dictionary<string, string>(environment, StringComparer.Ordinal)
@@ -18,7 +20,15 @@ public sealed record AgentAccount(string Name, string Home)
             ["HOME"] = Home,
             ["USER"] = Name,
             ["LOGNAME"] = Name,
+            ["PATH"] = LocalBinFirst(environment.TryGetValue("PATH", out var path) ? path : ""),
         };
+
+    private string LocalBinFirst(string path)
+    {
+        var localBin = Path.Combine(Home, ".local", "bin");
+        var rest = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Where(directory => directory != localBin);
+        return string.Join(Path.PathSeparator, rest.Prepend(localBin));
+    }
 
     private static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(10);
 

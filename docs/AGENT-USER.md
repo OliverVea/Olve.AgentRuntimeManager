@@ -61,7 +61,9 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
 - **Launch** (`Supervisors.Launch`): `sudo -n -u <user> -- <supervisor>` (`Supervisor:Sudo`,
   default `sudo`); the agent's `HOME`, `USER` and `LOGNAME` are the agent user's (looked up with
   `getent passwd`; a missing user fails the launch, it never falls back to ARM's user). So Claude
-  Code keeps its state, mise its toolchains and ssh its keys in `/home/arm-agent`.
+  Code keeps its state, mise its toolchains and ssh its keys in `/home/arm-agent`. Its
+  `~/.local/bin` comes first on `PATH`, as in a login shell, so the tools there (`gh`, `arm`,
+  `pl`, `mise`) are found.
 - **Session folders:** ARM makes each session's folder group-writable and setgid (`2770`); the
   group, `arm-agent`, comes from `sessions/` being setgid `arm-agent`. A new `work/` is made by
   the supervisor, so it's the agent's own (git trusts a repository right in it); one from before
