@@ -244,7 +244,8 @@ public class AgentUserTests
     {
         Skip.When(Posix.GetEUid() == 0, "As root it could signal anything: this would kill a real process.");
         var root = Directory.GetDirectories("/proc").Select(d => int.TryParse(Path.GetFileName(d), out var pid) ? pid : 0)
-            .First(pid => pid > 1 && OwnerUid(pid) == 0 && Posix.Status(pid) is { IsProcess: true } status && status.Group == pid);
+            .FirstOrDefault(pid => pid > 1 && OwnerUid(pid) == 0 && Posix.Status(pid) is { IsProcess: true } status && status.Group == pid);
+        Skip.When(root == 0, "No process of root's but pid 1 leads a process group of its own here (in a container, root's processes may all be in pid 1's group): nothing to try the kill on.");
 
         using var kill = Process.Start(new ProcessStartInfo(Supervisor, ["kill", root.ToString(System.Globalization.CultureInfo.InvariantCulture), root.ToString(System.Globalization.CultureInfo.InvariantCulture)])
         {

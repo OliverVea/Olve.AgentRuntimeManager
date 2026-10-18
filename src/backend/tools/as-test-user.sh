@@ -24,14 +24,17 @@ fi
 home="$(getent passwd "$user" | cut -d: -f6)"
 
 # Search permission (o+x) on every folder above $1, and above where it leads if it's a link, that
-# lacks it, so the user can reach it.
+# lacks it, so the user can reach it. Best effort: a folder that can't be read or changed (read-only)
+# is warned about and left; if the tests then can't reach their toolchain, they fail saying so.
 reach() {
   local dir
   for dir in "$1" "$(readlink -f "$1" || echo "$1")"; do
     while [ "$dir" != / ] && [ -n "$dir" ]; do
       # The mode's last letter is others' search: x or t when they have it, - or T when not.
       if [ -d "$dir" ] && [ ! -L "$dir" ]; then
-        case "$(stat -c %A "$dir" | cut -c10)" in -|T) chmod o+x "$dir" ;; esac
+        case "$(stat -c %A "$dir" 2>/dev/null | cut -c10)" in
+          -|T) chmod o+x "$dir" || echo "as-test-user: warning: could not give $user search permission on $dir" >&2 ;;
+        esac
       fi
       dir="$(dirname "$dir")"
     done
