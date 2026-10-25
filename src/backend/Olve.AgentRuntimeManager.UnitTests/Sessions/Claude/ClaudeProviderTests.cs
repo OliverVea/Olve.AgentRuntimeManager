@@ -23,8 +23,11 @@ public class ClaudeProviderTests
     /// <summary>The supervisors this test started: what is its own to kill.</summary>
     private readonly StartedSupervisors _started = new();
 
-    /// <summary>How long any wait in a test may take: nothing may hang the test run.</summary>
-    private static readonly TimeSpan Guard = TimeSpan.FromSeconds(15);
+    /// <summary>
+    /// How long any wait in a test may take: nothing may hang the test run. Generous: the gate runs
+    /// the supervisors under gVisor on a host shared with other pipelines.
+    /// </summary>
+    private static readonly TimeSpan Guard = TimeSpan.FromSeconds(20);
 
     [After(Test)]
     public void Cleanup()
@@ -272,7 +275,7 @@ public class ClaudeProviderTests
 
         run.Kill();
 
-        await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(10))).IsTypeOf<AgentOutcome.Killed>();
+        await Assert.That(await run.Completion.WaitAsync(Guard)).IsTypeOf<AgentOutcome.Killed>();
     }
 
     [Test]
@@ -285,7 +288,7 @@ public class ClaudeProviderTests
         await Until(() => TestProcesses.WithCommandLine(marker).Count == 2);
 
         run.Kill();
-        await Assert.That(await run.Completion.WaitAsync(TimeSpan.FromSeconds(10))).IsTypeOf<AgentOutcome.Killed>();
+        await Assert.That(await run.Completion.WaitAsync(Guard)).IsTypeOf<AgentOutcome.Killed>();
 
         await Until(() => TestProcesses.WithCommandLine(marker).Count == 0);
     }
@@ -295,7 +298,7 @@ public class ClaudeProviderTests
     {
         var run = Provider(o => o.ExitGrace = TimeSpan.FromMilliseconds(200)).Start(Launch("stub:linger"));
 
-        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var outcome = await run.Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
     }
@@ -307,7 +310,7 @@ public class ClaudeProviderTests
         var launch = Launch("stub:turns stub:slow") with { Messages = ["second"] };
         var run = Provider(o => o.ExitGrace = TimeSpan.FromMilliseconds(200)).Start(launch);
 
-        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var outcome = await run.Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(Input(launch)).IsEquivalentTo(["stub:turns stub:slow", "second"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
@@ -323,7 +326,7 @@ public class ClaudeProviderTests
 
         var sent = run.TrySend("and another thing");
         await File.WriteAllTextAsync(Path.Combine(Folder(launch), "work", "release"), "");
-        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var outcome = await run.Completion.WaitAsync(Guard);
 
         await Assert.That(sent).IsTrue();
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
@@ -343,7 +346,7 @@ public class ClaudeProviderTests
         await Assert.That(run.TrySend("late")).IsFalse();
 
         run.Kill();
-        await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await run.Completion.WaitAsync(Guard);
     }
 
     [Test]
@@ -352,7 +355,7 @@ public class ClaudeProviderTests
         var launch = Launch("the original prompt") with { Attempt = 2, Resume = "the-claude-session", Messages = ["stub:turns first", "second"] };
 
         var run = Provider().Start(launch);
-        var outcome = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var outcome = await run.Completion.WaitAsync(Guard);
 
         await Assert.That(outcome).IsEqualTo(new AgentOutcome.Completed(0));
         await Assert.That(run.ProviderSessionId).IsEqualTo("the-claude-session");

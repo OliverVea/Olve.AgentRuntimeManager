@@ -219,9 +219,9 @@ public static partial class ToolGist
             ? index
             : null;
 
-    [GeneratedRegex(@"\s*(?:&&|;)\s*", RegexOptions.None, 100)]
+    [GeneratedRegex(@"\s*(?:&&|;)\s*", RegexOptions.None, ActivityText.RegexTimeoutMs)]
     private static partial Regex Separator();
 
-    [GeneratedRegex(@"^(cd|export|eval)\b", RegexOptions.None, 100)]
+    [GeneratedRegex(@"^(cd|export|eval)\b", RegexOptions.None, ActivityText.RegexTimeoutMs)]
     private static partial Regex SetUp();
 }

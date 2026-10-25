@@ -20,7 +20,11 @@ public static partial class ActivityText
     /// <summary>How much of a text is looked at: 4 KiB characters (an error: 4 KiB from each end).</summary>
     public const int MaxShaped = 4096;
 
-    private const int RegexTimeoutMs = 100;
+    /// <summary>
+    /// A guard against runaway backtracking on at most <see cref="MaxShaped"/> characters, not a
+    /// budget: a loaded host (the gate shares one with other pipelines) takes far longer than usual.
+    /// </summary>
+    internal const int RegexTimeoutMs = 1000;
 
     /// <summary>
     /// The agent's text: its first line with something in it, without what's clearly Markdown (code
