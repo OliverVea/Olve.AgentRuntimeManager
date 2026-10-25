@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Olve.AgentRuntimeManager.Supervisor;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
@@ -84,5 +85,10 @@ if (launch is null || launch.Version != SupervisorProtocol.Version)
     return 2;
 }
 
+// A session of its own leaves the agent's process group orphaned: under gVisor (the pipeline's
+// gate), stopping a process in it, as killing the agent's tree does, sends the group SIGHUP, which
+// would end the supervisor before the kill is done and the exit written. A handler, not SIG_IGN:
+// an ignored signal would be the agent's too, through exec.
+using var hangup = PosixSignalRegistration.Create(PosixSignal.SIGHUP, context => context.Cancel = true);
 Detach.FromParent();
 return await new AgentSupervisor(launch).RunAsync();

@@ -409,7 +409,7 @@ public static partial class Posix
     /// </summary>
     public static SignalResult SignalIf(int pid, int signal, Func<ProcessStatus, bool> verify)
     {
-        const int noSuchProcess = 3, invalid = 22, notImplemented = 38;
+        const int noEntry = 2, noSuchProcess = 3, invalid = 22, notImplemented = 38;
         if (pid <= 1)
         {
             return SignalResult.Refused;
@@ -421,8 +421,8 @@ public static partial class Posix
             var error = Marshal.GetLastPInvokeError();
             if (error != notImplemented)
             {
-                // EINVAL: a thread's id, not a process's.
-                return error is noSuchProcess ? SignalResult.Gone : error is invalid ? SignalResult.Refused : SignalResult.Failed;
+                // EINVAL: a thread's id, not a process's (ENOENT under gVisor, where the pipeline's gate runs).
+                return error is noSuchProcess ? SignalResult.Gone : error is invalid or noEntry ? SignalResult.Refused : SignalResult.Failed;
             }
         }
 
