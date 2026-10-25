@@ -21,7 +21,7 @@ public class SessionTests(ApiTarget target)
     {
         var client = target.CreateAuthenticatedClient();
 
-        using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("Wait. fake:hang", "creator") { Model = "fake-large" }));
+        using var response = await client.PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("Wait. fake:hang", "creator") { Model = "opus" }));
         var body = await response.Content.ReadAsStringAsync();
         var created = System.Text.Json.JsonSerializer.Deserialize<CreatedSessionBody>(body, Wire.JsonOptions)!;
         var session = await client.GetSessionAsync(created.Id);
@@ -33,7 +33,7 @@ public class SessionTests(ApiTarget target)
         await Assert.That(session.Status).IsEqualTo("working");
         await Assert.That(session.QueuePosition).IsNull();
         await Assert.That(session.Provider).IsEqualTo("fake");
-        await Assert.That(session.Model).IsEqualTo("fake-large");
+        await Assert.That(session.Model).IsEqualTo("opus");
         await Assert.That(session.Caller).IsEqualTo("creator");
         await Assert.That(session.TimeoutSeconds).IsNull();
         await Assert.That(session.StartedAt).IsNotNull();
@@ -105,6 +105,17 @@ public class SessionTests(ApiTarget target)
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         await Assert.That((await response.ErrorAsync()).Code).IsEqualTo("UNKNOWN_PROVIDER");
+    }
+
+    [Test]
+    public async Task Create_WithAModelItsProviderDoesNotList_Is400()
+    {
+        using var response = await target.CreateAuthenticatedClient().PostAsync("/api/sessions", Wire.JsonContent(new CreateSessionBody("x") { Model = "nope" }));
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        var error = await response.ErrorAsync();
+        await Assert.That(error.Code).IsEqualTo("UNKNOWN_MODEL");
+        await Assert.That(error.Message).StartsWith("Provider 'fake' has no model 'nope'. Its models: ");
     }
 
     [Test]

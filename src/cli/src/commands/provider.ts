@@ -1,4 +1,4 @@
-import { type ProviderHealth, providersHealthList } from "@arm/client";
+import { type Provider, type ProviderHealth, providersHealthList, providersList } from "@arm/client";
 import { unwrap } from "../api";
 import { formatTable, localDateTime } from "../output";
 import type { CommandGroup } from "../registry";
@@ -15,11 +15,37 @@ export function formatHealth(health: readonly ProviderHealth[]): string {
   ]);
 }
 
+type ModelRow = { provider: Provider; id?: string; displayName?: string };
+
+/** One row per model (a provider without any still gets one), its provider's display name last. */
+export function formatProviders(providers: readonly Provider[]): string {
+  if (providers.length === 0) return "No providers.";
+  const rows: ModelRow[] = providers.flatMap((provider) =>
+    provider.models.length === 0 ? [{ provider }] : provider.models.map((m) => ({ provider, ...m })),
+  );
+  return formatTable(rows, [
+    { header: "provider", value: (r: ModelRow) => r.provider.name },
+    { header: "model", value: (r: ModelRow) => r.id },
+    { header: "name", value: (r: ModelRow) => r.displayName },
+    { header: "provider name", value: (r: ModelRow) => r.provider.displayName },
+  ]);
+}
+
 export const providerGroup: CommandGroup = {
   name: "provider",
   summary: "The providers that run agents",
   defaultCommand: "health",
   commands: [
+    {
+      name: "list",
+      summary: "Every provider and the models sessions may name for it (--model)",
+      args: [],
+      options: {},
+      async run({ client }) {
+        const providers = await unwrap(providersList({ client }), client);
+        return { json: providers, pretty: formatProviders(providers) };
+      },
+    },
     {
       name: "health",
       summary: "Whether each provider starts sessions now, and if not why and until when",

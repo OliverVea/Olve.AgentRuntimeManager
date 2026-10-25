@@ -185,6 +185,18 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task Create_WithAModelItsProviderDoesNotList_CreatesNothing()
+    {
+        var outcome = _sessions.Create(Request() with { Model = "nope" });
+
+        var unknown = (CreateOutcome.UnknownModel)outcome;
+        await Assert.That(unknown.Provider).IsEqualTo(_provider.Name);
+        await Assert.That(unknown.Model).IsEqualTo("nope");
+        await Assert.That(unknown.Known).IsEquivalentTo(["m"]);
+        await Assert.That(_sessions.Search(new SessionSearch(), 100, 0).Total).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task AgentThatCantStart_FailsTheSession()
     {
         _provider.StartFailure = new InvalidOperationException("no binary");

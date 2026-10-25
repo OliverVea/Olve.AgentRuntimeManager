@@ -12,6 +12,12 @@ public interface IAgentProvider
     /// <summary>The name sessions select it by (<c>provider</c>).</summary>
     string Name { get; }
 
+    /// <summary>Its name for people (<c>Claude Code</c>), as configured; blank: <see cref="Name"/>.</summary>
+    string? DisplayName => null;
+
+    /// <summary>The models sessions may name for it, in order, as configured on this server; any other is refused.</summary>
+    IReadOnlyList<ModelOptions> Models { get; }
+
     /// <summary>
     /// Starts an agent and returns at once; the run completes on its own. Throws when the agent
     /// can't start (the session then fails). Must not block: it's called while the runtime holds

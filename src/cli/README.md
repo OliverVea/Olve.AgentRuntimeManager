@@ -24,7 +24,7 @@ arm env [list] | arm env set <name> <value> [--default] | arm env delete <name>
 
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
-arm provider [health]
+arm provider list | arm provider [health]
 
 arm server [info]
 
@@ -83,7 +83,8 @@ environment, your settings in `~/.arm/config.json`, then a built-in default:
 | `caller` | `ARM_CALLER` | your OS user name (`$USER`) |
 
 `arm config set url https://arm-beta.ovea.pro` saves one; `arm config` lists them and where the
-file is. `ARM_HOME` moves the folder (default `~/.arm`).
+file is. `ARM_HOME` moves the folder (default `~/.arm`). The models a server accepts are its own
+configuration: `arm provider list` shows them, and any other is refused (`UNKNOWN_MODEL`).
 
 `arm session create` prints `Started session <id>.` when the session got a slot (201) and
 `Queued session <id> at position N.` when it is waiting for one (202); with `--json` it prints the

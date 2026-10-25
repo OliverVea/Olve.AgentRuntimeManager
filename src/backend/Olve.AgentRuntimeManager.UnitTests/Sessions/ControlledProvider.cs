@@ -10,6 +10,9 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
 
     public string Name => name;
 
+    /// <summary>The one model the tests' sessions name.</summary>
+    public IReadOnlyList<ModelOptions> Models { get; } = [new() { Id = "m" }];
+
     /// <summary>When set, <see cref="Start"/> throws this instead of starting.</summary>
     public Exception? StartFailure { get; set; }
 

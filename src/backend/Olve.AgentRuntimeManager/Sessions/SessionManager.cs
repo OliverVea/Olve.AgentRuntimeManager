@@ -180,9 +180,16 @@ public sealed class SessionManager : IDisposable
     /// <param name="agentEnv">The environment the agent gets, resolved from the registered variables and the request's own.</param>
     public CreateOutcome Create(CreateSession request, IReadOnlyDictionary<string, string>? agentEnv = null)
     {
-        if (!_providers.ContainsKey(request.Provider))
+        if (!_providers.TryGetValue(request.Provider, out var provider))
         {
             return new CreateOutcome.UnknownProvider(request.Provider, Providers);
+        }
+
+        // Only here: a stored session whose model was configured away still recovers and continues.
+        var models = provider.Models;
+        if (!models.Any(m => m.Id == request.Model))
+        {
+            return new CreateOutcome.UnknownModel(request.Provider, request.Model, [.. models.Select(m => m.Id)]);
         }
 
         lock (_gate)

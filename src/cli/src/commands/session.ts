@@ -90,7 +90,7 @@ export function formatSessionPage(page: SessionPage): string {
   return `${table}\n\n${footer}`;
 }
 
-/** Built-in defaults until the server lists its providers (M4b); `arm config set provider|model …` overrides them. */
+/** Built-in defaults, in every server's default model list (`arm provider list`); `arm config set provider|model …` overrides them. */
 export const DEFAULT_PROVIDER = "claude";
 export const DEFAULT_MODEL = "sonnet";
 
@@ -142,7 +142,7 @@ export const sessionGroup: CommandGroup = {
       args: [{ name: "prompt", description: "What the agent should do (quote it)" }],
       options: {
         provider: { type: "string", description: "Provider that runs the agent (default: setting provider, else claude)", valueName: "X" },
-        model: { type: "string", description: "Model, in the provider's own naming (default: setting model, else sonnet)", valueName: "X" },
+        model: { type: "string", description: "One of the provider's models, by id: see `arm provider list` (default: setting model, else sonnet)", valueName: "X" },
         caller: { type: "string", description: "Who started the session; searchable (default: setting caller, else your user name)", valueName: "X" },
         "timeout-seconds": {
           type: "string",

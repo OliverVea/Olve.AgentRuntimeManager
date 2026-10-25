@@ -17,6 +17,46 @@ const health = [
   { provider: "fake", status: "available" },
 ];
 
+const providers = [
+  {
+    name: "claude",
+    displayName: "Claude Code",
+    models: [
+      { id: "opus", displayName: "Opus" },
+      { id: "sonnet", displayName: "Sonnet" },
+    ],
+  },
+  { name: "fake", displayName: "Fake", models: [{ id: "fake", displayName: "fake" }] },
+];
+
+describe("provider list", () => {
+  test("GETs the providers and prints one line per model", async () => {
+    const f = fakeFetch(() => ({ body: providers }));
+    const r = await cli(["provider", "list"], f);
+    expect(r.code).toBe(0);
+    expect(f.requests[0]!.method).toBe("GET");
+    expect(f.requests[0]!.url).toBe(`${url}/api/providers`);
+    expect(r.stdout.split("\n")).toEqual([
+      "PROVIDER  MODEL   NAME    PROVIDER NAME",
+      "claude    opus    Opus    Claude Code",
+      "claude    sonnet  Sonnet  Claude Code",
+      "fake      fake    fake    Fake",
+    ]);
+  });
+
+  test("a provider without models still gets a line", async () => {
+    const f = fakeFetch(() => ({ body: [{ name: "x", displayName: "X", models: [] }] }));
+    const r = await cli(["provider", "list"], f);
+    expect(r.stdout.split("\n")[1]).toMatch(/^x\s+X$/);
+  });
+
+  test("--json prints the payload", async () => {
+    const f = fakeFetch(() => ({ body: providers }));
+    const r = await cli(["provider", "list", "--json"], f);
+    expect(JSON.parse(r.stdout)).toEqual(providers);
+  });
+});
+
 describe("provider health", () => {
   test("GETs every provider's health and prints a table", async () => {
     const f = fakeFetch(() => ({ body: health }));

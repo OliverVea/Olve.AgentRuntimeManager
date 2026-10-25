@@ -20,6 +20,9 @@ public static class SessionErrors
     public static ArmError UnknownProvider(string provider, IReadOnlyList<string> known) =>
         ArmError.Create("UNKNOWN_PROVIDER", $"No provider '{provider}'. Known providers: {string.Join(", ", known)}.");
 
+    public static ArmError UnknownModel(string provider, string model, IReadOnlyList<string> known) =>
+        ArmError.Create("UNKNOWN_MODEL", $"Provider '{provider}' has no model '{model}'. Its models: {string.Join(", ", known)}.");
+
     public static ArmError BlankPrompt() =>
         ArmError.Create(ArmErrors.InvalidRequest, "'prompt' cannot be blank.");
 

@@ -35,6 +35,10 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
 
     public string Name => ProviderName;
 
+    public string? DisplayName => options.Value.DisplayName;
+
+    public IReadOnlyList<ModelOptions> Models => ModelOptions.OrDefaults(options.Value.Models, ClaudeProviderOptions.DefaultModels);
+
     /// <summary>
     /// Starts Claude Code with the prompt and the messages held for it, or, for a session that
     /// continues (M11), resumes its Claude session with the messages as what it's told next.

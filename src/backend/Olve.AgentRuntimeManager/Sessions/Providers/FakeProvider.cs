@@ -15,6 +15,10 @@ public sealed class FakeProvider(TimeProvider time, IOptions<FakeProviderOptions
 
     public string Name => ProviderName;
 
+    public string? DisplayName => options.Value.DisplayName;
+
+    public IReadOnlyList<ModelOptions> Models => ModelOptions.OrDefaults(options.Value.Models, FakeProviderOptions.DefaultModels);
+
     /// <summary>
     /// Starts a fake agent following the directives in everything it's told first (the prompt and
     /// held messages; a continuing session: its messages), keeping its provider session id when it resumes.

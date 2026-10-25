@@ -18,4 +18,7 @@ public abstract record CreateOutcome
 
     /// <summary>No provider has this name; nothing was created.</summary>
     public sealed record UnknownProvider(string Provider, IReadOnlyList<string> Known) : CreateOutcome;
+
+    /// <summary>The provider lists no model with this id; nothing was created.</summary>
+    public sealed record UnknownModel(string Provider, string Model, IReadOnlyList<string> Known) : CreateOutcome;
 }

@@ -44,6 +44,7 @@ public sealed class CreateSessionHandler(SessionManager sessions, IdempotencySto
             CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(new CreatedSession { Id = queued.Session.Id }),
             CreateOutcome.QueueFull full => new SessionsCreateResponse.ServiceUnavailable(SessionErrors.QueueFull(full.MaxQueueSize)),
             CreateOutcome.UnknownProvider unknown => new SessionsCreateResponse.BadRequest(SessionErrors.UnknownProvider(unknown.Provider, unknown.Known)),
+            CreateOutcome.UnknownModel unknown => new SessionsCreateResponse.BadRequest(SessionErrors.UnknownModel(unknown.Provider, unknown.Model, unknown.Known)),
             _ => throw new InvalidOperationException("Unhandled create outcome."),
         };
     }

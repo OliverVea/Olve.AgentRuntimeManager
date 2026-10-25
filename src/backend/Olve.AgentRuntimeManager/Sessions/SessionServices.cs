@@ -10,14 +10,16 @@ using Olve.Utilities.AsyncOnStartup;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
-/// <summary>The session runtime, its providers and the <c>Sessions_*</c>, <c>SessionMessages_*</c> and <c>ProvidersHealth_*</c> handlers.</summary>
+/// <summary>The session runtime, its providers and the <c>Sessions_*</c>, <c>SessionMessages_*</c>, <c>Providers_*</c> and <c>ProvidersHealth_*</c> handlers.</summary>
 public static class SessionServices
 {
     public static void AddSessionServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<SessionOptions>(configuration.GetSection(SessionOptions.Section));
-        services.Configure<FakeProviderOptions>(configuration.GetSection(FakeProviderOptions.Section));
-        services.Configure<ClaudeProviderOptions>(configuration.GetSection(ClaudeProviderOptions.Section));
+        services.AddOptions<FakeProviderOptions>().Bind(configuration.GetSection(FakeProviderOptions.Section))
+            .Validate(o => ModelOptions.AreValid(o.Models), ModelOptions.Invalid(FakeProviderOptions.Section)).ValidateOnStart();
+        services.AddOptions<ClaudeProviderOptions>().Bind(configuration.GetSection(ClaudeProviderOptions.Section))
+            .Validate(o => ModelOptions.AreValid(o.Models), ModelOptions.Invalid(ClaudeProviderOptions.Section)).ValidateOnStart();
         services.Configure<SupervisorOptions>(configuration.GetSection(SupervisorOptions.Section));
         services.Configure<RepoOptions>(configuration.GetSection(RepoOptions.Section));
         services.AddSingleton<Supervisors>();
@@ -40,6 +42,7 @@ public static class SessionServices
         services.AddSingleton<ISessionsKillHandler, KillSessionHandler>();
         services.AddSingleton<ISessionsDeleteHandler, DeleteSessionHandler>();
         services.AddSingleton<ISessionMessagesSendHandler, SendMessageHandler>();
+        services.AddSingleton<IProvidersListHandler, ListProvidersHandler>();
         services.AddSingleton<IProvidersHealthListHandler, ListProviderHealthHandler>();
         services.AddSingleton<ISessionConversationGetHandler, GetConversationHandler>();
         services.AddSingleton<ISessionActivityGetHandler, GetActivityHandler>();

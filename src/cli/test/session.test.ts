@@ -142,6 +142,14 @@ describe("session create", () => {
     expect(r.stderr).toBe("error: 503 Service Unavailable: QUEUE_FULL: The session queue is full.");
   });
 
+  test("400 (unknown model) names the provider's models; exit 1", async () => {
+    const message = "Provider 'claude' has no model 'gpt'. Its models: opus, sonnet, haiku.";
+    const f = fakeFetch(() => ({ status: 400, body: errorBody("UNKNOWN_MODEL", message) }));
+    const r = await cli(["session", "create", "x", "--provider", "claude", "--model", "gpt", "--caller", "oribot"], f);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toBe(`error: 400 Bad Request: UNKNOWN_MODEL: ${message}`);
+  });
+
   test("400 with several problems lists each one; exit 1", async () => {
     const body = errorBody("INVALID_REQUEST", "The request is invalid.", [
       { code: "PROMPT_REQUIRED", message: "prompt is required" },
