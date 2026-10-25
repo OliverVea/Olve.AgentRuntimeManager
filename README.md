@@ -333,6 +333,10 @@ Sources in priority order (highest wins):
 | `Sessions:ProviderMaxBackoff` | `00:15:00` | The longest that wait gets |
 | `Providers:Fake:Enabled` | `true` | Whether the `fake` provider exists; `false` in prod |
 | `Providers:Fake:Delay` | `00:00:02` | How long a fake agent runs unless its prompt says otherwise (`fake:sleep=…`) |
+| `Providers:Fake:DisplayName` | `Fake` | Its name for people (`GET /api/providers`) |
+| `Providers:Fake:Models` | `fake`, `opus`, `sonnet`, `haiku` | The models sessions may name, a list of `{ Id, DisplayName }` (`Providers__Fake__Models__0__Id=fake`); a configured list replaces the defaults; any other model is a 400 `UNKNOWN_MODEL` |
+| `Providers:Claude:DisplayName` | `Claude Code` | Its name for people (`GET /api/providers`) |
+| `Providers:Claude:Models` | `opus` (Opus), `sonnet` (Sonnet), `haiku` (Haiku) | The models sessions may name, in the order clients show them: a list of `{ Id, DisplayName }` (`Providers__Claude__Models__0__Id=opus`); a configured list replaces the defaults; any other model is a 400 `UNKNOWN_MODEL` |
 | `Providers:Claude:Command` | `claude` | The Claude Code executable |
 | `Providers:Claude:WorkRoot` | `olve-arm/sessions` in the user's local data folder | Each session's folder: working directory (`work/`) and raw output |
 | `Providers:Claude:ConfigDirectory` | *(Claude Code's default, `~/.claude`)* | `CLAUDE_CONFIG_DIR` for the agents |
