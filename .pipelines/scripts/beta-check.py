@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ARM's beta checks: proves a release's main paths end to end with real sessions on beta.
 
-Run by .pipelines/scripts/test-after-beta.sh in the pipeline's own job, after the deploy, against
+Run by the pipeline's beta-test step (handlers/beta-test.ts) in its own job, after the deploy, against
 beta from outside: only over HTTP, through ARM's API (the host relay), like any client, with a
 client-credentials token from beta's Authentik. Nothing runs in the VM. Every check either passes,
 with one line saying what it proved, or fails the step, saying plainly what failed; the checks after
@@ -16,7 +16,7 @@ stream, and the record. Every wait is bounded.
 
 Settings, from the environment:
   BETA_CHECK_API                ARM's base URL (required), e.g. http://100.100.117.17:18792
-  BETA_CHECK_VERSION            the bundle's version (required): beta must serve it, and it's the
+  BETA_CHECK_VERSION            the release's version (required): beta must serve it, and it's the
                                 record that a retried run has already been confirmed
   BETA_CHECK_TOKEN              a token to use as is (the local tests), or, for a client-credentials
                                 token of ARM's confidential machine client:
@@ -819,7 +819,7 @@ def check_events(ctx):
 
 def still_serving(ctx, record=None):
     """
-    Fails if beta no longer serves the checked version: a newer bundle's deploy may land while the
+    Fails if beta no longer serves the checked version: a newer run's deploy may land while the
     checks run (deploy-beta doesn't wait for this step). A record written meanwhile is deleted.
     """
     info = ctx.api.call("GET", "/api/server-info")

@@ -1,4 +1,4 @@
-// Every push goes beta, then prod. config.yaml beside it is the old v1 config.
+// Every push goes beta, then prod.
 import { pipeline, secret, step, steps, Source } from "@olivervea/pipelines";
 import * as M from "./models";
 import { vmDeploy } from "./vm-deploy";

@@ -249,25 +249,25 @@ dotnet run --project Olve.AgentRuntimeManager
 ## Deployment (GitOps)
 
 The repo deploys via [**Olve.Pipelines**](https://github.com/OliverVea/Olve.Pipelines).
-`.pipelines/config.yaml` is the **single source of truth**; the pipeline is bound to this repo, so
-**pushing to `main` redeploys automatically**.
+`.pipelines/pipeline.ts` is the **single source of truth**; the pipeline is bound to this repo, so
+**pushing to `main` redeploys automatically**. Steps run in stages (parallel within a stage; a
+failed stage stops the run):
 
-- **Production steps (parallel):** `build-and-package` (Kaniko → image tarball + `src/deploy/vm`),
-  `check` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI) and
+- `source` (`steps.gitHubSource`), then in parallel `build` (`steps.imageBuild`: the ARM image),
+  `test` (`mise run ci`: emitter conformance, backend unit + API tests, frontend, CLI) and
   `claude-code` (the latest Claude Code release for the agents: manifest signature and checksum
-  verified, lockdown flags checked, the binary staged in the bundle). A failure gates everything after.
-- **Processing steps (sequential):** `deploy-beta` (only deploys) → `test-after-beta` (post-deploy
-  checks from the step's own job, against live beta from outside, over HTTP through the host relay
-  like any client; nothing runs in the VM: the API test suite, then ARM's beta checks,
-  `.pipelines/scripts/beta-check.py`, sessions through ARM's API with a client-credentials token
-  from beta's Authentik, one Haiku turn (which also proves a repository's checkout is where and on
-  the branch the API says) and the rest on the `fake` provider; see
-  [`docs/TESTING.md`](docs/TESTING.md)) → `deploy` (prod).
-- **Secrets by name only** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN_BETA`,
-  `CLAUDE_CODE_OAUTH_TOKEN_PROD`, `ARM_BETA_OIDC_CLIENT_SECRET`); values live in the pipeline's k8s secret. The Claude Code
-  tokens come from `claude setup-token` (valid one year; set with `pl secret set`); keep the beta
-  one for rare manual checks. Step scripts source the shared
-  [`olve-lib.sh`](https://github.com/OliverVea/Olve.Pipelines/blob/main/.pipelines/scripts/olve-lib.sh).
+  verified, lockdown flags checked).
+- `deploy-beta` (only deploys) → `beta-test` (post-deploy checks from the step's own job, against
+  live beta from outside, over HTTP through the host relay like any client; nothing runs in the VM:
+  the API test suite, then ARM's beta checks, `.pipelines/scripts/beta-check.py`, sessions through
+  ARM's API with a client-credentials token from beta's Authentik, one Haiku turn (which also proves
+  a repository's checkout is where and on the branch the API says) and the rest on the `fake`
+  provider; see [`docs/TESTING.md`](docs/TESTING.md)) → `deploy-prod`, only when `deployTo` is
+  `prod` (the default for a push; `deployTo=beta` stops after beta).
+- **Secrets** (`GITHUB_TOKEN`, `SSH_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN_BETA`,
+  `CLAUDE_CODE_OAUTH_TOKEN_PROD`, `ARM_BETA_OIDC_CLIENT_SECRET`) are declared in `pipeline.ts` and
+  set with `pl secret set`; a step gets only the ones it declares. The Claude Code tokens come from
+  `claude setup-token` (valid one year); keep the beta one for rare manual checks.
 
 **Where it runs.** ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`,
 `olve-arm-prod`), not in Kubernetes — agents must survive server restarts. Each deploy step copies
@@ -279,7 +279,7 @@ the image tarball and `src/deploy/vm/` to the host and runs `vm-deploy.sh`, whic
    `/opt/olve-arm/releases/<version>` with a systemd service (`KillMode=process`, so the
    per-session supervisors and their agents survive a server restart; their sockets live in the
    preserved `RuntimeDirectory`, `/run/olve-arm`);
-3. installs the bundle's Claude Code as `/opt/olve-arm/claude/<version>` (uploaded once per
+3. installs the run's Claude Code as `/opt/olve-arm/claude/<version>` (uploaded once per
    version) and links it into the release as `claude`, so rolling back a release rolls back its
    Claude Code too;
 4. ensures the agent user (`src/deploy/vm/agent-user.sh`): agents and their supervisors run as

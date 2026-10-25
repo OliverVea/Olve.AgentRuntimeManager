@@ -1,8 +1,7 @@
 #!/bin/sh
 # Stage Claude Code for the `claude` provider's agents (docs/OPEN-QUESTIONS.md A10). Runs in
-# PARALLEL with build-and-package. Resolves the latest release once per build and puts the
-# verified linux-x64 binary in the bundle, so beta and prod run the same version, deploys need
-# no download, and re-promoting an older bundle rolls Claude Code back with the app.
+# parallel with build. Resolves the latest release once per run and outputs the verified
+# linux-x64 binary, so beta and prod run the same version and deploys need no download.
 #
 # Verification mirrors the official installer, plus the manifest's GPG signature: the release
 # key's fingerprint is pinned here, the manifest must be signed by it, and the binary must match

@@ -46,15 +46,15 @@ confirm with Oliver that it still holds. When a leaning changes, rewrite the ent
 
 ## Deployment (GitOps)
 
-This repo deploys via **Olve.Pipelines** — the `.pipelines/` directory is the live deploy config
-(single source of truth; pushing to `main` redeploys). Build + `check` (`mise run ci`) run in
-parallel, then `deploy-beta` (only deploys) → `test-after-beta` (from its own job, over HTTP: the API
-tests and the beta checks against beta) → `deploy` (prod).
+This repo deploys via **Olve.Pipelines** — `.pipelines/pipeline.ts` is the live deploy config
+(single source of truth; pushing to `main` redeploys). `build`, `test` (`mise run ci`) and
+`claude-code` run in parallel, then `deploy-beta` (only deploys) → `beta-test` (from its own job,
+over HTTP: the API tests and the beta checks against beta) → `deploy-prod`.
 ARM runs in **libvirt VMs** on the homelab host (`olve-arm-beta`, `olve-arm-prod`), not in k8s:
 `src/deploy/vm/vm-deploy.sh` (run on the host by the deploy steps) creates the VM on first deploy,
 installs releases as a systemd service, and keeps a host relay (`100.100.117.17:18792` beta /
 `:18791` prod) that the `Olve.Homelab` route targets via `hostEndpoint`. **Invoke the `ovea-olve-pipelines` skill** for
-the authoritative model (config schema, secrets, promotion gates) before changing `.pipelines/` —
+the authoritative model (the SDK, stages, secrets) before changing `.pipelines/` —
 don't re-derive it. See [README.md](README.md#deployment-gitops) for the full write-up.
 
 **Homelab deploy gotchas** (each bit us on a real deploy; all validated against Olve.Pipelines):

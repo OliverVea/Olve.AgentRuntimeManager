@@ -330,7 +330,7 @@ class SettingsTests(unittest.TestCase):
     BASE = {"BETA_CHECK_VERSION": "1.2.3", "BETA_CHECK_API": "http://127.0.0.1:18792/"}
 
     def settings(self, port, secret, **more):
-        # As test-after-beta passes them: in the environment.
+        # As beta-test passes them: in the environment.
         return check.Settings({**self.BASE, "BETA_CHECK_AUTHORITY": f"http://127.0.0.1:{port}/application/o/olve-arm/",
                                "BETA_CHECK_CLIENT_ID": "olve-arm", "BETA_CHECK_CLIENT_SECRET": secret, **more})
 

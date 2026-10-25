@@ -5,8 +5,8 @@
 #
 #   vm-deploy.sh <beta|prod> <version> <image.tar> <claude-dir> [--claude-token-stdin]
 #
-# <claude-dir> is the bundle's claude-code step output: the verified Claude Code binary for the
-# agents (`claude`) and its version (`claude-version.txt`); `none` for a bundle built before that
+# <claude-dir> is the run's claude-code step output: the verified Claude Code binary for the
+# agents (`claude`) and its version (`claude-version.txt`); `none` for a release built before that
 # step existed (the release then has no Claude Code). With --claude-token-stdin the first stdin line is the Claude Code OAuth token (`claude
 # setup-token`, a pipeline secret) for the VM's agents; stdin keeps it off every command line.
 #

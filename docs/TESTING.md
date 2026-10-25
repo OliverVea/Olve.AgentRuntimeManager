@@ -10,9 +10,9 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
 - **Cost-safe by default.** ARM's job is spawning LLM agents; an unguarded test run spends
   real tokens. Every per-push test path is **LLM-free** (FakeProvider or mock endpoint).
   Real-API calls live only in a small, gated, off-hot-path suite.
-- **Deterministic in the gate.** No network, no real LLM in the production gate.
+- **Deterministic in the gate.** No network, no real LLM in the `test` gate.
 - **Test the engine where it lives.** SQLite (OPEN-QUESTIONS A5) in-process pre-deploy, and on
-  beta's VM live via `test-after-beta`.
+  beta's VM live via `beta-test`.
 - **Test the real artifact once.** The image built in the pipeline is validated against live
   beta — no separate image-build-and-test step pre-deploy.
 - **Nothing hangs the gate.** Every wait in a test is bounded (a `Guard`, `WaitAsync`), a test
@@ -36,32 +36,32 @@ gate pre-deploy, real suite against live beta). See [`OPEN-QUESTIONS.md`](OPEN-Q
 
 ## Pipeline shape (Olve.Pipelines)
 
-Mirrors QuestionBank. Invoke the `ovea-olve-pipelines` skill before editing `.pipelines/`.
+Stages in `.pipelines/pipeline.ts`, one after another. Invoke the `ovea-olve-pipelines` skill before editing `.pipelines/`.
 
 ```
-production (parallel — a red step blocks ALL processing → no deploy):
-  build-and-package     Kaniko → image.tar + src/deploy/vm + version.txt
-  test                  fast, no containers: build/typecheck + unit + in-process API tests
+source                  the pushed commit (steps.gitHubSource)
+build, test, claude-code  in parallel; a red step stops the run → no deploy
+  build                 the ARM image (steps.imageBuild)
+  test                  `mise run ci`: build/typecheck + unit + in-process API tests
                         (WebApplicationFactory on SQLite + FakeProvider)
-
-processing (sequential — beta gates prod):
-  deploy-beta           deploy the release into the beta VM (vm-deploy.sh); health gate
-  test-after-beta       from its own job, over HTTP only: the HTTP suite against LIVE beta (LLM-free),
+  claude-code           the latest Claude Code, verified
+deploy-beta             install the release in the beta VM (vm-deploy.sh); health gate
+beta-test               from its own job, over HTTP only: the HTTP suite against LIVE beta (LLM-free),
                         then the beta checks (one Haiku turn, the rest on `fake`); gates prod
-  deploy                prod
+deploy-prod             prod (when deployTo=prod)
 ```
 
 **No image-building Testcontainers in the gate.** (Decision — the "real image over HTTP"
-role is served once by `test-after-beta`, which tests the very artifact being promoted.)
-Building an image in a production step to test it, then deploying and testing it again, is
+role is served once by `beta-test`, which tests the very artifact being promoted.)
+Building an image in a step to test it, then deploying and testing it again, is
 doing the expensive thing twice.
 
 ### Persistence across the pipeline
 
 - **SQLite** is the only engine (OPEN-QUESTIONS A5): embedded, so it runs **in-process in the
-  production gate** for free (no container), and it is what the beta and prod VMs use
+  `test` gate** for free (no container), and it is what the beta and prod VMs use
   (`ConnectionStrings__Arm` in `src/deploy/vm/env.{beta,prod}`), validated **live on beta by
-  `test-after-beta`** against the deployed release's own database file.
+  `beta-test`** against the deployed release's own database file.
 
 ### One HTTP suite, two targets
 
@@ -84,7 +84,7 @@ Contract conformance (every operation routed, responses valid for their declared
 emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`, run by
 `mise run codegen:test`; see [`SPEC-FIRST.md`](SPEC-FIRST.md) M2).
 
-### `test-after-beta` specifics (from QuestionBank)
+### `beta-test` specifics (from QuestionBank)
 
 - Hit the **in-cluster Service** directly (no ingress dependency); readiness-gate on `/health`.
 - **Self-authenticate** — the suite mints its own token (this is the **A3** dependency:
@@ -93,17 +93,17 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   clobbers real beta state.
 - **LLM-free** — control-plane only (session CRUD, approval flow via FakeProvider, policy,
   SSE, health). Never spawn a real Claude/Codex session here.
-- **One exception: the beta checks (2026-10-12; post-deploy, in `test-after-beta`).** After the API
+- **One exception: the beta checks (2026-10-12; post-deploy, in `beta-test`).** After the API
   suite, the same job proves ARM's main paths with real sessions through its API
   (`.pipelines/scripts/beta-check.py`; caller `test-after-beta`), and prod deploys only if every
   check passes. They are post-deploy checks, so they run where the other post-deploy tests run: in
   the pipeline's own job, against beta from outside, over HTTP through the host relay like any
   client. Nothing runs in the VM for testing, and `deploy-beta` only deploys. Both the suite and the
-  checks are the bundle's own commit's (its `commit.txt`), so they match the release. The token is a
+  checks are the run's own commit's (the `source` step's tree), so they match the release. The token is a
   client-credentials token of the beta `olve-arm` machine client from beta's Authentik (secret
   `ARM_BETA_OIDC_CLIENT_SECRET`, in the job's environment only; the Authentik CA for that HTTPS is
   read the way the VM gets it, from the cluster's `authentik-ca` configMap through the host).
-  **One Haiku turn per bundle:** a `claude` session, created with a repository (the step's
+  **One Haiku turn per release:** a `claude` session, created with a repository (the step's
   `BETA_CHECK_REPO_URL`, default this repository over ssh), whose agent runs one small command with
   its Bash tool; the command's own output in the conversation (never the model's wording) proves
   Claude Code started and is logged in, the command ran as the agent user (not `arm`, not root), a
@@ -118,12 +118,12 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   push only (locally, the shared copy lists no worktree afterwards). A run that fails deletes it
   too, and a later run deletes any an earlier one left.
   **Everything else on the `fake` provider** (enabled on beta, never on prod; no model): `/health`,
-  server info (the bundle's version), auth (401 without a valid token), provider health (claude and
+  server info (the release's version), auth (401 without a valid token), provider health (claude and
   fake available), a scripted conversation and its activity checked against each other, a message
   continuing the ended session (M11), a working session refused deletion (409), killed (`killed`,
   by the user) and deleted, and the event stream (the three sessions' lifecycles). About a minute
-  in all, every wait bounded (the whole run by the step's `timeout`, 5 minutes). Idempotent per
-  bundle: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed for
+  in all, every wait bounded (the check by a 5-minute idle timeout, the step by its own). Idempotent per
+  release: a passing run leaves a record in ARM's history (a `fake` session, "Beta checks passed for
   <version>"), and a retried run for it starts no sessions; a run first kills what a failed one
   left running. Left on beta: the continued fake session and the record (the claude session is
   deleted: ARM keeps its folder and transcript on disk, and its branch in the shared copy).
@@ -139,8 +139,8 @@ emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`,
   (`BetaCheck/claude-stub.py`) and a local repository; the stub runs the command for real and can
   misbehave (a variable missing, ARM's config leaking, no tool call, a hang, logged out, the wrong
   version, no fake provider, the checkout on another branch, missing, or a plain folder inside
-  another work tree), each failure saying what failed and leaving nothing running; test-after-beta's part
-  that runs them (the secret in the environment only, each missing prerequisite failing the step
+  another work tree), each failure saying what failed and leaving nothing running; `test-after-beta.sh`, the script
+  that ran them before the `beta-test` step (the secret in the environment only, each missing prerequisite failing the step
   by name); the check's own logic on what a working ARM never answers (`BetaCheck/beta_check_test.py`).
   New features add their check to `CHECKS` in `beta-check.py` on the `fake` provider where it can
   prove the point (the budget is the one real turn) and a case to those tests.
@@ -181,14 +181,14 @@ L4 nightly.
 
 ## Components ARM must build for this
 
-- **`FakeProvider`** — deterministic scripted provider (L1; also used by `test-after-beta`).
+- **`FakeProvider`** — deterministic scripted provider (L1; also used by `beta-test`).
 - **Record/replay LLM stub** — a mock endpoint speaking the provider SSE format, seeded from
   recorded transcripts (L2/L3).
 - **`ApiTarget` base-URL mode** — the one HTTP suite pointed at localhost, the image or the beta
-  Service (done; `test-after-beta` still needs its auth, see Open).
+  Service (done; `beta-test` still needs its auth, see Open).
 
 ## Open
 
 - **Exact base-URL knobs** for the current Claude Code and Codex CLIs (confirm via context7
   docs before implementing L3).
-- **`test-after-beta` auth** — resolved by A3 (local-HMAC test token vs OIDC machine client).
+- **`beta-test` auth** — resolved by A3 (local-HMAC test token vs OIDC machine client).

@@ -175,7 +175,7 @@ non-null-assert the shadow DOM (`el.shadowRoot!`), so `noNonNullAssertion` is re
 
 ## Continuous integration
 
-The pipeline runs `mise run ci` (see [`.pipelines/config.yaml`](../../.pipelines/config.yaml)),
+The pipeline's `test` step runs `mise run ci` (see [`.pipelines/pipeline.ts`](../../.pipelines/pipeline.ts)),
 which includes this folder's lint, tests and build. A failure blocks the deploy.
 
 ## The API client

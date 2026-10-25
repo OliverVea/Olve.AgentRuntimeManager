@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Olve.AgentRuntimeManager.ApiTests.BetaCheck;
 
 /// <summary>
-/// The beta check (<c>.pipelines/scripts/beta-check.py</c>, run by the pipeline's test-after-beta
+/// The beta check (<c>.pipelines/scripts/beta-check.py</c>, run by the pipeline's beta-test step
 /// from its own job, over HTTP only) against a local ARM with a stub Claude Code
 /// (<see cref="LocalArm"/>): on a working ARM every check passes, once per version, with one model
 /// turn; each failure the stub can bring about fails the check and says what failed, and leaves

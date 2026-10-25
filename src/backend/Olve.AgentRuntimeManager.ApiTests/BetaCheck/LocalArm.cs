@@ -22,7 +22,7 @@ public sealed record CheckRun(int ExitCode, string Output)
 /// port, configured through its environment as <c>/etc/olve-arm/env</c> configures it in the VM
 /// (with a test signing key, and a database and session folders of its own), with the stub Claude
 /// Code (<c>claude-stub.py</c>) behaving as its mode says. <see cref="RunCheckAsync"/> runs the
-/// check (<c>.pipelines/scripts/beta-check.py</c>) against it over HTTP, as test-after-beta does.
+/// check (<c>.pipelines/scripts/beta-check.py</c>) against it over HTTP, as the beta-test step does.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
 public sealed partial class LocalArm : IAsyncDisposable
@@ -130,7 +130,7 @@ public sealed partial class LocalArm : IAsyncDisposable
     }
 
     /// <summary>
-    /// Runs the check as test-after-beta runs it, from outside, over HTTP only (<c>python3 -u
+    /// Runs the check as the beta-test step runs it, from outside, over HTTP only (<c>python3 -u
     /// beta-check.py</c>, its settings in its environment), with a minted token instead of the
     /// machine client's; <paramref name="settings"/> (<c>NAME=value</c>) override the others.
     /// </summary>

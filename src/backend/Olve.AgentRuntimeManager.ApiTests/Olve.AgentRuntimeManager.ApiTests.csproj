@@ -20,7 +20,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
   </ItemGroup>
 
-  <!-- The beta check (.pipelines/scripts/beta-check.py), the step that runs it, and what BetaCheckTests run it with. -->
+  <!-- The beta check (.pipelines/scripts/beta-check.py), the v1 script that ran it, and what BetaCheckTests run it with. -->
   <ItemGroup>
     <None Include="BetaCheck/*.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../.pipelines/scripts/beta-check.py" Link="BetaCheck/beta-check.py" CopyToOutputDirectory="PreserveNewest" />
