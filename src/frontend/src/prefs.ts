@@ -7,7 +7,10 @@
 export type Theme = "light" | "dark";
 
 export type SessionDefaults = {
-  /** `provider/model`, as the composer takes it. */
+  /**
+   * `provider/model`, as the model dropdown gives it; one the server no longer offers (an old
+   * `claude/sonnet`) is kept, and the dropdown picks its first model instead.
+   */
   model: string;
   /** Empty: the logged-in user's name. */
   caller: string;

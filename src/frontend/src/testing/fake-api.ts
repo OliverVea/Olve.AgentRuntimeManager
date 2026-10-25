@@ -2,6 +2,7 @@ import type {
   ActivityLine,
   ArmEventData,
   EnvVariable,
+  Provider,
   ProviderHealth,
   Session,
   SessionSearch,
@@ -25,6 +26,19 @@ export function session(id: string, overrides: Partial<Session> = {}): Session {
   };
 }
 
+/** What `GET /api/providers` answers by default. */
+export const defaultModels: Provider[] = [
+  {
+    name: "claude",
+    displayName: "Claude Code",
+    models: [
+      { id: "claude-opus-5-5", displayName: "Opus 5.5" },
+      { id: "claude-sonnet-5", displayName: "Sonnet 5" },
+    ],
+  },
+  { name: "fake", displayName: "fake", models: [{ id: "fake", displayName: "Instant" }] },
+];
+
 export type Call = { method: string; path: string; search: string; body: unknown };
 
 /**
@@ -33,7 +47,9 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `sessions` by status and pages them newest first. Each `GET /api/events` opens a stream that
  * stays open; `push` writes one SSE frame to the latest, `endStream` ends it like a redeploy.
  * `holdSearch` makes searches wait for `releaseSearch`, to deliver events before the snapshot.
- * `providers` is what `GET /api/providers/health` answers (every provider available by default).
+ * `providers` is what `GET /api/providers/health` answers (every provider available by default),
+ * `models` what `GET /api/providers` answers (Claude Code's Opus and Sonnet and fake's Instant by
+ * default; a status: that error instead).
  * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
  * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
  * DELETEs wait for `releaseEnvWrites`. `activity` is what `GET /api/sessions/{id}/activity`
@@ -45,6 +61,7 @@ export function fakeApi(
     sessions?: Session[];
     search?: () => Response;
     providers?: ProviderHealth[];
+    models?: Provider[] | number;
     env?: EnvVariable[];
     activity?: (id: string) => ActivityLine[] | undefined | "hang";
   } = {},
@@ -110,6 +127,15 @@ export function fakeApi(
     if (request.method === "GET" && byId) {
       const found = sessions.find((s) => s.id === byId[1]);
       return found ? Response.json(found) : new Response(null, { status: 404 });
+    }
+    if (request.method === "GET" && url.pathname === "/api/providers") {
+      const models = options.models ?? defaultModels;
+      return typeof models === "number"
+        ? Response.json(
+            { error: { code: "INTERNAL", message: "The server failed.", details: {} } },
+            { status: models },
+          )
+        : Response.json(models);
     }
     if (request.method === "GET" && url.pathname === "/api/providers/health") {
       return Response.json(

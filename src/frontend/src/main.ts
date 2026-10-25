@@ -22,6 +22,7 @@ import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
 import { RepoPanel } from "./repos/repo-panel.js";
 import { ActivityStore } from "./sessions/activity-store.js";
 import { parseModel, shortId } from "./sessions/format.js";
+import { ModelCatalog, modelChoice } from "./sessions/model-catalog.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
 import { isPaused, timesText, untilText, willQueueText } from "./sessions/provider-health.js";
 import { SessionStore, type StreamState } from "./sessions/session-store.js";
@@ -39,6 +40,7 @@ const client = createApiClient(baseUrl, {
 const store = new SessionStore(client);
 const activity = new ActivityStore(client, store);
 const envRegistry = new EnvRegistry(client);
+const models = new ModelCatalog(client);
 let prefs: Prefs = loadPrefs();
 
 const $ = <E extends HTMLElement = HTMLElement>(selector: string) => {
@@ -147,15 +149,45 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeProviders();
 });
 
-/** The composer's hint when the typed model's provider is paused: the session will queue. */
+/** The composer's hint when the picked model's provider is paused: the session will queue. */
 function renderWillQueue(): void {
-  const provider = parseModel($<HTMLInputElement>("#c-model").value)?.provider;
+  const provider = parseModel($<HTMLSelectElement>("#c-model").value)?.provider;
   const health = provider ? store.provider(provider) : undefined;
   const hint = $("#will-queue");
   hint.hidden = !isPaused(health);
   hint.textContent = isPaused(health) ? willQueueText(health, Date.now()) : "";
 }
-$("#c-model").addEventListener("input", renderWillQueue);
+$("#c-model").addEventListener("change", renderWillQueue);
+
+// --- models (M4b): the dropdowns list what the server offers, by display names ------------------
+/**
+ * Fills a model dropdown, selecting `saved` when it's offered and else the first model. Until the
+ * list arrives (or when it can't be read) it holds just `saved`, so sessions can still start.
+ */
+function fillModels(select: HTMLSelectElement, saved: string): void {
+  const choice = modelChoice(models.loaded ? models.providers : undefined, saved);
+  select.replaceChildren(...choice.options.map((o) => new Option(o.label, o.value)));
+  select.value = choice.selected;
+}
+
+function renderModels(): void {
+  const composer = $<HTMLSelectElement>("#c-model");
+  fillModels(composer, composer.value || prefs.defaults.model);
+  if ($<HTMLDialogElement>("#options-dialog").open) {
+    const options = $<HTMLSelectElement>("#o-model");
+    fillModels(options, options.value || prefs.defaults.model);
+    if (models.problem)
+      $("#options-problem").textContent = `Couldn't load the models: ${models.problem}`;
+  }
+  const problem = $("#models-problem");
+  problem.hidden = !models.problem;
+  problem.textContent = models.problem ? `Couldn't load the models: ${models.problem}` : "";
+  list.providers = models.providers;
+  page.providers = models.providers;
+  renderWillQueue();
+  updateCreate();
+}
+models.addEventListener("change", renderModels);
 
 /** Only beta says that it's beta, with its build version. */
 async function loadServerInfo(): Promise<void> {
@@ -189,6 +221,7 @@ function renderAuthState(): void {
     store.start();
     readActivity();
     void envRegistry.load();
+    void models.load();
     void loadServerInfo();
     fillComposer();
     route();
@@ -196,6 +229,7 @@ function renderAuthState(): void {
     store.stop();
     activity.stop();
     envRegistry.clear();
+    models.clear();
     $("#env").innerHTML = "";
     closeProviders();
   }
@@ -234,14 +268,18 @@ const repoPanel = new RepoPanel($<HTMLButtonElement>("#repos-toggle"), $("#repos
 /** Whether a create is in flight: Start stays disabled until it settles (no duplicate sessions). */
 let creating = false;
 
-/** Start needs a prompt, an env and repos without problems, and no create in flight. */
+/** Start needs a prompt, a model, an env and repos without problems, and no create in flight. */
 function updateCreate(): void {
   createButton.disabled =
-    creating || prompt.value.trim() === "" || envPanel.invalid || repoPanel.invalid;
+    creating ||
+    prompt.value.trim() === "" ||
+    $<HTMLSelectElement>("#c-model").value === "" ||
+    envPanel.invalid ||
+    repoPanel.invalid;
 }
 
 function fillComposer(): void {
-  $<HTMLInputElement>("#c-model").value = prefs.defaults.model;
+  fillModels($<HTMLSelectElement>("#c-model"), prefs.defaults.model);
   const caller = $<HTMLInputElement>("#c-caller");
   caller.value = prefs.defaults.caller;
   caller.placeholder = fallbackCaller();
@@ -279,7 +317,7 @@ async function create(): Promise<void> {
   const parsed = newSession(
     {
       prompt: prompt.value,
-      model: $<HTMLInputElement>("#c-model").value,
+      model: $<HTMLSelectElement>("#c-model").value,
       caller: $<HTMLInputElement>("#c-caller").value,
       timeout: $<HTMLInputElement>("#c-timeout").value,
       env: envPanel.rows,
@@ -317,6 +355,8 @@ async function create(): Promise<void> {
     toast(describeError(error), true);
     // A picked variable was deleted meanwhile: the fresh list drops the pick.
     if (error instanceof ApiError && error.code === "ENV_NOT_FOUND") void envRegistry.load();
+    // The model is no longer offered (the server's configuration changed): the fresh list.
+    if (error instanceof ApiError && error.code === "UNKNOWN_MODEL") void models.load();
   } finally {
     creating = false;
   }
@@ -472,7 +512,8 @@ function askDelete(id: string): void {
 
 // --- options -------------------------------------------------------------------------------------
 $("#open-options").addEventListener("click", () => {
-  $<HTMLInputElement>("#o-model").value = prefs.defaults.model;
+  fillModels($<HTMLSelectElement>("#o-model"), prefs.defaults.model);
+  if (!models.loaded) void models.load(); // the list couldn't be read: try again
   const caller = $<HTMLInputElement>("#o-caller");
   caller.value = prefs.defaults.caller;
   caller.placeholder = fallbackCaller();
@@ -485,16 +526,12 @@ $("#open-options").addEventListener("click", () => {
   const form = dialog.querySelector("form");
   if (form) {
     form.onsubmit = (e) => {
-      const model = $<HTMLInputElement>("#o-model").value.trim();
+      // Empty when there's no list and no saved default: keep what's saved.
+      const model = $<HTMLSelectElement>("#o-model").value || prefs.defaults.model;
       const timeout = parseTimeout($<HTMLInputElement>("#o-timeout").value);
-      const problem = !parseModel(model)
-        ? "The model is provider/model, e.g. claude/sonnet."
-        : !timeout.ok
-          ? timeout.problem
-          : "";
-      if (problem || !timeout.ok) {
+      if (!timeout.ok) {
         e.preventDefault();
-        $("#options-problem").textContent = problem;
+        $("#options-problem").textContent = timeout.problem;
         return;
       }
       const theme = $<HTMLSelectElement>("#o-theme").value as Theme | "";

@@ -270,10 +270,6 @@ main {
 .field .caller {
   width: 10em;
 }
-.field .model {
-  width: 12em;
-  font-family: var(--mono);
-}
 .hint {
   color: var(--faint);
   font-size: 12px;
@@ -453,6 +449,7 @@ label.check {
   .composer .settings .field {
     justify-content: space-between;
   }
+  .composer .settings .field select,
   .composer .settings .field input {
     flex: 1;
     max-width: 70%;
@@ -581,6 +578,11 @@ label.check {
 .will-queue {
   font-size: 13px;
   color: var(--warn);
+}
+/* The composer's models couldn't be read (M4b): why, until a read succeeds. */
+.models-problem {
+  font-size: 13px;
+  color: var(--danger);
 }
 
 /* ---- environment variables ---- */

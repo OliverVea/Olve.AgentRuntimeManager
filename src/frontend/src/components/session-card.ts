@@ -1,4 +1,4 @@
-import type { ActivityLine, ProviderHealth, Session } from "@arm/client";
+import type { ActivityLine, Provider, ProviderHealth, Session } from "@arm/client";
 import { escapeHtml } from "../base-element.js";
 import { linkify } from "../sessions/conversation.js";
 import { clock, isEnded, modelLabel, relative, runningTime, shortId } from "../sessions/format.js";
@@ -127,7 +127,8 @@ export function logBox(log: LogView): string {
 
 /**
  * One session card: status · time · outcome (and, queued, what it waits for), the task, then
- * id · model · caller (· ended). `health` is its provider's. A working session's card also shows
+ * id · model · caller (· ended); the model by its display names when `providers` has it.
+ * `health` is its provider's. A working session's card also shows
  * its log (`log`, M5f) with expand and wrap; a queued one keeps the column (and the icons' slots)
  * empty, so the Overview's cards line up; an ended one has neither.
  */
@@ -137,6 +138,7 @@ export function sessionCard(
   now: number,
   health?: ProviderHealth,
   log?: LogView,
+  providers?: readonly Provider[],
 ): string {
   const ended = isEnded(session);
   const title = escapeHtml(timeTitle(session, times, now));
@@ -150,7 +152,7 @@ export function sessionCard(
   ].filter(Boolean);
   const info = [
     `<span class="id" data-copy="${id}" title="Copy the full id (${id})">${shortId(session)}</span>`,
-    `<span title="${escapeHtml(`${session.provider}/${session.model}`)}">${escapeHtml(modelLabel(session))}</span>`,
+    `<span title="${escapeHtml(`${session.provider}/${session.model}`)}">${escapeHtml(modelLabel(session, providers))}</span>`,
     `<span>${escapeHtml(session.caller)}</span>`,
     ended && session.endedAt
       ? `<button class="when" data-times title="${title}">ended ${

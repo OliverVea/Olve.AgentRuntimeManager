@@ -1,3 +1,4 @@
+import type { Provider } from "@arm/client";
 import { BaseElement, escapeHtml } from "../base-element.js";
 import type { ActivityChange, ActivityStore } from "../sessions/activity-store.js";
 import { isEnded } from "../sessions/format.js";
@@ -52,6 +53,7 @@ export class SessionList extends BaseElement {
   #tick: ReturnType<typeof setInterval> | undefined;
   #activity: ActivityStore | null = null;
   #logDefaults: LogDefaults = { wrap: false, expand: false };
+  #providers: readonly Provider[] = [];
   /** Cards whose log is wrapped or expanded unlike the defaults. */
   readonly #flipped = { wrap: new Set<string>(), expand: new Set<string>() };
   readonly #onChange = () => {
@@ -82,6 +84,12 @@ export class SessionList extends BaseElement {
     this.#logDefaults = { ...defaults };
     this.#flipped.wrap.clear();
     this.#flipped.expand.clear();
+    this.render();
+  }
+
+  /** The providers and their models (M4b): the cards show models by their display names. */
+  set providers(providers: readonly Provider[]) {
+    this.#providers = providers;
     this.render();
   }
 
@@ -133,7 +141,16 @@ export class SessionList extends BaseElement {
     let body: string;
     if (sessions.length)
       body = sessions
-        .map((s) => sessionCard(s, this.#times, now, store.provider(s.provider), this.#log(s.id)))
+        .map((s) =>
+          sessionCard(
+            s,
+            this.#times,
+            now,
+            store.provider(s.provider),
+            this.#log(s.id),
+            this.#providers,
+          ),
+        )
         .join("");
     else if (state === "loading" || state === "idle") body = `<div class="empty">Loading…</div>`;
     else if (overview) body = `<div class="empty">Nothing running. Start a session above.</div>`;

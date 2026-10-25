@@ -1,4 +1,4 @@
-import type { Session, SessionStatus } from "@arm/client";
+import type { Provider, Session, SessionStatus } from "@arm/client";
 
 /** Statuses a session never leaves. */
 export const endedStatuses: readonly SessionStatus[] = [
@@ -56,9 +56,19 @@ export function clock(iso: string, now: number): string {
   return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${hm}`;
 }
 
-/** The model as the card shows it: `model (provider)`. Display names come with M4b. */
-export function modelLabel(session: Pick<Session, "provider" | "model">): string {
-  return `${session.model} (${session.provider})`;
+/**
+ * The model as the card shows it: by its display names, `Opus 5.5 (Claude Code)`, when the
+ * providers list has it, else by its ids, `claude-opus-5-5 (claude)`.
+ */
+export function modelLabel(
+  session: Pick<Session, "provider" | "model">,
+  providers: readonly Provider[] = [],
+): string {
+  const provider = providers.find((p) => p.name === session.provider);
+  const model = provider?.models.find((m) => m.id === session.model);
+  return provider && model
+    ? `${model.displayName} (${provider.displayName})`
+    : `${session.model} (${session.provider})`;
 }
 
 /** Splits the composer's `provider/model` into its parts; undefined when either is missing. */

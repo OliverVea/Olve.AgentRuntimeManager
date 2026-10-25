@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ActivityStore } from "../sessions/activity-store.js";
 import { clock } from "../sessions/format.js";
 import { SessionStore } from "../sessions/session-store.js";
-import { fakeApi, session } from "../testing/fake-api.js";
+import { defaultModels, fakeApi, session } from "../testing/fake-api.js";
 import { SessionList } from "./session-list.js";
 
 beforeAll(() => customElements.define(SessionList.tagName, SessionList));
@@ -55,6 +55,31 @@ describe("<session-list>", () => {
     expect(el.shadowRoot!.querySelector("[data-kill]")?.getAttribute("title")).toBe("Kill session");
     expect(el.shadowRoot!.querySelectorAll("[data-kill]")[1]?.getAttribute("title")).toBe(
       "Cancel session",
+    );
+  });
+
+  it("shows a card's model by its display names once the providers list has it", async () => {
+    const { el } = await mount(
+      fakeApi({
+        sessions: [
+          session("aaaaaaaa-0001", { provider: "claude", model: "claude-opus-5-5" }),
+          session("bbbbbbbb-0002", { provider: "claude", model: "sonnet" }),
+        ],
+      }),
+    );
+    expect(text(el, ".info span:nth-child(2)")).toEqual([
+      "claude-opus-5-5 (claude)",
+      "sonnet (claude)",
+    ]);
+
+    el.providers = defaultModels;
+    expect(text(el, ".info span:nth-child(2)")).toEqual([
+      "Opus 5.5 (Claude Code)",
+      // Not one the server offers: by its ids, as before.
+      "sonnet (claude)",
+    ]);
+    expect(el.shadowRoot!.querySelector(".info span:nth-child(2)")?.getAttribute("title")).toBe(
+      "claude/claude-opus-5-5",
     );
   });
 

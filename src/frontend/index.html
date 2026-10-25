@@ -46,7 +46,7 @@
           <div class="row">
             <button type="button" class="advanced-toggle" id="advanced" aria-expanded="false">Advanced ▾</button>
             <div class="settings">
-              <label class="field">model <input id="c-model" class="model" placeholder="provider/model" spellcheck="false" /></label>
+              <label class="field">model <select id="c-model"></select></label>
               <label class="field">caller <input id="c-caller" class="caller" spellcheck="false" /></label>
               <label class="field">timeout (s) <input id="c-timeout" class="num" inputmode="numeric" placeholder="none" /></label>
               <button type="button" class="env-toggle" id="env-toggle" aria-controls="env-panel" aria-expanded="false">env <span class="caret">▸</span></button>
@@ -54,6 +54,7 @@
             </div>
             <span class="spacer"></span>
             <span class="will-queue" id="will-queue" hidden></span>
+            <span class="models-problem" id="models-problem" role="alert" hidden></span>
             <span class="hint">Ctrl+Enter</span>
             <button class="primary" id="create" type="submit" disabled>Start session</button>
           </div>
@@ -106,7 +107,7 @@
         <p>Saved in this browser, like <code>arm config</code> on a machine.</p>
         <section class="opt">
           <h4>New sessions</h4>
-          <label class="field">model <input id="o-model" placeholder="provider/model" spellcheck="false" /></label>
+          <label class="field">model <select id="o-model"></select></label>
           <label class="field">caller <input id="o-caller" spellcheck="false" /></label>
           <label class="field">timeout (s) <input id="o-timeout" inputmode="numeric" placeholder="none" /></label>
         </section>

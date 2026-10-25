@@ -1,4 +1,4 @@
-import type { Conversation, ConversationEntry, Session } from "@arm/client";
+import type { Conversation, ConversationEntry, Provider, Session } from "@arm/client";
 import { BaseElement, escapeHtml } from "../base-element.js";
 import {
   clockSeconds,
@@ -57,6 +57,7 @@ export class SessionPage extends BaseElement {
   #conversation: Conversation | undefined;
   #problem = "";
   #times: TimesAs = "relative";
+  #providers: readonly Provider[] = [];
   #view: TranscriptView = { thinking: false, tools: false, notices: false };
   /** Tool calls (by toolId) the user opened or closed themselves, overriding "open every tool call". */
   readonly #opened = new Map<string, boolean>();
@@ -90,6 +91,12 @@ export class SessionPage extends BaseElement {
 
   set times(times: TimesAs) {
     this.#times = times;
+    this.#rerender();
+  }
+
+  /** The providers and their models (M4b): the model shows by its display names. */
+  set providers(providers: readonly Provider[]) {
+    this.#providers = providers;
     this.#rerender();
   }
 
@@ -257,8 +264,15 @@ export class SessionPage extends BaseElement {
       <div class="task" title="${escapeHtml(s.prompt)}">${escapeHtml(s.prompt.split("\n")[0] ?? "")}</div>
       <div class="info"><span class="id" data-copy="${id}" title="Copy the full id (${id})">${shortId(s)}</span><span title="${escapeHtml(
         `${s.provider}/${s.model}`,
-      )}">${escapeHtml(modelLabel(s))}</span><span>${escapeHtml(s.caller)}</span>${when}</div>
+      )}">${escapeHtml(modelLabel(s, this.#providers))}</span><span>${escapeHtml(s.caller)}</span>${when}</div>
     </div>`;
+  }
+
+  /** Details' model: its display names when the providers list has it, then its exact ids. */
+  #model(s: Session): string {
+    const ids = escapeHtml(`${s.provider}/${s.model}`);
+    const label = modelLabel(s, this.#providers);
+    return label === modelLabel(s) ? ids : `${escapeHtml(label)} <span class="mono">${ids}</span>`;
   }
 
   #details(s: Session, now: number): string {
@@ -286,7 +300,7 @@ export class SessionPage extends BaseElement {
       .join("");
     return `<details class="more"><summary>Details</summary><dl class="meta">${[
       row("id", copy(s.id), "", "wide"),
-      row("model", escapeHtml(`${s.provider}/${s.model}`)),
+      row("model", this.#model(s)),
       row("created", times(s.createdAt)),
       row("started", times(s.startedAt)),
       row("ended", times(s.endedAt)),

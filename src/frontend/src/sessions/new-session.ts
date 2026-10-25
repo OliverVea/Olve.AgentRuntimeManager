@@ -6,6 +6,7 @@ import { parseModel } from "./format.js";
 /** What the composer's fields hold, as typed. */
 export type NewSessionFields = {
   prompt: string;
+  /** The dropdown's `provider/model`. */
   model: string;
   caller: string;
   timeout: string;
@@ -40,7 +41,7 @@ export function newSession(
   const prompt = fields.prompt.trim();
   if (!prompt) return { ok: false, problem: "Say what the agent should do." };
   const model = parseModel(fields.model);
-  if (!model) return { ok: false, problem: "The model is provider/model, e.g. claude/sonnet." };
+  if (!model) return { ok: false, problem: "Pick a model." };
   const timeout = parseTimeout(fields.timeout);
   if (!timeout.ok) return timeout;
   const env = checkEnvRows(fields.env ?? []);

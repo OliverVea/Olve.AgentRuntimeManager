@@ -1,6 +1,6 @@
 import type { Conversation } from "@arm/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { session } from "../testing/fake-api.js";
+import { defaultModels, session } from "../testing/fake-api.js";
 import { SessionPage } from "./session-page.js";
 
 beforeAll(() => customElements.define(SessionPage.tagName, SessionPage));
@@ -92,6 +92,19 @@ describe("<session-page>", () => {
     // The agent's last text is the turn's answer: shown once.
     expect($$(page, ".msg.text")).toHaveLength(0);
     expect(text(page, ".turn-end")[0]).toContain("Turn ended");
+  });
+
+  it("shows the model by its display names, and its ids in Details, once the list has it", async () => {
+    const page = await mount();
+    const model = () =>
+      $$(page, ".meta > div").find((d) => d.querySelector("dt")?.textContent === "model");
+    expect(text(page, ".head .info span:nth-child(2)")).toEqual(["fake (fake)"]);
+    expect(model()?.querySelector("dd")?.textContent).toBe("fake/fake");
+
+    page.providers = defaultModels;
+    await Promise.resolve();
+    expect(text(page, ".head .info span:nth-child(2)")).toEqual(["Instant (fake)"]);
+    expect(model()?.querySelector("dd")?.textContent).toBe("Instant (fake) fake/fake");
   });
 
   it("opens errors by default, others when every tool call is open, and keeps what the user opened", async () => {
