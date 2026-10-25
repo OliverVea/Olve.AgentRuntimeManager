@@ -272,7 +272,8 @@ public sealed partial class LocalArm : IAsyncDisposable
     private async Task WaitHealthyAsync()
     {
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{_port}"), Timeout = TimeSpan.FromSeconds(2) };
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        // Generous: the gate's host is shared with other pipelines, and a start there can take long.
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (DateTime.UtcNow < deadline && !_process.HasExited)
         {
             try

@@ -15,6 +15,7 @@ namespace Olve.AgentRuntimeManager.ApiTests.BetaCheck;
 /// runs it. Starts ARM itself, so not against a base-URL target. Needs <c>python3</c> (mise.toml pins it).
 /// </summary>
 [UnsupportedOSPlatform("windows")]
+[ParallelLimiter<LocalArmStarts>]
 public class BetaCheckTests
 {
     private static readonly string[] Checks =
