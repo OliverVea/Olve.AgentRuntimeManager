@@ -493,3 +493,7 @@ docs/mocks/
 *.db
 *.db-shm
 *.db-wal
+
+# Olve.Pipelines v2 local state
+.pipelines/.olve/
+.pipelines/node_modules/
