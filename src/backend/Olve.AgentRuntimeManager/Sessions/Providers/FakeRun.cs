@@ -31,10 +31,13 @@ internal sealed class FakeRun : IAgentRun
             var refused = Refused(script, time);
             conversation([.. input.Select(text => Told(text, now)), TurnEnd(refused, time)!]);
             _ended = true;
+            Answered = new TaskCompletionSource().Task;
             Completion = Task.FromResult(refused);
             return;
         }
 
+        // Not refused: the fake provider has answered at once, however long the agent then runs.
+        Answered = Task.CompletedTask;
         conversation(input.SelectMany(text => (IEnumerable<ConversationEntryRecord>)[Told(text, now), .. FakeTurn.Parse(text, now)]));
         Completion = RunAsync(script, time).ContinueWith(
             run =>
@@ -54,6 +57,8 @@ internal sealed class FakeRun : IAgentRun
     }
 
     public string ProviderSessionId { get; }
+
+    public Task Answered { get; }
 
     public Task<AgentOutcome> Completion { get; }
 

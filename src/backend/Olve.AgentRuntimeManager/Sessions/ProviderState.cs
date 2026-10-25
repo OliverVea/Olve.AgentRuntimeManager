@@ -11,7 +11,12 @@ namespace Olve.AgentRuntimeManager.Sessions;
 ///   <item><c>available</c>: sessions start.</item>
 ///   <item><c>limited</c>: none start until <see cref="Until"/>, then it's available again.</item>
 ///   <item><c>unreachable</c>: none start until <see cref="Until"/>; then one (the <see cref="Probe"/>)
-///   tries, and its outcome decides: available again, or unreachable with a longer wait.</item>
+///   tries. As soon as the provider answers it (<see cref="Providers.IAgentRun.Answered"/>), it's
+///   available again, while the probe runs on: a probe may run for long (an orchestrator waiting
+///   for another session to start would wait for itself, issue 10). A probe that ends before that
+///   decides by its outcome: available again, or unreachable with a longer wait. Once answered it's
+///   no longer the probe, and its run counts as started before the change (<see cref="Generation"/>),
+///   so its outcome changes nothing; a later outage is found by the runs started since.</item>
 ///   <item><c>unauthorized</c>: none start until a restart (new credentials mean a redeploy).</item>
 /// </list>
 /// </remarks>
@@ -29,9 +34,10 @@ internal sealed class ProviderState(string name)
 
     /// <summary>
     /// Bumped on every change. A run's outcome changes the health only if the run started in the
-    /// current generation (or is the probe): when an outage hits, the other runs that started
-    /// before it fail too, and must not stretch its wait; a run that started before a usage limit
-    /// and succeeds must not lift it.
+    /// current generation (or is the probe, until the provider has answered it): when an outage
+    /// hits, the other runs that started before it fail too, and must not stretch its wait; a run
+    /// that started before a usage limit and succeeds must not lift it. A probe the provider has
+    /// answered has made it available, a change of its own: from then on it's one of the runs from before.
     /// </summary>
     public int Generation { get; private set; }
 
@@ -67,6 +73,9 @@ internal sealed class ProviderState(string name)
             Probe = sessionId;
         }
     }
+
+    /// <summary>The provider answered a session's run: whether that makes it available (the run is the probe).</summary>
+    public bool Answered(Guid sessionId) => Status == ProviderStatus.Unreachable && Probe == sessionId;
 
     /// <summary>A session's run ended; returns whether it was the probe (which then stops being it).</summary>
     public bool Ended(Guid sessionId)

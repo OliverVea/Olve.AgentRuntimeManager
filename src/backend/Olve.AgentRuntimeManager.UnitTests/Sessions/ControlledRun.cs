@@ -6,6 +6,7 @@ namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
 {
     private readonly TaskCompletionSource<AgentOutcome> _outcome = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _answered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public AgentLaunch Launch { get; } = launch;
 
@@ -16,6 +17,8 @@ public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
 
     public string ProviderSessionId { get; } = launch.Resume ?? $"controlled-{launch.SessionId:N}";
 
+    public Task Answered => _answered.Task;
+
     public Task<AgentOutcome> Completion => _outcome.Task;
 
     /// <summary>Whether it takes messages (<see cref="TrySend"/>); a test turns it off to act out a turn that just ended.</summary>
@@ -25,6 +28,9 @@ public sealed class ControlledRun(AgentLaunch launch) : IAgentRun
     public List<string> Sent { get; } = [];
 
     public void End(AgentOutcome outcome) => _outcome.TrySetResult(outcome);
+
+    /// <summary>The provider answers the agent (<see cref="IAgentRun.Answered"/>), which keeps running.</summary>
+    public void Answer() => _answered.TrySetResult();
 
     public void Kill()
     {

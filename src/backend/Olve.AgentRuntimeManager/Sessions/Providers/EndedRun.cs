@@ -5,6 +5,9 @@ public sealed class EndedRun(string providerSessionId, AgentOutcome outcome) : I
 {
     public string ProviderSessionId => providerSessionId;
 
+    /// <summary>Never: its outcome is known, and says the rest.</summary>
+    public Task Answered { get; } = new TaskCompletionSource().Task;
+
     public Task<AgentOutcome> Completion { get; } = Task.FromResult(outcome);
 
     public void Kill()

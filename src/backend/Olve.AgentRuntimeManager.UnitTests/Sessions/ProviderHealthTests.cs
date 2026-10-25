@@ -341,6 +341,98 @@ public class ProviderHealthTests : IDisposable
         await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Unreachable);
     }
 
+    /// <summary>An unreachable provider whose probe has just started: the probe's session id (events read).</summary>
+    private async Task<Guid> Probing()
+    {
+        var session = Create();
+        await End(session.Id, Down(), s => s.Status == SessionStatus.Queued);
+        _time.Advance(Backoff);
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        Events();
+        return session.Id;
+    }
+
+    [Test]
+    public async Task AProbeTheProviderAnswered_MakesItAvailable_WhileItRunsOn()
+    {
+        // Issue 10: the probe (an orchestrator) waits for the session behind it to start.
+        var session = Create();
+        await End(session.Id, Down(), s => s.Status == SessionStatus.Queued);
+        var behind = Create();
+        _time.Advance(Backoff);
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        await Assert.That(_sessions.Get(behind.Id)!.Status).IsEqualTo(SessionStatus.Queued);
+        Events();
+
+        LastRun(session.Id).Answer();
+
+        await Eventually(behind.Id, s => s.Status == SessionStatus.Working);
+        await Assert.That(_sessions.Get(session.Id)!.Status).IsEqualTo(SessionStatus.Working);
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Available);
+        await Assert.That(Events().OfType<ProviderHealthChanged>().Single().Health.Status).IsEqualTo(ProviderStatus.Available);
+    }
+
+    [Test]
+    public async Task AProbeTheProviderAnswered_ChangesNothingMore_WhenItCompletes()
+    {
+        var probe = await Probing();
+        LastRun(probe).Answer();
+        await Eventually(probe, _ => Health().Status == ProviderStatus.Available);
+
+        await End(probe, new AgentOutcome.Completed(0), s => s.Status == SessionStatus.Completed);
+
+        await Assert.That(Events().OfType<ProviderHealthChanged>()).Count().IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task AProbeTheProviderAnswered_ThenRefused_DoesntPauseItAgain()
+    {
+        var probe = await Probing();
+        LastRun(probe).Answer();
+        await Eventually(probe, _ => Health().Status == ProviderStatus.Available);
+
+        // Like a run that started before the provider was back: it tries again, in the new generation.
+        var retried = await End(probe, Down(), s => s.Attempts == 3 && s.Status == SessionStatus.Working);
+
+        await Assert.That(retried.FailedAttempts).IsEqualTo(2);
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Available);
+        await Assert.That(Events().OfType<ProviderHealthChanged>()).Count().IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ARunThatIsntTheProbe_BeingAnswered_DoesntMakeTheProviderAvailable()
+    {
+        var first = Create();
+        var second = Create();
+        await End(first.Id, Down(), s => s.Status == SessionStatus.Queued);
+
+        LastRun(second.Id).Answer();
+        await End(second.Id, new AgentOutcome.Completed(0), s => s.Status == SessionStatus.Completed);
+
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Unreachable);
+    }
+
+    [Test]
+    public async Task AKilledProbe_BeingAnsweredLate_DoesntMakeTheProviderAvailable()
+    {
+        var session = Create();
+        await End(session.Id, Down(), s => s.Status == SessionStatus.Queued);
+        var next = Create();
+        _time.Advance(Backoff);
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working);
+        var killed = LastRun(session.Id);
+        _sessions.Kill(session.Id, "no longer needed", KillSource.User, "tests");
+        await Eventually(next.Id, s => s.Status == SessionStatus.Working);
+
+        killed.Answer();
+        // The new probe's refusal still counts: had the late answer made the provider available,
+        // this run would be from before, and change nothing.
+        await End(next.Id, Down(), s => s.Status == SessionStatus.Queued);
+
+        await Assert.That(Health().Status).IsEqualTo(ProviderStatus.Unreachable);
+        await Assert.That(Health().Until).IsEqualTo(_time.GetUtcNow() + 2 * Backoff);
+    }
+
     [Test]
     public async Task AProbeFailingOnItsOwn_StillReachedTheProvider()
     {

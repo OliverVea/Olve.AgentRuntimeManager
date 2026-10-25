@@ -13,6 +13,14 @@ public interface IAgentRun
     /// </summary>
     bool AgentStarted => true;
 
+    /// <summary>
+    /// Completes once the provider has answered the agent (for Claude: the model's first message),
+    /// proof that the provider works while the agent may still run for long; never, for an agent
+    /// refused or that never got that far. Never faults. Only an unreachable provider's probe
+    /// reads it (<see cref="ProviderState"/>).
+    /// </summary>
+    Task Answered { get; }
+
     /// <summary>Completes when the agent ends, however it ends (never faults).</summary>
     Task<AgentOutcome> Completion { get; }
 

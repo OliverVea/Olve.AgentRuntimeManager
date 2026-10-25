@@ -671,6 +671,44 @@ public sealed class SessionManager : IDisposable
 
         // Not awaited inline: the run may already be complete, and Finish takes the lock.
         _ = Task.Run(async () => Finish(id, run, await run.Completion));
+        if (provider.Probe == id)
+        {
+            // The probe's word that its provider works comes before its end, maybe long before (issue 10).
+            // Watched until it ends at the latest: nothing waits on a run that's gone.
+            _ = Task.Run(async () =>
+            {
+                await Task.WhenAny(run.Answered, run.Completion);
+                if (run.Answered.IsCompletedSuccessfully)
+                {
+                    Answered(id, run);
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// The provider answered a run: if it's an unreachable provider's probe, the provider is
+    /// available again and its queued sessions start, while the probe runs on.
+    /// </summary>
+    private void Answered(Guid id, IAgentRun run)
+    {
+        lock (_gate)
+        {
+            // Killed (a new probe may be trying), finished (its outcome decided), or a later run of the session.
+            if (!_running.TryGetValue(id, out var running) || running.Run != run || !run.AgentStarted)
+            {
+                return;
+            }
+
+            var provider = _health[_sessions[id].Provider];
+            if (!provider.Answered(id))
+            {
+                return;
+            }
+
+            RecoverLocked(provider);
+            StartNextLocked();
+        }
     }
 
     /// <summary>An agent ended on its own: completes or fails its session and frees its slot.</summary>
@@ -695,6 +733,8 @@ public sealed class SessionManager : IDisposable
 
             var provider = _health[session.Provider];
             var current = running.Generation == provider.Generation;
+            // A probe the provider answered made it available then (Answered): it's neither the probe
+            // nor current any more, so its outcome changes nothing.
             var probe = provider.Ended(id);
             // The probe got through to the provider (a failure of its own still reached it): it's back.
             // A run whose agent never started never reached it.

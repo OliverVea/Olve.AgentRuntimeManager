@@ -26,6 +26,7 @@ internal sealed class ClaudeRun : IAgentRun
     private readonly SupervisedAgent _agent;
     private readonly TimeSpan _exitGrace;
     private readonly Lock _gate = new();
+    private readonly TaskCompletionSource _answered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Messages given to the agent that it hasn't taken up (replayed) yet.</summary>
     private readonly HashSet<Guid> _unread;
@@ -52,6 +53,13 @@ internal sealed class ClaudeRun : IAgentRun
     public string ProviderSessionId { get; }
 
     public bool AgentStarted => _agent.AgentStarted;
+
+    /// <summary>
+    /// The model's first message: not <c>system</c>/<c>init</c>, which Claude Code writes before it
+    /// calls the API, nor the <c>&lt;synthetic&gt;</c> one it writes for an API error. Re-attached,
+    /// it's read again from the run's output.
+    /// </summary>
+    public Task Answered => _answered.Task;
 
     public Task<AgentOutcome> Completion { get; }
 
@@ -99,6 +107,11 @@ internal sealed class ClaudeRun : IAgentRun
                 }
 
                 signals = signals.Read(e);
+                if (signals.ModelAnswered)
+                {
+                    _answered.TrySetResult();
+                }
+
                 if (ClaudeStreamJson.Result(e) is { } turnResult)
                 {
                     // The session's outcome is its last turn's.

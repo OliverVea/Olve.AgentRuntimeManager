@@ -216,6 +216,33 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task ModelAnswering_IsTheProviderAnswering()
+    {
+        var run = Provider().Start(Launch("Say READY"));
+
+        await run.Completion.WaitAsync(Guard);
+
+        await Assert.That(run.Answered.IsCompletedSuccessfully).IsTrue();
+    }
+
+    [Test]
+    [Arguments("stub:overloaded")]
+    [Arguments("stub:server-error")]
+    // Claude Code writes the API's error as an assistant message of its own (model <synthetic>).
+    [Arguments("stub:offline")]
+    [Arguments("stub:unauthorized")]
+    [Arguments("stub:limited")]
+    public async Task ApiRefusing_IsNoAnswer(string prompt)
+    {
+        var run = Provider().Start(Launch(prompt));
+
+        await run.Completion.WaitAsync(Guard);
+
+        // Answered is set while the output is read, before the run completes.
+        await Assert.That(run.Answered.IsCompleted).IsFalse();
+    }
+
+    [Test]
     public async Task Retry_UsesTheAttemptsOwnSessionId()
     {
         var launch = Launch("Say READY") with { Attempt = 2, ProviderSessionId = Guid.NewGuid() };
