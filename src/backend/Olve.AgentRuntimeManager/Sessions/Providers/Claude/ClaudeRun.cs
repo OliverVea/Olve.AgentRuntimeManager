@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json.Nodes;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
@@ -36,6 +38,9 @@ internal sealed class ClaudeRun : IAgentRun
     private Task? _guarding;
     private volatile bool _killed;
     private volatile bool _stoppedLingering;
+
+    /// <summary>Why ARM's tools server couldn't serve the agent (M10), once Claude Code said so; the agent is stopped then.</summary>
+    private volatile string? _toolsFailure;
 
     /// <param name="given">
     /// The uuids of the messages in its first input after the first, which is taken up before any
@@ -106,6 +111,13 @@ internal sealed class ClaudeRun : IAgentRun
                     continue;
                 }
 
+                if (ToolsServerFailure(e) is { } failure && _toolsFailure is null)
+                {
+                    // Without its tools the agent can do nothing it was meant to: stopped now, not after a turn.
+                    _toolsFailure = failure;
+                    _agent.Kill();
+                }
+
                 signals = signals.Read(e);
                 if (signals.ModelAnswered)
                 {
@@ -136,6 +148,7 @@ internal sealed class ClaudeRun : IAgentRun
             // An agent stopped only for lingering after a good turn still finished its work.
             exitCode = _stoppedLingering && result is { IsError: false } ? 0 : exitCode;
             return _killed ? new AgentOutcome.Killed()
+                : _toolsFailure is { } toolsFailure ? new AgentOutcome.Failed(toolsFailure)
                 // Claude Code never started (its repositories couldn't be checked out, M5e): why not.
                 : _agent.StartError is { } startError ? new AgentOutcome.Failed(startError)
                 : Outcome(result, exitCode, _agent.StderrTail(StderrTailLength), signals);
@@ -232,6 +245,20 @@ internal sealed class ClaudeRun : IAgentRun
             }
         }
     }
+
+    /// <summary>
+    /// Why the agent has none of ARM's tools (M10), if <paramref name="e"/> is Claude Code's
+    /// <c>system</c>/<c>init</c> and reports their MCP server (<see cref="ToolsLaunch.ServerName"/>)
+    /// as neither <c>connected</c> nor <c>pending</c>: e.g. <c>failed</c>, when <c>olve-arm-tools</c>
+    /// is missing or exits at once. Claude Code goes on without it (its built-ins are off: no tools at
+    /// all), so the run fails instead, as the session's own failure (not the provider's, so not
+    /// retried). Only a session that names tools has that server (<c>--strict-mcp-config</c>).
+    /// </summary>
+    internal static string? ToolsServerFailure(JsonObject e) =>
+        ClaudeStreamJson.McpServerStatus(e, ToolsLaunch.ServerName) is { } status && status is not ("connected" or "pending")
+            ? $"ARM's tools server (olve-arm-tools, MCP server '{ToolsLaunch.ServerName}') did not start: Claude Code reports it as {status}, "
+              + "so the agent would have no tools. Check the server's Tools:Command."
+            : null;
 
     internal static AgentOutcome Outcome(ClaudeResult? result, int exitCode, string stderrTail, ClaudeSignals signals = default) => result switch
     {

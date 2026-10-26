@@ -220,6 +220,30 @@ public class ClaudeProviderTests
     }
 
     [Test]
+    public async Task ToolsServerThatFailedToStart_StopsTheAgent_AndFailsTheRun_NamingIt()
+    {
+        // The stub writes the recorded init (the `arm` server failed), then waits: only ARM ends it.
+        var launch = Launch("stub:tools-failed") with { Tools = ["arm_bash"] };
+
+        var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        // The session's own failure (not the provider's, which would be retried).
+        var failed = await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+        await Assert.That(failed!.Error).StartsWith("ARM's tools server (olve-arm-tools, MCP server 'arm') did not start: Claude Code reports it as failed");
+    }
+
+    [Test]
+    [Arguments("tools-failed.jsonl", "failed")]
+    [Arguments("arm-tools.jsonl", "connected")]
+    [Arguments("success.jsonl", null)]
+    public async Task Init_SaysHowArmsToolsServerStarted_OnlyWhenTheSessionHasIt(string recording, string? status)
+    {
+        var init = ClaudeStreamJson.Parse(File.ReadLines(Path.Combine(Path.GetDirectoryName(Stub)!, recording)).First())!;
+
+        await Assert.That(ClaudeStreamJson.McpServerStatus(init, "arm")).IsEqualTo(status);
+    }
+
+    [Test]
     public async Task ToolsCommand_Unset_IsOlveArmToolsNextToArm() =>
         await Assert.That(new ToolsOptions().Resolved()).IsEqualTo(Path.Combine(AppContext.BaseDirectory, "olve-arm-tools"));
 

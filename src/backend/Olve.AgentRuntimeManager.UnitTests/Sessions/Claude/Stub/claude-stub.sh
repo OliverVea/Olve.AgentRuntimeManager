@@ -39,6 +39,9 @@ esac
 case "$prompt" in
   *stub:crash*) echo "Invalid API key · Please run /login" >&2; exit 3 ;;
   *stub:hang*) exec sleep 3600 ;;
+  # ARM's tools server failed to start (recorded, 2.1.310, a missing command): the init says so, and
+  # Claude Code carries on without it (here: it waits, so only ARM stopping it ends it).
+  *stub:tools-failed*) head -n 1 "$here/tools-failed.jsonl"; exec sleep 3600 ;;
   # Like a tool call: a command of its own (two processes, both named by the marker after `stub:tree`,
   # with output of their own), waited for.
   *stub:tree*)

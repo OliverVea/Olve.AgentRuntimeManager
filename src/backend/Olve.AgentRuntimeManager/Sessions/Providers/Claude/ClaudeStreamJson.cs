@@ -136,6 +136,16 @@ public static class ClaudeStreamJson
     public static bool IsModelMessage(JsonObject e) =>
         Text(e["type"]) == "assistant" && e["message"] is JsonObject message && Text(message["model"]) is { } model && model != "<synthetic>";
 
+    /// <summary>
+    /// The status Claude Code gives MCP server <paramref name="server"/> (<c>connected</c>,
+    /// <c>failed</c>, …) if <paramref name="e"/> is its <c>system</c>/<c>init</c> event and lists
+    /// that server; else null.
+    /// </summary>
+    public static string? McpServerStatus(JsonObject e, string server) =>
+        Text(e["type"]) == "system" && Text(e["subtype"]) == "init" && e["mcp_servers"] is JsonArray servers
+            ? servers.OfType<JsonObject>().Where(s => Text(s["name"]) == server).Select(s => Text(s["status"]) ?? "unknown").FirstOrDefault()
+            : null;
+
     private static int? Number(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
 

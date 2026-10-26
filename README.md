@@ -347,7 +347,7 @@ Sources in priority order (highest wins):
 | `Repos:CheckoutTimeout` | *(eight `Repos:GitTimeout`s per repository, and a minute)* | The longest a session's whole checkout may take; then it's stopped and the session fails |
 | `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
 | `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
-| `Tools:Command` | *(`olve-arm-tools` next to ARM's own executable)* | ARM's tools server (M10), which the agent of a session that names `tools` starts as its only MCP server (as the agents' user); a path, or a name on the agents' `PATH` |
+| `Tools:Command` | *(`olve-arm-tools` next to ARM's own executable)* | ARM's tools server (M10), which the agent of a session that names `tools` starts as its only MCP server (as the agents' user); a path, or a name on the agents' `PATH`. If it doesn't start, such a session fails at once, naming it |
 
 ### Persistence
 

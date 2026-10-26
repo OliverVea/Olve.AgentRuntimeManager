@@ -133,7 +133,7 @@ repositories that would land in one folder are the server's 400.
 turns the provider's built-in tools off. Without `--tool` the agent has the provider's built-ins.
 `arm session get` shows them as given (`tools  arm_bash, arm_file_read`); its conversation and
 activity show them by ARM's name (`⚙ arm_bash → git status`). A name ARM doesn't have is the
-server's 400 `UNKNOWN_TOOL` (exit 1), listing the ones it has.
+server's 400 `UNKNOWN_TOOL` (exit 1), listing the ones it has. If ARM's tools server can't start, the session fails at once with an error that says so.
 
 ## Environment variables
 
