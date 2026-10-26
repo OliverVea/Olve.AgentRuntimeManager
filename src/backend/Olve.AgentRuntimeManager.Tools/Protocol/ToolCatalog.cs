@@ -36,8 +36,8 @@ public static class ToolCatalog
         new(FileEdit, "Replace an exact string in a file."),
         new(FileCreate, "Create a new file; refuses one that exists."),
         new(FileDelete, "Delete a file, or a folder with recursive."),
-        new(FileCopy, "Copy a file or folder; refuses an existing target unless overwrite."),
-        new(FileMove, "Move or rename a file or folder; refuses an existing target unless overwrite."),
+        new(FileCopy, "Copy a file or folder; refuses an existing target (overwrite replaces files only, never folders)."),
+        new(FileMove, "Move or rename a file or folder; refuses an existing target (overwrite replaces files only, never folders)."),
     ];
 
     public static ArmTool? Find(string name) => All.FirstOrDefault(tool => tool.Name == name);
