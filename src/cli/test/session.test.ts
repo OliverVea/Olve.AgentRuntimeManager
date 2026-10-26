@@ -96,6 +96,20 @@ describe("session create", () => {
     expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, env: { A: "1", B: "x=y" }, useEnv: ["GH", "EXTRA"] });
   });
 
+  test("--tool repeats into tools, in order", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(["session", "create", "x", ...required, "--tool", "arm_bash", "--tool", "arm_file_read"], f);
+    expect(r.code).toBe(0);
+    expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, tools: ["arm_bash", "arm_file_read"] });
+  });
+
+  test("an unknown tool is the server's 400, exit 1", async () => {
+    const f = fakeFetch(() => ({ status: 400, body: errorBody("UNKNOWN_TOOL", "No tool 'nope'. ARM's tools: arm_bash.") }));
+    const r = await cli(["session", "create", "x", ...required, "--tool", "nope"], f);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("UNKNOWN_TOOL");
+  });
+
   test("--repo repeats into repos, split at the last #", async () => {
     const f = fakeFetch(() => ({ status: 201, body: created }));
     const r = await cli(
@@ -280,6 +294,15 @@ describe("session get", () => {
     const f = fakeFetch(() => ({ body: { ...session, repos } }));
     const r = await cli(["session", "get", id, "--json"], f);
     expect(JSON.parse(r.stdout).repos).toEqual(repos);
+  });
+
+  test("shows the session's tools on one line; without any (or an empty list) there is no tools line", async () => {
+    const withTools = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: ["arm_bash", "arm_file_read"] } })));
+    expect(withTools.stdout).toContain("tools           arm_bash, arm_file_read");
+    for (const body of [session, { ...session, tools: [] }]) {
+      const r = await cli(["session", "get", id], fakeFetch(() => ({ body })));
+      expect(r.stdout).not.toContain("tools");
+    }
   });
 
   test("a session without repos has no repos line", async () => {

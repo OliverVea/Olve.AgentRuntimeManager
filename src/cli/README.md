@@ -11,7 +11,7 @@ arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
-                   [--repo URL[#REF]]...
+                   [--repo URL[#REF]]... [--tool NAME]...
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
@@ -125,6 +125,15 @@ ref) fails the session with git's error. `arm session get` shows them one per li
 branch arm/1a2b3c4d`; the server names them, also while the session is queued); `--json` has them
 as each repo's `folder` and `branch`. An empty URL or ref (`--repo '#main'`, `--repo url#`) is a usage error; two
 repositories that would land in one folder are the server's 400.
+
+## Tools
+
+`arm tool list` shows ARM's own tools (`arm_bash`, `arm_file_read`, …), each with what it does.
+`arm session create --tool NAME` (repeatable) gives the agent those tools and only those: naming any
+turns the provider's built-in tools off. Without `--tool` the agent has the provider's built-ins.
+`arm session get` shows them as given (`tools  arm_bash, arm_file_read`); its conversation and
+activity show them by ARM's name (`⚙ arm_bash → git status`). A name ARM doesn't have is the
+server's 400 `UNKNOWN_TOOL` (exit 1), listing the ones it has.
 
 ## Environment variables
 

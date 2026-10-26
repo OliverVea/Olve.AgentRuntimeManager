@@ -5,6 +5,7 @@ using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
@@ -12,10 +13,14 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// Runs Claude Code agents: one locked-down <c>claude -p</c> process per session, spoken to in the
 /// CLI's own <c>stream-json</c> protocol (OPEN-QUESTIONS A10). The agent sees nothing of the
 /// machine's Claude Code setup: no user or project settings, plugins, MCP servers, claude.ai
-/// connectors, skills or memory. Only the login is shared. It has Claude Code's built-in tools,
-/// without permission prompts: the VM is the sandbox until ARM's own tools replace them (M5d, M10).
+/// connectors, skills or memory. Only the login is shared. A session that names ARM's tools (M10)
+/// gets only those, served by <c>olve-arm-tools</c> as its one MCP server, with every built-in off;
+/// one that names none has Claude Code's built-in tools. Either way without permission prompts: the
+/// VM is the sandbox.
 /// </summary>
-public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supervisors supervisors, RepoCheckouts repos, ILogger<ClaudeProvider> logger) : IAgentProvider
+public sealed class ClaudeProvider(
+    IOptions<ClaudeProviderOptions> options, Supervisors supervisors, RepoCheckouts repos, ILogger<ClaudeProvider> logger, IOptions<ToolsOptions>? tools = null)
+    : IAgentProvider
 {
     public const string ProviderName = "claude";
 
@@ -49,7 +54,7 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
             ? (["--resume", resume], resume)
             : (new[] { "--session-id", launch.ProviderSessionId.ToString() }, launch.ProviderSessionId.ToString());
         var input = launch.Input.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
-        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env, launch.Repos);
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env, launch.Repos, launch.Tools);
         logger.LogInformation("Session {SessionId}: {Started} Claude Code (attempt {Attempt}, run {RunId}, {Messages} messages)",
             launch.SessionId, launch.Resume is null ? "started" : "resumed", launch.Attempt, launch.RunId, launch.Messages?.Count ?? 0);
         // The first is taken up before any turn can end: the run waits for the others.
@@ -103,14 +108,15 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
                 ? (["--resume", resume], recovery.Messages ?? [])
                 : (new[] { "--session-id", recovery.ProviderSessionId }, (IReadOnlyList<string>)[recovery.Prompt, .. recovery.Messages ?? []]);
             var input = told.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
-            var again = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, session, input, recovery.Env, recovery.Repos);
+            var again = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, session, input, recovery.Env, recovery.Repos, recovery.Tools);
             // As at a start: the first is taken up before any turn can end, the run waits for the others.
             return new RecoveredAgent(new ClaudeRun(again, recovery.ProviderSessionId, settings.ExitGrace, input.Skip(1).Select(m => m.Id)), Resumed: true);
         }
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
-        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env, recovery.Repos);
+        var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env, recovery.Repos,
+            recovery.Tools);
         return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
     }
 
@@ -202,25 +208,34 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
     /// as its first messages (each with its uuid) and the session's <paramref name="env"/> in its environment.
     /// The supervisor checks out <paramref name="sessionRepos"/> in the workplace first (M5e; those
     /// already there are kept); the agent starts in the workplace, as without repositories, each in its own folder there.
+    /// With <paramref name="sessionTools"/> (M10) it gets only those, from ARM's tools server; every
+    /// launch of the session passes them (a start, a retry, a continuation, a resume), so none gets the built-ins back.
     /// </summary>
     private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session,
-        IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env, IReadOnlyList<RepoRecord>? sessionRepos)
+        IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env, IReadOnlyList<RepoRecord>? sessionRepos,
+        IReadOnlyList<string>? sessionTools)
     {
         var settings = options.Value;
         var folder = Directory.CreateDirectory(Folder(settings, sessionId)).FullName;
         // Made by Supervisors.Launch, or with an agent user by the supervisor, as that user (docs/AGENT-USER.md).
         var workDirectory = Workplace(settings, sessionId);
+        // The tools server is the agent's child, so it runs as the agent user too: its journal is in
+        // the session's folder, which that user writes.
+        var mcpConfig = sessionTools is { Count: > 0 }
+            ? McpConfig((tools?.Value ?? new ToolsOptions()).Resolved(), workDirectory, Path.Combine(folder, ToolsLaunch.JournalFileName), sessionTools)
+            : null;
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
-            ResolveCommand(settings.Command), Arguments(session, model), AgentEnvironment(settings, env),
+            ResolveCommand(settings.Command), Arguments(session, model, mcpConfig), AgentEnvironment(settings, env),
             [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))],
             repos.Plan(sessionId, workDirectory, sessionRepos), repos.GitTimeout, repos.CheckoutTimeout);
     }
 
     /// <summary>
     /// How the agent is launched: the lockdown flags, and <paramref name="session"/>
-    /// (<c>--session-id &lt;id&gt;</c> for a new one, <c>--resume &lt;id&gt;</c>).
+    /// (<c>--session-id &lt;id&gt;</c> for a new one, <c>--resume &lt;id&gt;</c>), and with
+    /// <paramref name="mcpConfig"/> (<see cref="McpConfig"/>, M10) ARM's tools instead of the built-ins.
     /// </summary>
-    internal static IReadOnlyList<string> Arguments(string[] session, string model)
+    internal static IReadOnlyList<string> Arguments(string[] session, string model, string? mcpConfig = null)
     {
         List<string> arguments =
         [
@@ -230,12 +245,17 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
             // --session-id: ARM's session id on the first attempt, a new one on a retry (Claude keeps
             // the failed attempt's); --resume: the session it continues.
             .. session,
-            // Claude Code's built-in tools, without asking: the VM is the sandbox until ARM's own
-            // tools replace them (M5d, M10).
+            // Its tools, without asking: the VM is the sandbox.
             "--permission-mode", "bypassPermissions",
             // Nothing of the user's: settings (and with them hooks and plugins), MCP servers, skills.
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
         ];
+        if (mcpConfig is not null)
+        {
+            // ARM's tools (M10): no built-in at all, and their server the only MCP server.
+            arguments.AddRange(["--tools", "", "--mcp-config", mcpConfig]);
+        }
+
         if (!string.IsNullOrWhiteSpace(model))
         {
             arguments.Add("--model");
@@ -243,6 +263,24 @@ public sealed class ClaudeProvider(IOptions<ClaudeProviderOptions> options, Supe
         }
 
         return arguments;
+    }
+
+    /// <summary>
+    /// The MCP configuration that gives the agent ARM's tools (M10), as JSON: one stdio server,
+    /// <see cref="ToolsLaunch.ServerName"/>, that the agent starts as <paramref name="command"/> with
+    /// the session's workplace, its journal and the tools it named (each once, in order).
+    /// </summary>
+    internal static string McpConfig(string command, string workplace, string journal, IReadOnlyList<string> sessionTools)
+    {
+        var arguments = new JsonArray(ToolsLaunch.Workplace, workplace, ToolsLaunch.Journal, journal);
+        foreach (var tool in sessionTools.Distinct(StringComparer.Ordinal))
+        {
+            arguments.Add(ToolsLaunch.Tool);
+            arguments.Add(tool);
+        }
+
+        var server = new JsonObject { ["type"] = "stdio", ["command"] = command, ["args"] = arguments };
+        return new JsonObject { ["mcpServers"] = new JsonObject { [ToolsLaunch.ServerName] = server } }.ToJsonString();
     }
 
     /// <summary>

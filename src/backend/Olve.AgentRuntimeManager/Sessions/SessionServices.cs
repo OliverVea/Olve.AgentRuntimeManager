@@ -22,6 +22,7 @@ public static class SessionServices
             .Validate(o => ModelOptions.AreValid(o.Models), ModelOptions.Invalid(ClaudeProviderOptions.Section)).ValidateOnStart();
         services.Configure<SupervisorOptions>(configuration.GetSection(SupervisorOptions.Section));
         services.Configure<RepoOptions>(configuration.GetSection(RepoOptions.Section));
+        services.Configure<ToolsOptions>(configuration.GetSection(ToolsOptions.Section));
         services.AddSingleton<Supervisors>();
         services.AddSingleton<RepoCheckouts>();
         services.TryAddSingleton(TimeProvider.System);

@@ -12,4 +12,6 @@ public sealed record CreateSessionBody(string Prompt, string Caller = "api-tests
     public IReadOnlyList<string>? UseEnv { get; init; }
 
     public IReadOnlyList<RepoBody>? Repos { get; init; }
+
+    public IReadOnlyList<string>? Tools { get; init; }
 }

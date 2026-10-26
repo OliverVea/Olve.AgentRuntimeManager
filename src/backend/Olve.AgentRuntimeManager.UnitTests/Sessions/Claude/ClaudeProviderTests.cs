@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Repos;
@@ -157,6 +158,70 @@ public class ClaudeProviderTests
         var (_, environment) = await Invocation(launch);
         await Assert.That(environment["CLAUDE_CONFIG_DIR"]).IsEqualTo("/etc/claude-arm");
     }
+
+    [Test]
+    public async Task Tools_TurnTheBuiltInsOff_AndArmsToolsServerIsTheOnlyMcpServer()
+    {
+        var launch = Launch("Say READY") with { Tools = ["arm_bash", "arm_file_read", "arm_bash"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        string[] expected =
+        [
+            "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
+            "--replay-user-messages",
+            "--session-id", launch.SessionId.ToString(),
+            "--permission-mode", "bypassPermissions",
+            "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
+            "--tools", "", "--mcp-config", arguments[Array.IndexOf(arguments, "--mcp-config") + 1],
+            "--model", "sonnet",
+        ];
+        await Assert.That(string.Join('\u0001', arguments)).IsEqualTo(string.Join('\u0001', expected));
+        await Assert.That(McpServers(arguments)).IsEqualTo(ArmServer(launch, ["arm_bash", "arm_file_read"]));
+    }
+
+    [Test]
+    public async Task Tools_OnARetry_AreTheSame()
+    {
+        var launch = Launch("Say READY") with { Attempt = 2, ProviderSessionId = Guid.NewGuid(), Tools = ["arm_file_edit"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--session-id") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
+        await Assert.That(McpServers(arguments)).IsEqualTo(ArmServer(launch, ["arm_file_edit"]));
+    }
+
+    [Test]
+    public async Task Tools_OnAContinuation_AreTheSame()
+    {
+        var launch = Launch("the original prompt") with { Attempt = 2, Resume = "the-claude-session", Messages = ["go on"], Tools = ["arm_bash"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--resume") + 1]).IsEqualTo("the-claude-session");
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
+        await Assert.That(McpServers(arguments)).IsEqualTo(ArmServer(launch, ["arm_bash"]));
+    }
+
+    [Test]
+    public async Task NoTools_OrAnEmptyList_KeepTheBuiltIns()
+    {
+        var empty = Launch("Say READY") with { Tools = [] };
+
+        await Provider().Start(empty).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(empty);
+        await Assert.That(arguments).DoesNotContain("--tools");
+        await Assert.That(arguments).DoesNotContain("--mcp-config");
+    }
+
+    [Test]
+    public async Task ToolsCommand_Unset_IsOlveArmToolsNextToArm() =>
+        await Assert.That(new ToolsOptions().Resolved()).IsEqualTo(Path.Combine(AppContext.BaseDirectory, "olve-arm-tools"));
 
     [Test]
     public async Task NoModel_LeavesTheChoiceToClaude()
@@ -406,8 +471,27 @@ public class ClaudeProviderTests
         var options = new ClaudeProviderOptions { Command = Stub, WorkRoot = _root };
         configure?.Invoke(options);
         var supervisors = Supervisors();
-        return new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance);
+        return new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance,
+            Options.Create(new ToolsOptions { Command = ToolsCommand }));
     }
+
+    /// <summary>The tools server the tests' agents are told to start (the stub never starts it).</summary>
+    internal const string ToolsCommand = "/opt/olve-arm/olve-arm-tools";
+
+    /// <summary>The <c>--mcp-config</c> the agent was started with, as JSON text.</summary>
+    internal static string McpServers(string[] arguments) =>
+        JsonNode.Parse(arguments[Array.IndexOf(arguments, "--mcp-config") + 1])!.ToJsonString();
+
+    /// <summary>The MCP configuration of ARM's tools server for a session in <paramref name="root"/>: its workplace, journal and tools.</summary>
+    internal static string ArmServer(string root, Guid sessionId, string[] tools)
+    {
+        var folder = Path.Combine(root, sessionId.ToString());
+        string[] args = ["--workplace", Path.Combine(folder, "work"), "--journal", Path.Combine(folder, "tools.jsonl"), .. tools.SelectMany(t => new[] { "--tool", t })];
+        var server = new JsonObject { ["type"] = "stdio", ["command"] = ToolsCommand, ["args"] = new JsonArray([.. args.Select(a => (JsonNode)a)]) };
+        return new JsonObject { ["mcpServers"] = new JsonObject { ["arm"] = server } }.ToJsonString();
+    }
+
+    private string ArmServer(AgentLaunch launch, string[] tools) => ArmServer(_root, launch.SessionId, tools);
 
     /// <summary>The real supervisor (built next to the tests), with its sockets under the test's folder.</summary>
     private Supervisors Supervisors() =>

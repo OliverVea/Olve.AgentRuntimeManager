@@ -47,6 +47,8 @@ export function formatSession(s: Session): string {
     ["timeoutSeconds", s.timeoutSeconds],
     ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
+    // None (or an empty list): the provider's built-in tools.
+    ["tools", s.tools?.length ? s.tools.join(", ") : undefined],
     // One line per repo: as given, then the folder and branch ARM gave it.
     ...(s.repos ?? []).map(
       (r, i) =>
@@ -105,6 +107,7 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
     env: keyValues(options, "env"),
     useEnv: repeated(options, "use-env"),
     repos: repos(options, "repo"),
+    tools: repeated(options, "tool"),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
@@ -171,6 +174,13 @@ export const sessionGroup: CommandGroup = {
           description:
             "A git repository ARM checks out for the agent, on a branch of the session's own; #REF starts it from a branch, tag or commit (default: the repository's default branch)",
           valueName: "URL[#REF]",
+          multiple: true,
+        },
+        tool: {
+          type: "string",
+          description:
+            "One of ARM's tools to give the agent (see `arm tool list`); naming any gives it only these, without the provider's built-in tools (default: the built-ins)",
+          valueName: "NAME",
           multiple: true,
         },
       },

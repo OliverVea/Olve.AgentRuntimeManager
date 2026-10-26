@@ -130,6 +130,9 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                     b.Property<int?>("TimeoutSeconds")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Tools")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("UseEnv")
                         .HasColumnType("TEXT");
 

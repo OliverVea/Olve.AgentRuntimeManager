@@ -35,6 +35,12 @@ public sealed record SessionRecord
     public IReadOnlyList<RepoRecord>? Repos { get; init; }
 
     /// <summary>
+    /// ARM's tools its agent gets (M10), as given: naming any turns the provider's built-in tools
+    /// off. Null or empty: the built-ins. Every launch, retry, resume and continuation uses it.
+    /// </summary>
+    public IReadOnlyList<string>? Tools { get; init; }
+
+    /// <summary>
     /// Messages held for its agent (M11), in the order they came: sent while it was queued, or
     /// while its agent could no longer take them. Its next agent gets them when it starts, after
     /// the prompt (or instead of it, when the session continues).

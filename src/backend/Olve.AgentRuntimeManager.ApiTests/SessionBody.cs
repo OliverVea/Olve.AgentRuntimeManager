@@ -23,4 +23,5 @@ public sealed record SessionBody(
     string? KillCaller,
     IReadOnlyDictionary<string, string>? Env = null,
     IReadOnlyList<string>? UseEnv = null,
-    IReadOnlyList<SessionRepoBody>? Repos = null);
+    IReadOnlyList<SessionRepoBody>? Repos = null,
+    IReadOnlyList<string>? Tools = null);

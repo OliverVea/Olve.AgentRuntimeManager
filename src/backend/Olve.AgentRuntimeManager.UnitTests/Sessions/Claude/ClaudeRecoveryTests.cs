@@ -141,6 +141,45 @@ public class ClaudeRecoveryTests
     }
 
     [Test]
+    public async Task SupervisorLost_TheResumedAgent_KeepsArmsTools()
+    {
+        var (before, launch) = await StartAsync("stub:gate", ["arm_bash", "arm_file_read"]);
+        before.Dispose();
+        var info = SupervisorFiles.ReadInfo(Folder(launch))!;
+        TestProcesses.KillSupervisor(info.SupervisorPid);
+        var server = Server();
+        await Until(() => !server.Supervisors.IsListening(launch.SessionId));
+
+        var recovered = server.Provider.Recover(Recovery(launch))!;
+
+        await Assert.That(recovered.Resumed).IsTrue();
+        await Assert.That(await recovered.Run.Completion.WaitAsync(Guard)).IsEqualTo(new AgentOutcome.Completed(0));
+        var (arguments, prompt) = Invocation(launch);
+        await Assert.That(ClaudeProviderTests.Told(prompt)).IsEqualTo(ClaudeProvider.ResumePrompt);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--resume") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
+        await Assert.That(ClaudeProviderTests.McpServers(arguments)).IsEqualTo(ClaudeProviderTests.ArmServer(_root, launch.SessionId, ["arm_bash", "arm_file_read"]));
+    }
+
+    [Test]
+    public async Task SupervisorLost_BeforeTheAgentStarted_TheRunLaunchedAgain_KeepsArmsTools()
+    {
+        // Nothing of the run on disk: its supervisor was lost before the agent started (mid-checkout).
+        var launch = Launch("Say READY") with { Tools = ["arm_file_create"] };
+        var server = Server();
+
+        var recovered = server.Provider.Recover(Recovery(launch))!;
+
+        await Assert.That(recovered.Resumed).IsTrue();
+        await Assert.That(await recovered.Run.Completion.WaitAsync(Guard)).IsEqualTo(new AgentOutcome.Completed(0));
+        var (arguments, prompt) = Invocation(launch);
+        await Assert.That(ClaudeProviderTests.Told(prompt)).IsEqualTo("Say READY");
+        await Assert.That(arguments[Array.IndexOf(arguments, "--session-id") + 1]).IsEqualTo(launch.ProviderSessionId.ToString());
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
+        await Assert.That(ClaudeProviderTests.McpServers(arguments)).IsEqualTo(ClaudeProviderTests.ArmServer(_root, launch.SessionId, ["arm_file_create"]));
+    }
+
+    [Test]
     public async Task SupervisorLost_AfterASuccessfulTurn_Completes_WithoutResuming()
     {
         var (before, launch) = await StartAsync("stub:gate");
@@ -194,14 +233,15 @@ public class ClaudeRecoveryTests
             Options.Create(new SupervisorOptions { SocketRoot = Path.Combine(_root, "sockets") }), _started);
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = _root };
-        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance,
+            Options.Create(new ToolsOptions { Command = ClaudeProviderTests.ToolsCommand })));
     }
 
     /// <summary>Starts an agent on a first server, once its supervisor has it running.</summary>
-    private async Task<(Supervisors Server, AgentLaunch Launch)> StartAsync(string prompt)
+    private async Task<(Supervisors Server, AgentLaunch Launch)> StartAsync(string prompt, IReadOnlyList<string>? tools = null)
     {
         var (supervisors, provider) = Server();
-        var launch = Launch(prompt);
+        var launch = Launch(prompt) with { Tools = tools };
         _ = provider.Start(launch);
         await Until(() => SupervisorFiles.ReadInfo(Folder(launch)) is not null && File.Exists(Path.Combine(Folder(launch), "work", "prompt.jsonl")));
         return (supervisors, launch);
@@ -220,7 +260,8 @@ public class ClaudeRecoveryTests
     {
         if (!_recoveries.TryGetValue(launch.RunId, out var recovery))
         {
-            recovery = new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, launch.ProviderSessionId.ToString(), launch.RunId, Guid.NewGuid());
+            recovery = new AgentRecovery(launch.SessionId, launch.Prompt, launch.Model, launch.ProviderSessionId.ToString(), launch.RunId, Guid.NewGuid(),
+                Tools: launch.Tools);
             _recoveries[launch.RunId] = recovery;
         }
 

@@ -22,6 +22,7 @@ public static class SessionMapping
         // a corrupt row that couldn't be named (StoredRepoNames) has neither and is left out.
         Repos = session.Repos?.Where(r => r.Folder is not null && r.Branch is not null)
             .Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref, Folder = r.Folder, Branch = r.Branch }).ToList(),
+        Tools = session.Tools,
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

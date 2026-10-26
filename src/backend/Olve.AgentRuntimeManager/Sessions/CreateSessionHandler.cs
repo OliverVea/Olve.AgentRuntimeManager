@@ -1,5 +1,6 @@
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 using Olve.AgentRuntimeManager.Variables;
 
 namespace Olve.AgentRuntimeManager.Sessions;
@@ -7,7 +8,8 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// <summary>
 /// <c>POST /api/sessions</c>: the new session's id, 201 when started, 202 when queued. Its agent's
 /// environment is resolved here, from the registered variables and the request's own; its
-/// <c>repos</c> are checked here too (M5e: a blank URL, two in one folder).
+/// <c>repos</c> are checked here too (M5e: a blank URL, two in one folder), and its <c>tools</c>
+/// against ARM's catalog (M10: every one must be known).
 /// </summary>
 public sealed class CreateSessionHandler(SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env) : ISessionsCreateHandler
 {
@@ -30,6 +32,11 @@ public sealed class CreateSessionHandler(SessionManager sessions, IdempotencySto
         if (RepoErrors.Check(body.Repos) is { } repoProblem)
         {
             return new SessionsCreateResponse.BadRequest(repoProblem);
+        }
+
+        if (body.Tools?.Where(name => ToolCatalog.Find(name) is null).Distinct().ToList() is { Count: > 0 } unknownTools)
+        {
+            return new SessionsCreateResponse.BadRequest(SessionErrors.UnknownTool(unknownTools, [.. ToolCatalog.All.Select(t => t.Name)]));
         }
 
         var (agentEnv, problem) = SessionEnv.Resolve(body, env);

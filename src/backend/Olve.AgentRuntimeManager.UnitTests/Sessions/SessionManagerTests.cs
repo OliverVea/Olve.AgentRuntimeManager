@@ -395,6 +395,55 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task Tools_AreStoredAsGiven_AndGoToTheAgent()
+    {
+        var session = Record(_sessions.Create(Request() with { Tools = ["arm_bash", "arm_file_read"] }));
+
+        await Assert.That(_database.Store().Get(session.Id)!.Tools).IsEquivalentTo(["arm_bash", "arm_file_read"]);
+        await Assert.That(_database.Store().Get(session.Id)!.ToDto(2).Tools).IsEquivalentTo(["arm_bash", "arm_file_read"]);
+        await Assert.That(_provider.RunOf(session.Id).Launch.Tools).IsEquivalentTo(["arm_bash", "arm_file_read"]);
+    }
+
+    [Test]
+    public async Task NoTools_AreUnset_AndAnEmptyListStaysEmpty()
+    {
+        var none = Record(_sessions.Create(Request()));
+        var empty = Record(_sessions.Create(Request() with { Tools = [] }));
+
+        await Assert.That(_database.Store().Get(none.Id)!.ToDto(2).Tools).IsNull();
+        await Assert.That(_database.Store().Get(empty.Id)!.ToDto(2).Tools).IsEquivalentTo(Array.Empty<string>());
+    }
+
+    [Test]
+    public async Task Tools_GoToEveryLaunch_ARetry_AContinuation_AndARecovery()
+    {
+        var session = Record(_sessions.Create(Request() with { Tools = ["arm_bash"] }));
+
+        // The provider refuses the first attempt: the retry gets them.
+        _provider.RunOf(session.Id).End(new AgentOutcome.Unavailable(ProviderTrouble.Unreachable, "down"));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Queued);
+        _time.Advance(TimeSpan.FromMinutes(10));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working && s.Attempts == 2);
+        var retry = _provider.Runs.Last(r => r.Launch.SessionId == session.Id);
+
+        // It ends, and a message continues it.
+        retry.End(new AgentOutcome.Completed(0));
+        await Eventually(session.Id, s => s.Status == SessionStatus.Completed);
+        _sessions.Send(session.Id, "go on", "tests");
+        await Eventually(session.Id, s => s.Status == SessionStatus.Working && s.Attempts == 3);
+        var continued = _provider.Runs.Last(r => r.Launch.SessionId == session.Id);
+
+        // ARM restarts while it works.
+        var provider = Restart((p, r) => p.Reattach(r, resumed: true));
+
+        await Assert.That(retry.Launch.Attempt).IsEqualTo(2);
+        await Assert.That(retry.Launch.Tools).IsEquivalentTo(["arm_bash"]);
+        await Assert.That(continued.Launch.Resume).IsNotNull();
+        await Assert.That(continued.Launch.Tools).IsEquivalentTo(["arm_bash"]);
+        await Assert.That(provider.Recoveries.Single(r => r.SessionId == session.Id).Tools).IsEquivalentTo(["arm_bash"]);
+    }
+
+    [Test]
     public async Task Delete_RemovesTheSessionsWorktrees_ThroughItsProvider()
     {
         var withRepos = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
@@ -126,7 +127,7 @@ public static class ClaudeConversation
                 case "tool_use":
                     yield return new ConversationEntryRecord(
                         ConversationEntryKind.ToolCall,
-                        Tool: ClaudeStreamJson.Text(block["name"]),
+                        Tool: ToolName(ClaudeStreamJson.Text(block["name"])),
                         Input: block["input"] is { } input ? JsonSerializer.SerializeToElement(input) : null,
                         ToolId: ClaudeStreamJson.Text(block["id"]),
                         ParentToolId: parent,
@@ -141,6 +142,17 @@ public static class ClaudeConversation
             }
         }
     }
+
+    /// <summary>
+    /// A tool's name as ARM calls it: Claude Code names ARM's tools after their MCP server
+    /// (<c>mcp__arm__arm_bash</c>), which is stripped (<c>arm_bash</c>, M10); any other is kept.
+    /// </summary>
+    public static string? ToolName(string? name) =>
+        name is not null && name.StartsWith(ArmToolPrefix, StringComparison.Ordinal) && name.Length > ArmToolPrefix.Length
+            ? name[ArmToolPrefix.Length..]
+            : name;
+
+    private const string ArmToolPrefix = $"mcp__{ToolsLaunch.ServerName}__";
 
     private static IEnumerable<JsonObject> Blocks(JsonNode? content) =>
         content is JsonArray array ? array.OfType<JsonObject>() : [];
@@ -162,7 +174,7 @@ public static class ClaudeConversation
 
         if (type == "tool_reference" && ClaudeStreamJson.Text(block["tool_name"]) is { } tool)
         {
-            return $"Loaded tool: {tool}";
+            return $"Loaded tool: {ToolName(tool)}";
         }
 
         if (type != "image")
