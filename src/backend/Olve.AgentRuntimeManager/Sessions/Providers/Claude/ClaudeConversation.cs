@@ -12,7 +12,8 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// user messages (echoed back with <c>--replay-user-messages</c>, marked <c>isReplay</c>), Claude
 /// Code's own messages to the agent (notices: top-level user text it wasn't sent, e.g. that a
 /// background command finished) and tool results from <c>user</c> events, the agent's text, thinking and tool calls from <c>assistant</c> events, and each turn's
-/// end from <c>result</c> events. Everything else (<c>system</c>, rate limits, …) is left out.
+/// end from <c>result</c> events. Everything else (<c>system</c>, rate limits, the heartbeats of a
+/// long tool call, …) is left out. ARM's tools show by ARM's name (<c>arm_bash</c>, not <c>mcp__arm__arm_bash</c>; M10).
 /// </summary>
 public static class ClaudeConversation
 {

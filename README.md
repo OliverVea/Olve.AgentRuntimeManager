@@ -79,8 +79,9 @@ keeps a FIFO queue in front of `Sessions:TotalSlots` slots, moves sessions throu
 Agents run through the `IAgentProvider` seam. `fake` runs no LLM and follows `fake:` directives in
 the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`, `fake:down=unreachable:1`; see
 `FakeScript`). `claude` runs Claude Code (`Providers/Claude/`): one `claude -p` process per session,
-spoken to in its `stream-json` protocol, with Claude Code's built-in tools and no permission
-prompts (the VM is the sandbox until ARM's own tools, M10), but locked down otherwise (none of the machine's
+spoken to in its `stream-json` protocol, with no permission prompts (the VM is the sandbox) and
+either Claude Code's built-in tools or, for a session that names `tools` (M10), only ARM's tools
+from `olve-arm-tools` as its one MCP server, but locked down otherwise (none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
 variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers its
 prompt and each message after it with a turn, and ends once its last turn is over; its
