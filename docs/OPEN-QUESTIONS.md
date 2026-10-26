@@ -56,9 +56,10 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   environment passed to agents.
 
 ### A6. Where agents run
-- **Leaning (2026-08-14):** `IAgentExecutor` seam (spawn / kill / list / re-attach);
-  V0 = `LocalProcessExecutor`. Later: k8s Job executor. **Open:** remote SSH executor
-  (run agents on registered machines) — V0 or fast-follow?
+- **Leaning (2026-10-26):** agents run on ARM's machine, through the supervisor (M5a); no
+  executor seam was built. Other machines come as remote targets (M18, post-MVP): Claude Code
+  stays on ARM's machine and ARM's own tools (M10) act on the target over SSH, instead of a
+  remote SSH executor running agents there. A k8s Job executor stays a later option.
 
 ### A7. HA / approval-await under multiple replicas
 - **Leaning (2026-08-14):** V0 is single-node; build the waiter and event bus behind the notify

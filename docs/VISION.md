@@ -5,8 +5,6 @@ re-evaluated and scoped when it's picked up.
 
 ## Where agents run
 
-- **Remote SSH executor**: run agents in a folder on a registered machine ARM holds a key for
-  (host registry, `--target`/`--cwd` per session). ARM as a dispatcher across your machines.
 - **OS sandbox for local agents**: cgroups + bubblewrap/nsjail for filesystem and resource
   isolation without a container runtime.
 - **A network and Docker of its own per session** (spiked on beta 2026-10-12; scripts in the
@@ -27,7 +25,7 @@ re-evaluated and scoped when it's picked up.
     data goes on its own virtual disk (NVMe first; the host's HDD if space runs out, later
     perhaps an NVMe cache in front of it with LVM), and a shared registry mirror saves the pulls.
   - The VM needs sizing for it (about 200 MiB per idle session before the agent; builds take the
-    CPU). One VM holds every session; more machines come with the executors above.
+    CPU). One VM holds every session; more machines come with remote targets (MILESTONES M18).
   - Devcontainers fit on top as something an agent uses per repo (`devcontainer up` in its own
     Docker), not as what a session runs in: a session has zero or several repos.
 - **A user per session**: sessions above still share one agent user, so an agent can reach
