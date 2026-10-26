@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Olve.AgentRuntimeManager.Tools.Server;
 
 /// <summary>
@@ -14,35 +12,22 @@ namespace Olve.AgentRuntimeManager.Tools.Server;
 /// as seen (2026-10-26: a server alive over a 90 s call and the call after it); a test host's
 /// thread-pool thread may not, so tests keep a server's life short.
 /// </remarks>
-internal static partial class ParentDeath
+internal static class ParentDeath
 {
-    private const int SetDeathSignal = 1; // PR_SET_PDEATHSIG
     private const int SigTerm = 15;
 
     /// <summary>
-    /// Asks for the signal. False if the parent is gone already: it may have died before the ask,
-    /// which then never fires (the server has a new parent, a reaper, by then). Null if it can't be
-    /// asked (not Linux, or prctl refused): the server then ends with its input or a signal only.
+    /// Asks for the signal. False if the parent isn't <paramref name="parent"/> (the one the server
+    /// had when it started) any more: it died before the ask, which then never fires. Null if it
+    /// can't be asked (not Linux, or prctl refused): the server then ends with its input or a signal only.
     /// </summary>
-    public static bool? Watch()
+    public static bool? Watch(int parent)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() || Native.Prctl(Native.SetDeathSignal, SigTerm, 0, 0, 0) != 0)
         {
             return null;
         }
 
-        var parent = GetParent();
-        if (Prctl(SetDeathSignal, SigTerm, 0, 0, 0) != 0)
-        {
-            return null;
-        }
-
-        return parent > 1 && GetParent() == parent;
+        return Native.GetParent() == parent;
     }
-
-    [LibraryImport("libc", EntryPoint = "prctl", SetLastError = true)]
-    private static partial int Prctl(int option, nuint argument2, nuint argument3, nuint argument4, nuint argument5);
-
-    [LibraryImport("libc", EntryPoint = "getppid")]
-    private static partial int GetParent();
 }

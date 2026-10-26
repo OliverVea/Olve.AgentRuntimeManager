@@ -98,6 +98,27 @@ public class FileReadToolTests
     }
 
     [Test]
+    public async Task Run_AFifo_IsRefused_WithoutBlocking()
+    {
+        _folder.MakeFifo("fifo");
+
+        var result = Run("""{ "file_path": "fifo" }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("isn't a regular file (a FIFO)");
+    }
+
+    [Test]
+    public async Task Run_AHugeLimit_DoesNotOverflow()
+    {
+        _folder.Write("a.txt", "one\ntwo\n");
+
+        var result = Run($$"""{ "file_path": "a.txt", "offset": 2, "limit": {{long.MaxValue}} }""");
+
+        await Assert.That(result.Text).IsEqualTo("     2\ttwo");
+    }
+
+    [Test]
     public async Task Run_AMissingFile_IsAnError()
     {
         var result = Run("""{ "file_path": "nope.txt" }""");

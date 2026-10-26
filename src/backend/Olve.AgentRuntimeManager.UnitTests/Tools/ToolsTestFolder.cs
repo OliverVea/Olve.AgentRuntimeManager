@@ -29,6 +29,15 @@ public sealed class ToolsTestFolder : IDisposable
         return path;
     }
 
+    /// <summary>A FIFO (mkfifo): opening one to read blocks until someone writes.</summary>
+    public string MakeFifo(string relative)
+    {
+        var path = PathOf(relative);
+        using var process = System.Diagnostics.Process.Start("mkfifo", [path]);
+        process.WaitForExit();
+        return path;
+    }
+
     internal static ToolArguments Arguments(string json) => new(JsonNode.Parse(json) as JsonObject);
 
     /// <summary>A name for a test's processes to carry (<c>exec -a</c>), to see they're gone (<see cref="TestProcesses.WithCommandLine"/>).</summary>

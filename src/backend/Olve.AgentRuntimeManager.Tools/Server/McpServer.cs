@@ -30,6 +30,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
     private const int InvalidRequest = -32600;
     private const int MethodNotFound = -32601;
     private const int InvalidParams = -32602;
+    private const int InternalError = -32603;
 
     private static readonly byte[] NewLine = "\n"u8.ToArray();
 
@@ -40,7 +41,10 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancels = new();
     private readonly ConcurrentDictionary<Task, bool> _calls = new();
     private readonly CancellationTokenSource _stopping = new();
-    private int _stopped;
+
+    /// <summary>Held while a call is started or the stop begins: no call starts once the stop has.</summary>
+    private readonly Lock _gate = new();
+    private bool _stopped;
 
     /// <summary>Reads and answers messages until the input ends (or the server stops).</summary>
     public async Task ReadAsync()
@@ -50,7 +54,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
         {
             if (!string.IsNullOrWhiteSpace(line))
             {
-                await HandleAsync(line);
+                await HandleSafelyAsync(line);
             }
         }
     }
@@ -61,16 +65,85 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
     /// </summary>
     public async Task StopAsync(string reason)
     {
-        if (Interlocked.Exchange(ref _stopped, 1) == 1)
+        Task[] calls;
+        lock (_gate)
         {
-            return;
+            if (_stopped)
+            {
+                return;
+            }
+
+            _stopped = true;
+            calls = [.. _calls.Keys];
         }
 
-        await log.WriteLineAsync($"olve-arm-tools: stopping ({reason}), {_calls.Count} call(s) running.");
+        await log.WriteLineAsync($"olve-arm-tools: stopping ({reason}), {calls.Length} call(s) running.");
         await _stopping.CancelAsync();
-        await Task.WhenAny(Task.WhenAll(_calls.Keys), Task.Delay(StopWait));
-        // Whatever didn't go in time.
+        await Task.WhenAny(Task.WhenAll(calls), Task.Delay(StopWait));
+        // Whatever didn't go in time, and anything left below the server.
         groups.KillAll(Posix.SigKill);
+        await groups.StopOrphansAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    /// <summary>
+    /// One message, whatever it holds: a line the server can't make sense of (a duplicate key, a
+    /// lone surrogate, a field of the wrong kind) is answered as an invalid request if it has an
+    /// id to answer, logged otherwise, and the server reads on. No line ends it.
+    /// </summary>
+    private async Task HandleSafelyAsync(string line)
+    {
+        try
+        {
+            await HandleAsync(line);
+        }
+        catch (Exception exception)
+        {
+            await log.WriteLineAsync($"olve-arm-tools: an unreadable message ({exception.GetType().Name}: {exception.Message}).");
+            // A request is answered, with its id if that can be read (null otherwise, as JSON-RPC has it).
+            if (IdOf(line) is (true, var id))
+            {
+                await SendErrorAsync(id, InvalidRequest, $"Unreadable message: {exception.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a message the server couldn't handle has an id (it's a request), and the id if it can
+    /// be read (a number, or a string that is valid text).
+    /// </summary>
+    private static (bool IsRequest, JsonNode? Id) IdOf(string line)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(line);
+        }
+        catch (JsonException)
+        {
+            return (false, null);
+        }
+
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("id", out var id))
+            {
+                return (false, null);
+            }
+
+            try
+            {
+                return (true, id.ValueKind switch
+                {
+                    JsonValueKind.Number => JsonNode.Parse(id.GetRawText()),
+                    JsonValueKind.String => JsonValue.Create(id.GetString()),
+                    _ => null,
+                });
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or ArgumentException)
+            {
+                return (true, null);
+            }
+        }
     }
 
     private async Task HandleAsync(string line)
@@ -170,7 +243,8 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
 
         var name = nameValue.GetValue<string>();
         var arguments = parameters["arguments"] as JsonObject;
-        var toolUseId = parameters["_meta"]?["claudecode/toolUseId"] is JsonValue useId && useId.GetValueKind() == JsonValueKind.String
+        // A `_meta` that isn't an object holds no id: the call runs without one.
+        var toolUseId = parameters["_meta"] is JsonObject meta && meta["claudecode/toolUseId"] is JsonValue useId && useId.GetValueKind() == JsonValueKind.String
             ? useId.GetValue<string>()
             : null;
         var key = Key(id);
@@ -182,7 +256,27 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
             return;
         }
 
-        var call = Task.Run(async () =>
+        lock (_gate)
+        {
+            if (!_stopped)
+            {
+                var call = Run();
+                _calls[call] = true;
+                _ = call.ContinueWith(done => _calls.TryRemove(done, out _), TaskScheduler.Default);
+                return;
+            }
+        }
+
+        // Stopping: nothing new starts (its process would outlive the stop).
+        _cancels.TryRemove(key, out _);
+        cancel.Dispose();
+        await SendResultAsync(id, new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "The tools server is stopping: the call wasn't run." }),
+            ["isError"] = true,
+        });
+
+        Task Run() => Task.Run(async () =>
         {
             try
             {
@@ -218,8 +312,6 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                 cancel.Dispose();
             }
         });
-        _calls[call] = true;
-        _ = call.ContinueWith(done => _calls.TryRemove(done, out _), TaskScheduler.Default);
     }
 
     private void Cancel(JsonObject? parameters)
@@ -253,7 +345,30 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
 
     private async Task SendAsync(JsonObject message)
     {
-        var bytes = Encoding.UTF8.GetBytes(message.ToJsonString(Wire));
+        byte[] bytes;
+        try
+        {
+            bytes = Encoding.UTF8.GetBytes(message.ToJsonString(Wire));
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Text JSON can't hold (a lone surrogate, echoed from the request): answer that instead.
+            await log.WriteLineAsync($"olve-arm-tools: could not encode an answer: {exception.Message}");
+            try
+            {
+                bytes = Encoding.UTF8.GetBytes(new JsonObject
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = message["id"]?.DeepClone(),
+                    ["error"] = new JsonObject { ["code"] = InternalError, ["message"] = "The answer held text JSON can't encode." },
+                }.ToJsonString(Wire));
+            }
+            catch (Exception again) when (again is ArgumentException or InvalidOperationException)
+            {
+                return;
+            }
+        }
+
         await _writing.WaitAsync();
         try
         {

@@ -101,6 +101,46 @@ public class FileEditToolTests
     }
 
     [Test]
+    public async Task Run_ReplacesTheFileWhole_KeepingItsMode()
+    {
+        var path = _folder.Write("script.sh", "echo old");
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var before = new FileInfo(path);
+
+        Run("""{ "file_path": "script.sh", "old_string": "old", "new_string": "new" }""");
+
+        await Assert.That(await File.ReadAllTextAsync(path)).IsEqualTo("echo new");
+        await Assert.That(File.GetUnixFileMode(path)).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        // Nothing of the temporary file is left next to it.
+        await Assert.That(Directory.GetFileSystemEntries(_folder.Workplace)).IsEquivalentTo((string[])[before.FullName]);
+    }
+
+    [Test]
+    public async Task Run_ThroughALink_EditsWhatItPointsTo_AndKeepsTheLink()
+    {
+        var target = _folder.Write("real.txt", "a");
+        var link = _folder.PathOf("link.txt");
+        File.CreateSymbolicLink(link, target);
+
+        var result = Run("""{ "file_path": "link.txt", "old_string": "a", "new_string": "b" }""");
+
+        await Assert.That(result.IsError).IsFalse();
+        await Assert.That(new FileInfo(link).LinkTarget).IsEqualTo(target);
+        await Assert.That(await File.ReadAllTextAsync(target)).IsEqualTo("b");
+    }
+
+    [Test]
+    public async Task Run_AFifo_IsRefused_WithoutBlocking()
+    {
+        _folder.MakeFifo("fifo");
+
+        var result = Run("""{ "file_path": "fifo", "old_string": "a", "new_string": "b" }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("isn't a regular file");
+    }
+
+    [Test]
     public async Task Run_AMissingFile_IsAnError()
     {
         var result = Run("""{ "file_path": "nope.txt", "old_string": "a", "new_string": "b" }""");

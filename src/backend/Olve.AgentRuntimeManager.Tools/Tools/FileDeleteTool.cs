@@ -19,7 +19,8 @@ internal static class FileDeleteTool
             return failure;
         }
 
-        var path = ToolPaths.Resolve(context.Workplace, filePath);
+        // `link/` is the link itself, as `link` is: deleted, never what it points to.
+        var path = Path.TrimEndingDirectorySeparator(ToolPaths.Resolve(context.Workplace, filePath));
         if (!ToolPaths.Exists(path))
         {
             return ToolResult.Error($"{path} doesn't exist.");

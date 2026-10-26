@@ -132,6 +132,93 @@ public class FileTransferTests
     }
 
     [Test]
+    public async Task Move_ALinkToAFolder_OntoAFile_ReplacesTheFileWithTheLink()
+    {
+        var kept = _folder.Write("target/keep.txt", "x");
+        Directory.CreateSymbolicLink(_folder.PathOf("dirlink"), _folder.PathOf("target"));
+        _folder.Write("dest.txt", "old");
+
+        var result = Move("""{ "file_path": "dirlink", "destination_path": "dest.txt", "overwrite": true }""");
+
+        await Assert.That(result.IsError).IsFalse();
+        await Assert.That(new FileInfo(_folder.PathOf("dest.txt")).LinkTarget).IsEqualTo(_folder.PathOf("target"));
+        await Assert.That(ToolPaths.Exists(_folder.PathOf("dirlink"))).IsFalse();
+        await Assert.That(File.Exists(kept)).IsTrue();
+    }
+
+    [Test]
+    public async Task Move_ALinkToAFolder_MovesTheLink()
+    {
+        _folder.Write("target/keep.txt", "x");
+        Directory.CreateSymbolicLink(_folder.PathOf("dirlink"), _folder.PathOf("target"));
+
+        var result = Move("""{ "file_path": "dirlink", "destination_path": "moved" }""");
+
+        await Assert.That(result.IsError).IsFalse();
+        await Assert.That(new FileInfo(_folder.PathOf("moved")).LinkTarget).IsEqualTo(_folder.PathOf("target"));
+        await Assert.That(File.Exists(_folder.PathOf("target/keep.txt"))).IsTrue();
+    }
+
+    [Test]
+    public async Task Move_ThatFails_LeavesTheDestinationItReplaced()
+    {
+        Skip.When(Supervisor.Protocol.Posix.GetEUid() == 0, "root may rename out of a read-only folder");
+
+        _folder.Write("locked/src/a.txt", "a");
+        var old = _folder.Write("dest/old.txt", "old");
+        var locked = _folder.PathOf("locked");
+        File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            // Through the dispatcher, the IOException is the call's error result.
+            await Assert.That(() => Move("""{ "file_path": "locked/src", "destination_path": "dest", "overwrite": true }""")).Throws<IOException>();
+
+            await Assert.That(await File.ReadAllTextAsync(old)).IsEqualTo("old");
+            await Assert.That(Directory.GetFileSystemEntries(_folder.Workplace).Select(Path.GetFileName)).IsEquivalentTo((string?[])["locked", "dest"]);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Test]
+    public async Task Copy_IntoItselfThroughALink_IsRefused()
+    {
+        _folder.Write("src/a.txt", "a");
+        Directory.CreateSymbolicLink(_folder.PathOf("srclink"), _folder.PathOf("src"));
+
+        var result = Copy("""{ "file_path": "src", "destination_path": "srclink/inner" }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("into itself");
+        await Assert.That(Directory.Exists(_folder.PathOf("src/inner"))).IsFalse();
+    }
+
+    [Test]
+    public async Task Move_OverwritingWhatHoldsTheSourceThroughALink_IsRefused()
+    {
+        _folder.Write("dst/a.txt", "a");
+        Directory.CreateSymbolicLink(_folder.PathOf("dlink"), _folder.PathOf("dst"));
+
+        var result = Move("""{ "file_path": "dlink/a.txt", "destination_path": "dst", "overwrite": true }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(File.Exists(_folder.PathOf("dst/a.txt"))).IsTrue();
+    }
+
+    [Test]
+    public async Task Copy_AFifo_IsRefused()
+    {
+        _folder.MakeFifo("fifo");
+
+        var result = Copy("""{ "file_path": "fifo", "destination_path": "copy" }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("a FIFO");
+    }
+
+    [Test]
     public async Task Move_OverwritingAFolderThatHoldsTheSource_IsRefused()
     {
         _folder.Write("dst/a.txt", "a");

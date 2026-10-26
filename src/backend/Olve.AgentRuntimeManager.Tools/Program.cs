@@ -16,6 +16,10 @@ if (OperatingSystem.IsWindows())
     return 2;
 }
 
+// The agent that started it, before anything else: if it's gone by the time the death signal is
+// asked for, the parent is another process by then.
+var parent = Native.GetParent();
+
 if (ToolsOptions.Parse(args, out var error) is not { } options)
 {
     await Console.Error.WriteLineAsync($"olve-arm-tools: {error}");
@@ -25,7 +29,7 @@ if (ToolsOptions.Parse(args, out var error) is not { } options)
 CallJournal journal;
 try
 {
-    journal = new CallJournal(options.Journal);
+    journal = new CallJournal(options.Journal, Console.Error);
 }
 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 {
@@ -35,7 +39,15 @@ catch (Exception exception) when (exception is IOException or UnauthorizedAccess
 
 using (journal)
 {
-    var groups = new ProcessGroups();
+    // A subreaper inherits what a call's processes leave behind outside its group (setsid, a
+    // daemon), so it can stop them too; without it (not Linux, or refused) they escape.
+    var subreaper = OperatingSystem.IsLinux() && Native.Prctl(Native.SetChildSubreaper, 1, 0, 0, 0) == 0;
+    if (!subreaper)
+    {
+        await Console.Error.WriteLineAsync("olve-arm-tools: can't be a subreaper: what a call starts outside its group may outlive it.");
+    }
+
+    var groups = new ProcessGroups(sweepOrphans: subreaper);
     var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups), options.Tools, journal);
     var server = new McpServer(options, dispatcher, groups, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
 
@@ -43,7 +55,7 @@ using (journal)
     using var terminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);
     using var interrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, Stop);
     using var hangup = PosixSignalRegistration.Create(PosixSignal.SIGHUP, Stop);
-    if (ParentDeath.Watch() is false)
+    if (ParentDeath.Watch(parent) is false)
     {
         stop.TrySetResult("the agent that started it is gone");
     }

@@ -41,14 +41,9 @@ internal static class FileReadTool
         }
 
         var path = ToolPaths.Resolve(context.Workplace, filePath);
-        if (Directory.Exists(path))
+        if (ToolPaths.NotAFile(path) is { } notAFile)
         {
-            return ToolResult.Error($"{path} is a folder, not a file: list it with arm_bash (ls).");
-        }
-
-        if (!File.Exists(path))
-        {
-            return ToolResult.Error($"{path} doesn't exist.");
+            return ToolResult.Error(notAFile);
         }
 
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -71,7 +66,8 @@ internal static class FileReadTool
                 continue;
             }
 
-            if (number >= offset + limit)
+            // Not `offset + limit`: a huge limit would overflow.
+            if (number - offset >= limit)
             {
                 stop = $"[More lines follow line {last}: read on with offset {last + 1}.]";
                 break;

@@ -25,9 +25,23 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
             return ToolResult.Error($"There's no tool '{name}' in this session. Its tools: {served}.");
         }
 
-        if (toolUseId is not null && journal.Begin(toolUseId, name) is { } recorded)
+        // Nothing starts once the server stops: what it started would outlive the stop.
+        if (stopping.IsCancellationRequested)
         {
-            return recorded;
+            return null;
+        }
+
+        try
+        {
+            if (toolUseId is not null && journal.Begin(toolUseId, name) is { } recorded)
+            {
+                return recorded;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+            // Not written down, so not run: it couldn't be kept from running twice.
+            return ToolResult.Error($"{name} wasn't run: the journal can't be written ({exception.Message}).");
         }
 
         using var either = CancellationTokenSource.CreateLinkedTokenSource(cancelled, stopping);

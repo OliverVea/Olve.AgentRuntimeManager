@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools.Calls;
 
 namespace Olve.AgentRuntimeManager.Tools.Tools;
@@ -33,14 +34,14 @@ internal static class FileEditTool
         }
 
         var path = ToolPaths.Resolve(context.Workplace, filePath);
-        if (Directory.Exists(path))
-        {
-            return ToolResult.Error($"{path} is a folder, not a file.");
-        }
-
-        if (!File.Exists(path))
+        if (!ToolPaths.Exists(path))
         {
             return ToolResult.Error($"{path} doesn't exist: make a new file with arm_file_create.");
+        }
+
+        if (ToolPaths.NotAFile(path) is { } notAFile)
+        {
+            return ToolResult.Error(notAFile);
         }
 
         var bytes = File.ReadAllBytes(path);
@@ -76,10 +77,37 @@ internal static class FileEditTool
 
         var edited = replaceAll ? text.Replace(oldString, newString, StringComparison.Ordinal) : ReplaceFirst(text, oldString, newString);
         var encoded = Encoding.UTF8.GetBytes(edited);
-        File.WriteAllBytes(path, bom ? [.. preamble, .. encoded] : encoded);
+        Replace(path, bom ? [.. preamble, .. encoded] : encoded);
         return ToolResult.Ok(count == 1
             ? $"Edited {path}: replaced 1 occurrence."
             : string.Create(CultureInfo.InvariantCulture, $"Edited {path}: replaced all {count} occurrences."));
+    }
+
+    /// <summary>
+    /// Writes the file's new content whole or not at all: to a new file next to it, with its mode,
+    /// renamed over it. Through a link, the file it points to is replaced, the link kept.
+    /// </summary>
+    private static void Replace(string path, byte[] content)
+    {
+        var target = Posix.RealPath(path);
+        var temporary = Path.Combine(Path.GetDirectoryName(target)!, $".{Path.GetFileName(target)}.arm-edit-{Guid.NewGuid():N}");
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(content);
+            }
+
+            File.SetUnixFileMode(temporary, File.GetUnixFileMode(target));
+            if (Native.Rename(temporary, target) is not 0 and var error)
+            {
+                throw new IOException($"Could not replace {target} (errno {error}).");
+            }
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
     }
 
     private static int Count(string text, string value)

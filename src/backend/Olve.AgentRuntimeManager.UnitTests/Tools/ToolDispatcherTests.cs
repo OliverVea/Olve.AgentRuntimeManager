@@ -114,6 +114,78 @@ public class ToolDispatcherTests
     }
 
     [Test]
+    public async Task Call_OnceTheServerStops_IsNotRun()
+    {
+        using var stopping = new CancellationTokenSource();
+        await stopping.CancelAsync();
+
+        var result = await Dispatcher().CallAsync(ToolCatalog.Bash, JsonNode.Parse(Append) as JsonObject, "toolu_1", CancellationToken.None, stopping.Token);
+
+        await Assert.That(result).IsNull();
+        await Assert.That(Runs()).IsEqualTo(0);
+        await Assert.That(File.ReadAllText(JournalPath)).DoesNotContain("toolu_1");
+    }
+
+    [Test]
+    public async Task Call_ThatCantBeJournaled_IsNotRun()
+    {
+        var dispatcher = Dispatcher();
+        _journals[^1].Dispose();
+
+        var result = await Call(dispatcher, ToolCatalog.Bash, Append, "toolu_1");
+
+        await Assert.That(result!.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("the journal can't be written");
+        await Assert.That(Runs()).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Journal_AResultThatCantBeWritten_IsStillReturned()
+    {
+        var journal = new CallJournal(JournalPath);
+        _journals.Add(journal);
+        await Assert.That(journal.Begin("toolu_1", ToolCatalog.Bash)).IsNull();
+        journal.Dispose();
+
+        journal.Finish("toolu_1", ToolCatalog.Bash, ToolResult.Ok("done"));
+
+        // Not thrown; and the id now reads as interrupted, not running.
+        await Assert.That(journal.Begin("toolu_1", ToolCatalog.Bash)!.Text).Contains("was interrupted");
+    }
+
+    [Test]
+    public async Task Journal_ALineWithoutAnId_IsSkipped()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(JournalPath)!);
+        await File.WriteAllTextAsync(JournalPath, """{"event":"finished"}""" + "\n" + """{"id":"toolu_1","tool":"arm_bash"}""" + "\n");
+
+        var result = await Call(Dispatcher(), ToolCatalog.Bash, Append, "toolu_1");
+
+        await Assert.That(result!.IsError).IsFalse();
+        await Assert.That(Runs()).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Journal_TwoServersOnOneFile_KeepEachOthersLines()
+    {
+        var first = Dispatcher();
+        var second = Dispatcher();
+
+        await Call(first, ToolCatalog.Bash, Append, "toolu_1");
+        await Call(second, ToolCatalog.Bash, Append, "toolu_2");
+        await Call(first, ToolCatalog.Bash, Append, "toolu_3");
+
+        var fresh = Dispatcher();
+        foreach (var id in (string[])["toolu_1", "toolu_2", "toolu_3"])
+        {
+            await Assert.That((await Call(fresh, ToolCatalog.Bash, Append, id))!.Text).Contains("done");
+        }
+
+        await Assert.That(Runs()).IsEqualTo(3);
+        await Assert.That(File.ReadAllLines(JournalPath).Length).IsEqualTo(6);
+    }
+
+    [Test]
     public async Task Call_AFailingFileTool_IsAResult()
     {
         var result = await Call(Dispatcher(), ToolCatalog.FileCreate, """{ "file_path": "/proc/arm-cannot-create-here/x", "content": "" }""", null);

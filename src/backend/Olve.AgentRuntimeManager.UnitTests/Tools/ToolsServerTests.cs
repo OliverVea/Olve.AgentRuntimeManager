@@ -196,6 +196,55 @@ public class ToolsServerTests
     }
 
     [Test]
+    public async Task Server_MalformedMessages_AreAnsweredOrSkipped_AndItReadsOn()
+    {
+        var process = Start(ToolCatalog.Bash);
+        await Initialize(process);
+
+        // A `_meta` that isn't an object: the call runs, without a tool-use id.
+        await Send(process, """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"arm_bash","arguments":{"command":"echo meta"},"_meta":[]}}""");
+        await Send(process, """{"jsonrpc":"2.0","id":10,"id":10,"method":"ping"}""");
+        await Send(process, """{"jsonrpc":"2.0","id":6,"method":"\ud800"}""");
+        await Send(process, """{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":"\ud800"}}""");
+        await Send(process, """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"arm_bash","arguments":{"command":"echo x"},"_meta":{"claudecode/toolUseId":"\ud800"}}}""");
+        await Send(process, """{"jsonrpc":"2.0","method":"\ud800"}""");
+        await Send(process, """{"jsonrpc":"2.0","id":"\ud800","method":"\ud800"}""");
+        await Send(process, """{"jsonrpc":"2.0","id":9,"method":"ping"}""");
+
+        var answers = new Dictionary<string, JsonObject>();
+        while (answers.Count < 7)
+        {
+            var answer = await Receive(process);
+            answers[answer["id"]?.ToJsonString() ?? "null"] = answer;
+        }
+
+        await Assert.That(answers["5"]["result"]!["content"]![0]!["text"]!.GetValue<string>()).IsEqualTo("meta\n\nExit code: 0");
+        foreach (var id in (string[])["10", "6", "7", "8"])
+        {
+            await Assert.That(answers[id]["error"]!["code"]!.GetValue<int>()).IsEqualTo(-32600);
+        }
+
+        // An id that isn't valid text can't be echoed: answered without one.
+        await Assert.That(answers["null"]["error"]!["code"]!.GetValue<int>()).IsEqualTo(-32600);
+        await Assert.That(answers["9"]["result"]).IsNotNull();
+        await Assert.That(process.HasExited).IsFalse();
+    }
+
+    [Test]
+    public async Task Server_AProcessThatLeftItsGroup_IsStoppedWithTheCall()
+    {
+        var process = Start(ToolCatalog.Bash);
+        await Initialize(process);
+        var marker = ToolsTestFolder.Marker();
+
+        await Send(process, CallMessage(1, ToolCatalog.Bash, $$"""{"command":"setsid bash -c 'exec -a {{marker}} sleep 300' >/dev/null 2>&1 & sleep 0.5; echo started"}"""));
+        var call = await Receive(process);
+
+        await Assert.That(call["result"]!["content"]![0]!["text"]!.GetValue<string>()).IsEqualTo("started\n\nExit code: 0");
+        await Assert.That(await ToolsTestFolder.Gone(marker)).IsTrue();
+    }
+
+    [Test]
     public async Task Server_ABadLaunch_ExitsWithAnError()
     {
         using var process = Process.Start(new ProcessStartInfo(Server, ["--tool", "arm_nope"]) { RedirectStandardError = true, UseShellExecute = false })!;

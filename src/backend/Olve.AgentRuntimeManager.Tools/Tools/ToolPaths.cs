@@ -26,6 +26,19 @@ internal static class ToolPaths
         }
     }
 
+    /// <summary>
+    /// Why <paramref name="path"/> (links followed) can't be read as a file; null if it's a regular
+    /// file. A FIFO, device or socket is refused: reading one can block for ever, or take what's
+    /// meant for another (<c>/dev/stdin</c> is the server's MCP input).
+    /// </summary>
+    public static string? NotAFile(string path) => Native.Kind(path) switch
+    {
+        null => ToolPaths.IsLink(path) ? $"{path} is a link to nothing." : $"{path} doesn't exist.",
+        FileKind.Regular => null,
+        FileKind.Directory => $"{path} is a folder, not a file: list it with arm_bash (ls).",
+        var kind => $"{path} isn't a regular file ({kind switch { FileKind.Fifo => "a FIFO", FileKind.Socket => "a socket", FileKind.Device => "a device", _ => "a special file" }}): not opened.",
+    };
+
     /// <summary>A folder itself, not a link to one.</summary>
     public static bool IsRealDirectory(string path) => Directory.Exists(path) && !IsLink(path);
 

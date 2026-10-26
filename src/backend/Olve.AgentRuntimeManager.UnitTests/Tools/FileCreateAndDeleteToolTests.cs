@@ -98,6 +98,19 @@ public class FileCreateAndDeleteToolTests
     }
 
     [Test]
+    public async Task Delete_ALinkWithATrailingSlash_DeletesTheLinkOnly()
+    {
+        var target = _folder.Write("target/keep.txt", "x");
+        Directory.CreateSymbolicLink(_folder.PathOf("link"), _folder.PathOf("target"));
+
+        var result = Delete("""{ "file_path": "link/", "recursive": true }""");
+
+        await Assert.That(result.IsError).IsFalse();
+        await Assert.That(ToolPaths.Exists(_folder.PathOf("link"))).IsFalse();
+        await Assert.That(File.Exists(target)).IsTrue();
+    }
+
+    [Test]
     public async Task Delete_SomethingMissing_IsAnError()
     {
         var result = Delete("""{ "file_path": "nope" }""");

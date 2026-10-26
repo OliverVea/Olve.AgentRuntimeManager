@@ -11,8 +11,10 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 /// runs in a session of its own (so its group can be stopped whole), with stdin from /dev/null
 /// and stdout and stderr captured together (never the server's own stdio, which is the MCP
 /// channel), capped (<see cref="CappedOutput"/>). Whatever is left of the group when the command
-/// ends, on its timeout or when the call is cancelled is stopped: nothing a call starts outlives
-/// it. Background jobs that should are for later, as a tool of their own or an argument.
+/// ends, on its timeout or when the call is cancelled is stopped, and so is what left the group
+/// (setsid, a daemon), which the server inherits as a subreaper (<see cref="ProcessGroups"/>):
+/// nothing a call starts outlives it, but for a server killed with SIGKILL. Background jobs that
+/// should are for later, as a tool of their own or an argument.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
 internal static class BashTool
@@ -68,7 +70,7 @@ internal static class BashTool
         Process process;
         try
         {
-            process = Process.Start(info) ?? throw new InvalidOperationException("setsid did not start.");
+            process = context.Groups.Start(info);
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -78,7 +80,6 @@ internal static class BashTool
         using (process)
         {
             var group = process.Id;
-            context.Groups.Add(group);
             try
             {
                 process.StandardInput.Close();
@@ -95,16 +96,16 @@ internal static class BashTool
                 catch (OperationCanceledException)
                 {
                     stopped = true;
-                    await ProcessGroups.StopAsync(group);
+                    await context.Groups.StopAsync(group);
                     await process.WaitForExitAsync(CancellationToken.None);
                 }
 
                 // Output still held open by something the command left running (`sleep 100 &`)
                 // would never end: give it a moment, then stop what's left.
                 await Task.WhenAny(readers, Task.Delay(Drain, CancellationToken.None));
-                if (ProcessGroups.IsAlive(group))
+                if (context.Groups.IsAlive(group))
                 {
-                    await ProcessGroups.StopAsync(group);
+                    await context.Groups.StopAsync(group);
                     await Task.WhenAny(readers, Task.Delay(Drain, CancellationToken.None));
                 }
 
@@ -123,6 +124,8 @@ internal static class BashTool
             finally
             {
                 context.Groups.Remove(group);
+                // What left the group (setsid, a daemon) and so outlived the stop above.
+                await context.Groups.StopOrphansAsync();
             }
         }
     }
