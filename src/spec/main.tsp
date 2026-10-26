@@ -7,6 +7,7 @@ import "./sessions.tsp";
 import "./conversation.tsp";
 import "./activity.tsp";
 import "./providers.tsp";
+import "./tools.tsp";
 import "./env.tsp";
 import "./events.tsp";
 

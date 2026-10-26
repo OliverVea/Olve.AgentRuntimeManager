@@ -88,6 +88,13 @@ model CreateSession {
    * the same folder are a 400. A checkout that fails (no access, unknown ref) fails the session.
    */
   repos?: CreateSessionRepo[];
+
+  /**
+   * ARM's tools to give the agent, by name (`GET /api/tools`); an unknown one is a 400
+   * `UNKNOWN_TOOL`. Naming any gives the agent only these (its provider's built-in tools are
+   * off). Unset or empty: the provider's built-in tools, as before.
+   */
+  tools?: string[];
 }
 
 /** A session: what it was created with (defaults resolved) and its lifecycle. */
@@ -114,6 +121,9 @@ model Session {
 
   /** The git repositories it was created with, as given. */
   repos?: SessionRepo[];
+
+  /** ARM's tools it was created with, as given. */
+  tools?: string[];
 
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;
