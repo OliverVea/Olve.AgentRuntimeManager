@@ -89,9 +89,15 @@ OIDC optional); actor derived from the token. Permission model: see MILESTONES M
   provider-shaped (session ids, update types, permission options) goes into `src/spec/`, so a
   provider can move between direct and ACP without an API change.
 - **How a provider is wired:** lifecycle and the event stream over the provider's transport;
-  ARM's tools served to the agent over MCP (HTTP); the agent's user-level config switched off.
+  ARM's tools served to the agent over MCP; the agent's user-level config switched off.
   Its built-in tools were meant to be off too; since 2026-09-27 (M5d) they're on, with the VM as
   the sandbox, so ARM's agents can do real work now, until ARM's own tools (M10) replace them.
+- **Where ARM's tools run (revised 2026-10-26, M10):** not in the ARM server over HTTP (the
+  2026-09-26 leaning) but in `olve-arm-tools`, an internal executable the agent starts as a
+  stdio MCP server per session. A call in flight (a long build) then survives an ARM restart
+  along with the agent (M5a), and M18 runs the same binary on a remote target. The cost: ARM no
+  longer sees each call first-hand, so M8's policy checks need a call from the tools server back
+  to ARM (or the provider's own permission requests, as in the CLI spike below).
   Per-provider differences (how to lock down, whether steering and MCP
   exist) live in a small capability profile, not in separate runners.
 - **Why Claude goes direct:** the CLI (`claude -p --input-format stream-json --output-format

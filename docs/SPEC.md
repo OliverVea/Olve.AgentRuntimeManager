@@ -71,12 +71,12 @@ a repeated key within 24 hours returns the original response.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tools T1,T2] [--skills S1,S2]` | `POST /api/sessions` | Create; returns its id (201 started, 202 queued) |
+| `arm session create -p "prompt" [--provider X] [--model X] [--effort X] [--caller X] [--tag k:v] [--timeout-seconds N] [--headless] [--messaging\|--no-messaging] [--env K=V] [--secret-env K=V] [--policy X] [--tool T] [--skills S1,S2]` | `POST /api/sessions` | Create; returns its id (201 started, 202 queued) |
 | `arm session list [--status X,Y] [--caller X] [--tag k:v] [--after DATE] [--before DATE] [--limit N] [--offset N]` | `POST /api/sessions/search` | Search |
 | `arm session get <id>` | `GET /api/sessions/:id` | Get |
 | `arm session kill <id> [--reason "..."]` | `POST /api/sessions/:id/kill` | Kill a queued/working/waiting session |
 | `arm session delete <id>` | `DELETE /api/sessions/:id` | Delete (terminal sessions only) |
-| `arm session revive <id> [-p "follow-up"] [--tools …] [--skills …]` | `POST /api/sessions/:id/revive` | New session continuing this one |
+| `arm session revive <id> [-p "follow-up"] [--tool …] [--skills …]` | `POST /api/sessions/:id/revive` | New session continuing this one |
 | `arm session logs <id> [-f] [--since T] [--until T]` | `GET /api/sessions/:id/logs` | Log (streams with `-f`) |
 | `arm session conversation <id> [--format json\|text]` | `GET /api/sessions/:id/conversation` | Structured conversation |
 | `arm session message <id> "text"` | `POST /api/sessions/:id/messages` | Message the agent |
@@ -96,7 +96,7 @@ a repeated key within 24 hours returns the original response.
   "secretEnv": {},
   "timeoutSeconds": 600,
   "approvalPolicy": "standard",
-  "tools": ["arm-approved-bash", "arm-file-ops", "arm-skills", "arm-messaging"],
+  "tools": ["arm_bash", "arm_file_read", "arm_file_edit", "arm_skill_load", "arm_message_user"],
   "skills": ["brazil", "git-workflows"],
   "messaging": true,
   "headless": false
@@ -117,7 +117,7 @@ refused the agent before it did anything; retried up to `Sessions:ProviderRetrie
 `completed`, `killed`, `failed`.
 
 - **`secretEnv`** is write-only: never returned or logged, and only passed to commands run through
-  `approved_bash`. It is stored encrypted (so restart and revive keep working) and deleted once
+  `arm_bash`. It is stored encrypted (so restart and revive keep working) and deleted once
   nothing can use it anymore.
 - **Messaging** is on by default; with `messaging: false` the messages endpoint returns 403.
 - **Headless** sessions auto-deny anything the policy doesn't `allow` (for CI/scripting).
@@ -148,18 +148,20 @@ it can't parse needs approval.
 
 ### Agent tools
 
-Enabled per session via `tools`; none are on by default (no tools = reasoning only).
+Enabled per session by name via `tools`. A session that names any gets only ARM's tools (the
+provider's built-ins are off); one that names none keeps the provider's built-ins, for now
+(M10). Served by `olve-arm-tools`, a stdio MCP server per session.
 
-| Module | Tools |
+| Area | Tools |
 |---|---|
-| `arm-approved-bash` | `approved_bash` |
-| `arm-file-ops` | `approved_file_read`, `approved_file_edit`, `approved_file_create`, `approved_file_delete` |
-| `arm-skills` | `skill_list`, `skill_load` |
-| `arm-messaging` | `message_user`, `check_user_replies` |
+| Shell | `arm_bash` |
+| Files | `arm_file_read`, `arm_file_edit`, `arm_file_create`, `arm_file_delete`, `arm_file_copy`, `arm_file_move` |
+| Skills | `arm_skill_list`, `arm_skill_load` (M10b) |
+| Messaging | `arm_message_user`, `arm_check_user_replies` |
 
 ```json
-// approved_bash call
-{ "command": "git push origin main", "purpose": "Deploy fix", "working_dir": "/path/to/repo" }
+// arm_bash call
+{ "command": "git push origin main", "purpose": "Deploy fix", "workingDir": "/path/to/repo" }
 // blocked
 { "error": "BLOCKED", "reason": "rm commands are not allowed in this policy" }
 // denied by a human (or timed out)
@@ -213,9 +215,9 @@ policy allow reads broadly while restricting writes.
 | `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove |
 
 A skill is a directory with a `SKILL.md` (YAML frontmatter: name, description, triggers). When a
-session enables `arm-skills`, the agent sees the list of its skills and loads full content on
-demand with `skill_load`. Built-in tools (`arm-*`) are always available; custom tools are external
-MCP servers a session can enable.
+session enables `arm_skill_list`/`arm_skill_load`, the agent sees the list of its skills and
+loads full content on demand with `arm_skill_load`. ARM's own tools (`arm_*`) are always listed;
+custom tools are external MCP servers a session can enable (M10b).
 
 ---
 
@@ -348,7 +350,7 @@ a trailing `.*` matches a namespace, e.g. `session.approval.*`),
 - **Slack:** subscribe to `session.approval.*`, `session.text` and lifecycle events; render approvals
   as buttons; post decisions.
 - **Web UI:** dashboard over SSE with an approval queue across sessions.
-- **CI/scripting:** `arm session create --headless --tools arm-approved-bash --policy permissive`.
+- **CI/scripting:** `arm session create --headless --tool arm_bash --policy permissive`.
 - **Custom:** any HTTP client can call the API and consume SSE.
 
 Tools use MCP, reserved for general-purpose operations (shell, files, messaging); domain-specific
