@@ -96,12 +96,12 @@ internal static class ToolDefinitions
             """),
         [ToolCatalog.FileCopy] = (
             """
-            A file, or a folder with everything in it. `destination_path` is the copy's own path, not a folder to put it in. An existing destination is refused unless `overwrite`, which replaces it whole (a folder isn't merged). Links are copied as links.
+            A file, or a folder with everything in it. `destination_path` is the copy's own path, not a folder to put it in. A file that exists there is refused unless `overwrite`, which replaces it (with a file only). A folder that exists there is always refused: delete it first (arm_file_delete with `recursive`). Links are copied as links.
             """,
             TransferSchema("copy")),
         [ToolCatalog.FileMove] = (
             """
-            A file, or a folder with everything in it. `destination_path` is the new path itself, not a folder to put it in. An existing destination is refused unless `overwrite`, which replaces it whole (a folder isn't merged).
+            A file, or a folder with everything in it. `destination_path` is the new path itself, not a folder to put it in. A file that exists there is refused unless `overwrite`, which replaces it (with a file only). A folder that exists there is always refused: delete it first (arm_file_delete with `recursive`). A link moves as a link.
             """,
             TransferSchema("move")),
     };
@@ -130,7 +130,7 @@ internal static class ToolDefinitions
           "properties": {
             "file_path": { "type": "string", "description": "What to {{verb}}, a file or a folder: relative to the workplace, or an absolute path." },
             "destination_path": { "type": "string", "description": "Its new path (not a folder to put it in): relative to the workplace, or an absolute path." },
-            "overwrite": { "type": "boolean", "description": "Replace a destination that exists. False by default." }
+            "overwrite": { "type": "boolean", "description": "Replace a file that exists at the destination (never a folder). False by default." }
           },
           "required": ["file_path", "destination_path"]
         }

@@ -49,6 +49,15 @@ public class BashToolTests
     }
 
     [Test]
+    public async Task Run_ForgetsItsLeaderOnceItEnds()
+    {
+        await Run("""{ "command": "true" }""");
+        await Run("""{ "command": "sleep 300", "timeout_seconds": 1 }""");
+
+        await Assert.That(_folder.Groups.Leaders).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task Run_StdinIsEmpty()
     {
         var watch = Stopwatch.StartNew();

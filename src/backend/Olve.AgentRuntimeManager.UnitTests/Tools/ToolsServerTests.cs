@@ -245,6 +245,42 @@ public class ToolsServerTests
     }
 
     [Test]
+    public async Task Server_AProcessThatLeftItsGroupWhileCallsOverlap_LivesUntilTheLastEnds_AndNothingIsLeftUnreaped()
+    {
+        var process = Start(ToolCatalog.Bash);
+        await Initialize(process);
+        var marker = ToolsTestFolder.Marker();
+
+        await Send(process, CallMessage(1, ToolCatalog.Bash, """{"command":"sleep 3; echo slow"}"""));
+        await Send(process, CallMessage(2, ToolCatalog.Bash, $$"""{"command":"setsid bash -c 'exec -a {{marker}} sleep 300' >/dev/null 2>&1 & sleep 0.5; echo fast"}"""));
+        var fast = await Receive(process);
+        var stillThere = Support.TestProcesses.WithCommandLine(marker).Count;
+        var slow = await Receive(process);
+
+        await Assert.That(fast["id"]!.GetValue<int>()).IsEqualTo(2);
+        await Assert.That(stillThere).IsEqualTo(1);
+        await Assert.That(slow["id"]!.GetValue<int>()).IsEqualTo(1);
+        await Assert.That(await ToolsTestFolder.Gone(marker)).IsTrue();
+        // What it inherited and stopped, it reaped too.
+        await Assert.That(Unreaped(process.Id)).IsEqualTo(0);
+    }
+
+    /// <summary>The ended children of <paramref name="parent"/> no one has reaped.</summary>
+    private static int Unreaped(int parent)
+    {
+        var found = 0;
+        foreach (var entry in Directory.GetDirectories("/proc"))
+        {
+            if (int.TryParse(Path.GetFileName(entry), out var pid) && Posix.Status(pid) is { IsProcess: true, IsRunning: false } status && status.Parent == parent)
+            {
+                found++;
+            }
+        }
+
+        return found;
+    }
+
+    [Test]
     public async Task Server_ABadLaunch_ExitsWithAnError()
     {
         using var process = Process.Start(new ProcessStartInfo(Server, ["--tool", "arm_nope"]) { RedirectStandardError = true, UseShellExecute = false })!;

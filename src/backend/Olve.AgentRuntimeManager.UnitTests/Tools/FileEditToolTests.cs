@@ -101,18 +101,40 @@ public class FileEditToolTests
     }
 
     [Test]
-    public async Task Run_ReplacesTheFileWhole_KeepingItsMode()
+    public async Task Run_WritesInPlace_KeepingHardLinksAndMode()
     {
         var path = _folder.Write("script.sh", "echo old");
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var before = new FileInfo(path);
+        var other = _folder.PathOf("hardlink.sh");
+        using (var link = System.Diagnostics.Process.Start("ln", [path, other]))
+        {
+            await link.WaitForExitAsync();
+        }
 
         Run("""{ "file_path": "script.sh", "old_string": "old", "new_string": "new" }""");
 
-        await Assert.That(await File.ReadAllTextAsync(path)).IsEqualTo("echo new");
+        await Assert.That(await File.ReadAllTextAsync(other)).IsEqualTo("echo new");
         await Assert.That(File.GetUnixFileMode(path)).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        // Nothing of the temporary file is left next to it.
-        await Assert.That(Directory.GetFileSystemEntries(_folder.Workplace)).IsEquivalentTo((string[])[before.FullName]);
+    }
+
+    [Test]
+    public async Task Run_InAReadOnlyFolder_Works()
+    {
+        Skip.When(Supervisor.Protocol.Posix.GetEUid() == 0, "root writes anywhere");
+        var path = _folder.Write("ro/a.txt", "old");
+        var folder = _folder.PathOf("ro");
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var result = Run("""{ "file_path": "ro/a.txt", "old_string": "old", "new_string": "new" }""");
+
+            await Assert.That(result.IsError).IsFalse();
+            await Assert.That(await File.ReadAllTextAsync(path)).IsEqualTo("new");
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     [Test]
