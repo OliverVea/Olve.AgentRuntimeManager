@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj" />
+    <!-- ARM's tools (M10): its internals, and the olve-arm-tools apphost next to the tests. -->
+    <ProjectReference Include="../Olve.AgentRuntimeManager.Tools/Olve.AgentRuntimeManager.Tools.csproj" />
   </ItemGroup>
 
 </Project>
