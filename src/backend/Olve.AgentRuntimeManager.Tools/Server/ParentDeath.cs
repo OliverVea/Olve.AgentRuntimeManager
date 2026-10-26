@@ -10,7 +10,9 @@ namespace Olve.AgentRuntimeManager.Tools.Server;
 /// </summary>
 /// <remarks>
 /// The kernel sends it when the thread that started the server ends, not only the process: fine
-/// for an agent that spawns from its main thread (Claude Code does).
+/// for an agent whose spawning thread lives as long as it does. Claude Code 2.1.310's does as far
+/// as seen (2026-10-26: a server alive over a 90 s call and the call after it); a test host's
+/// thread-pool thread may not, so tests keep a server's life short.
 /// </remarks>
 internal static partial class ParentDeath
 {

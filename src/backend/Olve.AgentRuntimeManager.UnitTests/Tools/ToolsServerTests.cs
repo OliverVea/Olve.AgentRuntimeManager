@@ -170,6 +170,8 @@ public class ToolsServerTests
 
         if (how == "SIGTERM")
         {
+            // Only while it's still this host's running child (TestProcesses' rule: a pid alone proves nothing).
+            await Assert.That(Posix.Status(process.Id) is { IsProcess: true, IsRunning: true } status && status.Parent == Environment.ProcessId).IsTrue();
             Posix.Kill(process.Id, Posix.SigTerm);
         }
         else

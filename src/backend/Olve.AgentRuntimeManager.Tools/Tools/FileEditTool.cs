@@ -8,12 +8,14 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 /// <summary>
 /// <c>arm_file_edit</c>: replaces <c>old_string</c> with <c>new_string</c>, matched exactly (case,
 /// whitespace and line endings as they are). It must be in the file once, unless
-/// <c>replace_all</c>, so an edit never lands somewhere the agent didn't mean. A UTF-8 byte order
-/// mark is kept as it was.
+/// <c>replace_all</c>, so an edit never lands somewhere the agent didn't mean. UTF-8 only (a file
+/// that isn't is refused, not rewritten), a byte order mark kept as it was.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
 internal static class FileEditTool
 {
+    private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     public static ToolResult Run(ToolArguments arguments, ToolContext context)
     {
         var filePath = arguments.RequiredString("file_path");
@@ -49,7 +51,16 @@ internal static class FileEditTool
 
         var preamble = Encoding.UTF8.Preamble;
         var bom = bytes.AsSpan().StartsWith(preamble);
-        var text = Encoding.UTF8.GetString(bom ? bytes[preamble.Length..] : bytes);
+        string text;
+        try
+        {
+            text = Strict.GetString(bom ? bytes[preamble.Length..] : bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Decoded leniently and written back, every byte that isn't UTF-8 would be replaced, far from the edit too.
+            return ToolResult.Error($"{path} isn't UTF-8 text: not edited. Change it with arm_bash.");
+        }
 
         var count = Count(text, oldString);
         if (count == 0)

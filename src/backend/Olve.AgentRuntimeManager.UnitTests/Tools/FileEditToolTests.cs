@@ -87,6 +87,20 @@ public class FileEditToolTests
     }
 
     [Test]
+    public async Task Run_AFileThatIsNotUtf8_IsRefused_AndLeftAsItWas()
+    {
+        var path = _folder.PathOf("latin1.txt");
+        byte[] bytes = [0x63, 0xE9, 0x0A]; // "cé\n" in Latin-1
+        await File.WriteAllBytesAsync(path, bytes);
+
+        var result = Run("""{ "file_path": "latin1.txt", "old_string": "c", "new_string": "d" }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("isn't UTF-8");
+        await Assert.That(await File.ReadAllBytesAsync(path)).IsEquivalentTo(bytes);
+    }
+
+    [Test]
     public async Task Run_AMissingFile_IsAnError()
     {
         var result = Run("""{ "file_path": "nope.txt", "old_string": "a", "new_string": "b" }""");
