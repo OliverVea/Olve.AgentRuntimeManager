@@ -186,6 +186,50 @@ public class ToolDispatcherTests
     }
 
     [Test]
+    [Arguments("{ \"file_path\": \"a\\u0000b\" }")]
+    [Arguments("{ \"file_path\": \"\\ud800\" }")]
+    public async Task Call_ThatThrowsAnything_IsAnErrorResult_JournaledAsFinished(string arguments)
+    {
+        var result = await Call(Dispatcher(), ToolCatalog.FileRead, arguments, "toolu_1");
+        var again = await Call(Dispatcher(), ToolCatalog.FileRead, arguments, "toolu_1");
+
+        await Assert.That(result!.IsError).IsTrue();
+        await Assert.That(result.Text).StartsWith("arm_file_read failed:");
+        // Finished with that error, not left running nor interrupted.
+        await Assert.That(again).IsEqualTo(result);
+    }
+
+    [Test]
+    public async Task Journal_AfterAWriteThatFailedPartway_StartsOnAFreshLine()
+    {
+        var fail = true;
+        Directory.CreateDirectory(Path.GetDirectoryName(JournalPath)!);
+        var journal = new CallJournal(JournalPath, write: (file, bytes) =>
+        {
+            if (fail)
+            {
+                // Half the line reaches the file, then the disk fails.
+                Olve.AgentRuntimeManager.Tools.Native.WriteAll(file, bytes[..(bytes.Length / 2)]);
+                throw new IOException("disk full");
+            }
+
+            Olve.AgentRuntimeManager.Tools.Native.WriteAll(file, bytes);
+        });
+        _journals.Add(journal);
+
+        await Assert.That(() => journal.Begin("toolu_1", ToolCatalog.Bash)).Throws<IOException>();
+        fail = false;
+        await Assert.That(journal.Begin("toolu_2", ToolCatalog.Bash)).IsNull();
+        journal.Finish("toolu_2", ToolCatalog.Bash, ToolResult.Ok("done"));
+
+        var replayed = await Call(Dispatcher(), ToolCatalog.Bash, Append, "toolu_2");
+        await Assert.That(replayed).IsEqualTo(ToolResult.Ok("done"));
+        // toolu_1 was never written down whole: it isn't known, so it runs.
+        await Assert.That((await Call(Dispatcher(), ToolCatalog.Bash, Append, "toolu_1"))!.Text).Contains("done");
+        await Assert.That(Runs()).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task Call_AFailingFileTool_IsAResult()
     {
         var result = await Call(Dispatcher(), ToolCatalog.FileCreate, """{ "file_path": "/proc/arm-cannot-create-here/x", "content": "" }""", null);

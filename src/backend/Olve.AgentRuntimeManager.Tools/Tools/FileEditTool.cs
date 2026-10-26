@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
-using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools.Calls;
 
 namespace Olve.AgentRuntimeManager.Tools.Tools;
@@ -77,37 +76,12 @@ internal static class FileEditTool
 
         var edited = replaceAll ? text.Replace(oldString, newString, StringComparison.Ordinal) : ReplaceFirst(text, oldString, newString);
         var encoded = Encoding.UTF8.GetBytes(edited);
-        Replace(path, bom ? [.. preamble, .. encoded] : encoded);
+        // In place (truncate and write, as editors do): the file keeps its hard links, owner, mode,
+        // ACLs and xattrs, and a read-only folder doesn't stop it.
+        File.WriteAllBytes(path, bom ? [.. preamble, .. encoded] : encoded);
         return ToolResult.Ok(count == 1
             ? $"Edited {path}: replaced 1 occurrence."
             : string.Create(CultureInfo.InvariantCulture, $"Edited {path}: replaced all {count} occurrences."));
-    }
-
-    /// <summary>
-    /// Writes the file's new content whole or not at all: to a new file next to it, with its mode,
-    /// renamed over it. Through a link, the file it points to is replaced, the link kept.
-    /// </summary>
-    private static void Replace(string path, byte[] content)
-    {
-        var target = Posix.RealPath(path);
-        var temporary = Path.Combine(Path.GetDirectoryName(target)!, $".{Path.GetFileName(target)}.arm-edit-{Guid.NewGuid():N}");
-        try
-        {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(content);
-            }
-
-            File.SetUnixFileMode(temporary, File.GetUnixFileMode(target));
-            if (Native.Rename(temporary, target) is not 0 and var error)
-            {
-                throw new IOException($"Could not replace {target} (errno {error}).");
-            }
-        }
-        finally
-        {
-            File.Delete(temporary);
-        }
     }
 
     private static int Count(string text, string value)

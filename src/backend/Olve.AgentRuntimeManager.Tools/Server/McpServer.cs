@@ -82,7 +82,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
         await Task.WhenAny(Task.WhenAll(calls), Task.Delay(StopWait));
         // Whatever didn't go in time, and anything left below the server.
         groups.KillAll(Posix.SigKill);
-        await groups.StopOrphansAsync(TimeSpan.FromMilliseconds(500));
+        await groups.StopOrphansAsync(TimeSpan.FromMilliseconds(500), stopping: true);
     }
 
     /// <summary>

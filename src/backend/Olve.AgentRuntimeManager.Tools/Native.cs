@@ -97,6 +97,26 @@ internal static partial class Native
     private static partial int Statx(int directoryFd, string path, int flags, uint mask, ref byte buffer);
 
     /// <summary>
+    /// The device and inode of the file <paramref name="path"/> names, links followed (statx:
+    /// <c>stx_ino</c> at 32, <c>stx_dev_major</c>/<c>minor</c> at 136/140); null if nothing is there.
+    /// Two paths with one identity are the same file (a link and its target, two hard links).
+    /// </summary>
+    public static (ulong Device, ulong Inode)? Identity(string path)
+    {
+        const int currentDirectory = -100; // AT_FDCWD
+        const uint inode = 0x100; // STATX_INO
+        Span<byte> buffer = stackalloc byte[256];
+        buffer.Clear();
+        if (Statx(currentDirectory, path, 0, inode, ref MemoryMarshal.GetReference(buffer)) != 0)
+        {
+            return null;
+        }
+
+        var device = ((ulong)BinaryPrimitives.ReadUInt32LittleEndian(buffer[136..]) << 32) | BinaryPrimitives.ReadUInt32LittleEndian(buffer[140..]);
+        return (device, BinaryPrimitives.ReadUInt64LittleEndian(buffer[32..]));
+    }
+
+    /// <summary>
     /// What <paramref name="path"/> is, links followed (statx: <c>stx_mode</c> at 28, one layout on
     /// every architecture); null if nothing is there.
     /// </summary>

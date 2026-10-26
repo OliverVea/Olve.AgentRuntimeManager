@@ -38,7 +38,7 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
                 return recorded;
             }
         }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        catch (Exception exception)
         {
             // Not written down, so not run: it couldn't be kept from running twice.
             return ToolResult.Error($"{name} wasn't run: the journal can't be written ({exception.Message}).");
@@ -50,8 +50,10 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         {
             result = await RunAsync(name, new ToolArguments(arguments), either.Token);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception)
         {
+            // Anything (a NUL in a path, a lone surrogate in an argument, a bug): the call ends as
+            // an error the agent reads, and is journaled so, never left running.
             result = ToolResult.Error($"{name} failed: {exception.Message}");
         }
 

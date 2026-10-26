@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools.Calls;
 
@@ -6,15 +7,21 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 
 /// <summary>
 /// <c>arm_file_copy</c> and <c>arm_file_move</c>: a file or a folder (all it holds) to
-/// <c>destination_path</c>, which is the new path itself, not a folder to put it in. An existing
-/// target is refused unless <c>overwrite</c>, which replaces it whole (a folder too, not merged),
-/// and only once the new one is in place: the old one is moved aside first and put back if the
-/// copy or move fails. Links are copied and moved as links, never followed; FIFOs, devices and
-/// sockets aren't copied.
+/// <c>destination_path</c>, which is the new path itself, not a folder to put it in. Links are
+/// copied and moved as links, never followed; FIFOs, devices and sockets aren't copied.
 /// </summary>
+/// <remarks>
+/// <c>overwrite</c> replaces a file (or a link) only, and whole: a move is rename(2), atomic; a
+/// copy (or a move to another filesystem) is written to a temporary file next to the destination
+/// and renamed over it. A folder in the way is refused, overwrite or not: replacing one can't be
+/// made safe in one step, so the agent deletes it first (<c>arm_file_delete</c>, recursive).
+/// </remarks>
 [UnsupportedOSPlatform("windows")]
 internal static class FileTransfer
 {
+    /// <summary>How much of a name a temporary file keeps, in UTF-8 bytes: with its prefix, well inside NAME_MAX (255).</summary>
+    private const int TemporaryNameBytes = 200;
+
     public static ToolResult Copy(ToolArguments arguments, ToolContext context) => Run(arguments, context, move: false);
 
     public static ToolResult Move(ToolArguments arguments, ToolContext context) => Run(arguments, context, move: true);
@@ -39,8 +46,8 @@ internal static class FileTransfer
             return ToolResult.Error($"{source} doesn't exist.");
         }
 
-        // Where each really is, links in the folders above resolved (not the entry itself: a link is moved as a link),
-        // so a path through a link can't copy a folder into itself or replace what holds the source.
+        // Where each really is, links in the folders above resolved (not the entry itself: a link is
+        // moved as a link), so a path through a link can't copy a folder into itself.
         var realSource = Real(source);
         var realDestination = Real(destination);
         if (realSource == realDestination)
@@ -59,17 +66,28 @@ internal static class FileTransfer
             return ToolResult.Error(notAFile);
         }
 
-        var replacing = ToolPaths.Exists(destination);
-        if (replacing)
+        if (ToolPaths.Exists(destination))
         {
+            if (ToolPaths.IsRealDirectory(destination))
+            {
+                return ToolResult.Error($"{destination} is a folder that exists: `overwrite` replaces files only. Delete it first (arm_file_delete with `recursive`) if it should go.");
+            }
+
             if (!overwrite)
             {
                 return ToolResult.Error($"{destination} exists: set `overwrite` to replace it.");
             }
 
-            if (ToolPaths.IsWithin(realSource, realDestination))
+            if (folder)
             {
-                return ToolResult.Error($"{source} is inside {destination}: replacing it would delete the source.");
+                return ToolResult.Error($"{destination} is a file that exists: `overwrite` replaces a file with a file only. Delete it first (arm_file_delete) if it should go.");
+            }
+
+            // A link onto what it points to, or two hard links of one file ("are the same file"):
+            // replacing one with the other would destroy the file.
+            if (Native.Identity(source) is { } sourceFile && sourceFile == Native.Identity(destination))
+            {
+                return ToolResult.Error($"{source} and {destination} are the same file.");
             }
         }
 
@@ -78,17 +96,44 @@ internal static class FileTransfer
             Directory.CreateDirectory(parent);
         }
 
-        if (replacing)
+        var what = folder ? "the folder " : "";
+        if (!move)
         {
-            Replace(destination, () => Transfer(source, destination, move));
-        }
-        else
-        {
-            Transfer(source, destination, move);
+            Put(source, destination, folder);
+            return ToolResult.Ok($"Copied {what}{source} to {destination}.");
         }
 
-        var what = folder ? "the folder " : "";
-        return ToolResult.Ok($"{(move ? "Moved" : "Copied")} {what}{source} to {destination}.");
+        var error = Native.Rename(source, destination);
+        if (error == 0)
+        {
+            return ToolResult.Ok($"Moved {what}{source} to {destination}.");
+        }
+
+        if (error != Native.CrossDevice)
+        {
+            return ToolResult.Error($"Could not move {source} to {destination} (errno {error}).");
+        }
+
+        // Another filesystem: copied whole first; a complete copy is never rolled back.
+        Put(source, destination, folder);
+        try
+        {
+            if (folder)
+            {
+                DeleteTree(source);
+            }
+            else
+            {
+                File.Delete(source);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            var left = folder && Directory.Exists(source) ? $" ({Directory.EnumerateFileSystemEntries(source, "*", SearchOption.AllDirectories).Count()} entries are left there)" : "";
+            return ToolResult.Ok($"Copied {what}{source} to {destination} (another filesystem), but the source could not be removed{left}: {exception.Message}");
+        }
+
+        return ToolResult.Ok($"Moved {what}{source} to {destination} (copied to another filesystem, then the source deleted).");
     }
 
     /// <summary><paramref name="path"/> with the links in the folders above it resolved, its last part as it is.</summary>
@@ -96,90 +141,89 @@ internal static class FileTransfer
         Path.GetDirectoryName(path) is { } parent ? Path.Combine(Posix.RealPath(parent), Path.GetFileName(path)) : path;
 
     /// <summary>
-    /// Puts something new at <paramref name="destination"/> (<paramref name="put"/>), replacing what's
-    /// there only once it worked: the old one is renamed aside first, deleted after, and renamed back
-    /// if <paramref name="put"/> fails.
+    /// A copy of <paramref name="source"/> at <paramref name="destination"/>: a file or link through a
+    /// temporary file renamed over it (what was there is replaced whole, or not at all); a folder
+    /// (where nothing is) copied entry by entry, its partial copy removed if that fails.
     /// </summary>
-    private static void Replace(string destination, Action put)
+    private static void Put(string source, string destination, bool folder)
     {
-        var aside = Path.Combine(Path.GetDirectoryName(destination)!, $".{Path.GetFileName(destination)}.arm-replaced-{Guid.NewGuid():N}");
-        Rename(destination, aside);
-        try
+        if (folder)
         {
-            put();
-        }
-        catch
-        {
-            if (ToolPaths.Exists(destination))
+            try
             {
-                Delete(destination);
+                CopyEntry(source, destination);
+            }
+            catch
+            {
+                RemovePartial(destination);
+                throw;
             }
 
-            Rename(aside, destination);
-            throw;
+            return;
         }
 
-        Delete(aside);
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!, TemporaryName(Path.GetFileName(destination)));
+        try
+        {
+            CopyEntry(source, temporary);
+            if (Native.Rename(temporary, destination) is not 0 and var error)
+            {
+                throw new IOException($"Could not put the copy at {destination} (errno {error}).");
+            }
+        }
+        finally
+        {
+            if (ToolPaths.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
     }
 
-    /// <summary>
-    /// Moves (rename(2): the entry itself, a link as a link; a copy and delete to another
-    /// filesystem) or copies <paramref name="source"/> to <paramref name="destination"/>, where
-    /// nothing is. A copy that fails partway leaves nothing behind.
-    /// </summary>
-    private static void Transfer(string source, string destination, bool move)
+    /// <summary><c>.arm-&lt;8 hex&gt;-</c> and as much of <paramref name="name"/> as fits <see cref="TemporaryNameBytes"/>.</summary>
+    private static string TemporaryName(string name)
     {
-        if (move)
+        var kept = new StringBuilder();
+        var bytes = 0;
+        foreach (var rune in name.EnumerateRunes())
         {
-            var error = Native.Rename(source, destination);
-            if (error == 0)
+            bytes += rune.Utf8SequenceLength;
+            if (bytes > TemporaryNameBytes)
             {
+                break;
+            }
+
+            kept.Append(rune.ToString());
+        }
+
+        return $".arm-{Guid.NewGuid().ToString("N")[..8]}-{kept}";
+    }
+
+    /// <summary>What a failed folder copy made, best effort: its folders made writable first (a read-only one copied as such).</summary>
+    private static void RemovePartial(string path)
+    {
+        try
+        {
+            if (!ToolPaths.IsRealDirectory(path))
+            {
+                if (ToolPaths.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
                 return;
             }
 
-            if (error != Native.CrossDevice)
+            foreach (var folder in Directory.EnumerateDirectories(path, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }).Prepend(path))
             {
-                throw new IOException($"Could not move {source} to {destination} (errno {error}).");
-            }
-        }
-
-        try
-        {
-            CopyEntry(source, destination);
-        }
-        catch
-        {
-            if (ToolPaths.Exists(destination))
-            {
-                Delete(destination);
+                File.SetUnixFileMode(folder, File.GetUnixFileMode(folder) | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
 
-            throw;
-        }
-
-        if (move)
-        {
-            Delete(source);
-        }
-    }
-
-    private static void Rename(string from, string to)
-    {
-        if (Native.Rename(from, to) is not 0 and var error)
-        {
-            throw new IOException($"Could not rename {from} to {to} (errno {error}).");
-        }
-    }
-
-    private static void Delete(string path)
-    {
-        if (ToolPaths.IsRealDirectory(path))
-        {
             DeleteTree(path);
         }
-        else
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            File.Delete(path);
+            // Best effort: the copy's own failure is what the agent hears of.
         }
     }
 

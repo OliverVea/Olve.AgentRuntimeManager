@@ -26,12 +26,20 @@ internal sealed class CallJournal : IDisposable
     private readonly string _path;
     private readonly TextWriter _log;
     private readonly SafeFileHandle _file;
+    private readonly Action<SafeFileHandle, byte[]> _write;
     private readonly Dictionary<string, CallState> _calls = [];
 
-    public CallJournal(string path, TextWriter? log = null)
+    /// <summary>Whether the last write may have left part of a line (it failed or wrote short).</summary>
+    private bool _torn;
+
+    /// <param name="path">The journal file.</param>
+    /// <param name="log">Where a write that failed is told.</param>
+    /// <param name="write">How a line is written (all of it, or throw); a test's stand-in for a disk that fails.</param>
+    public CallJournal(string path, TextWriter? log = null, Action<SafeFileHandle, byte[]>? write = null)
     {
         _path = path;
         _log = log ?? TextWriter.Null;
+        _write = write ?? ((file, bytes) => Native.WriteAll(file, bytes));
         if (Path.GetDirectoryName(path) is { } folder)
         {
             Directory.CreateDirectory(folder);
@@ -101,8 +109,9 @@ internal sealed class CallJournal : IDisposable
                 Append(new JournalEntry(id, JournalEntry.Finished, tool, DateTimeOffset.UtcNow, kept.Text, kept.IsError));
                 _calls[id] = CallState.Finished;
             }
-            catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException or ArgumentException or InvalidOperationException)
             {
+                // Can't be written (the disk, or text JSON can't hold): it ran, so never runs again.
                 _calls[id] = CallState.Interrupted;
                 _log.WriteLine($"olve-arm-tools: could not write the result of {id} to the journal: {exception.Message}");
             }
@@ -192,7 +201,11 @@ internal sealed class CallJournal : IDisposable
     private void Append(JournalEntry entry)
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(entry, JournalJsonContext.Default.JournalEntry);
+        // After a write that failed partway, the line it left is torn: start on a fresh one.
+        byte[] line = _torn ? [(byte)'\n', .. json, (byte)'\n'] : [.. json, (byte)'\n'];
+        _torn = true;
         // One write of the whole line, to the kernel: the server dying (the case the journal is for) loses nothing.
-        Native.WriteAll(_file, [.. json, (byte)'\n']);
+        _write(_file, line);
+        _torn = false;
     }
 }

@@ -11,8 +11,10 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 /// the server stops every group (<see cref="KillAll"/>). A process that leaves its group (setsid, a
 /// daemon) escapes that: with <paramref name="sweepOrphans"/> (the server is a subreaper,
 /// <c>PR_SET_CHILD_SUBREAPER</c>, so such orphans become its children) every process below the
-/// server that isn't a running call's is stopped when a call ends and when the server stops
-/// (<see cref="StopOrphansAsync"/>).
+/// server is stopped when the last running call ends, and when the server stops
+/// (<see cref="StopOrphansAsync"/>). Only then: once a process has left its group and its parent,
+/// nothing tells which call it came from, so a daemon started while calls overlap lives until the
+/// last of them ends.
 /// </summary>
 /// <remarks>
 /// Known gap: a server killed with SIGKILL (the OOM killer) stops nothing, and its running calls'
@@ -47,11 +49,28 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
         }
     }
 
+    /// <summary>
+    /// A call has ended (its leader exited and was reaped by .NET, which the wait for it waited
+    /// for): its group no longer counts as running, and its leader's pid is nothing of ours now.
+    /// </summary>
     public void Remove(int group)
     {
         lock (_groups)
         {
             _groups.Remove(group);
+            _leaders.Remove(group);
+        }
+    }
+
+    /// <summary>The call leaders being tracked (for tests: none once every call has ended).</summary>
+    public int Leaders
+    {
+        get
+        {
+            lock (_groups)
+            {
+                return _leaders.Count;
+            }
         }
     }
 
@@ -107,22 +126,27 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
 
     /// <summary>
     /// Stops every process below the server that isn't a running call's (in its group or below its
-    /// leader): what calls left behind outside their groups. SIGTERM, then SIGKILL after
-    /// <paramref name="grace"/> (<see cref="Grace"/> by default), each only while it's the very
-    /// process found (pid and start time). An escaped process of a call that still runs is taken
-    /// too, if another call ends first: once it has left its group and its parent, nothing tells
-    /// whose it is.
+    /// leader): what calls left behind outside their groups. Only while no call runs, unless
+    /// <paramref name="stopping"/> (the server stops: everything goes); either way the ended
+    /// children it inherited are reaped. SIGTERM, then SIGKILL after <paramref name="grace"/>
+    /// (<see cref="Grace"/> by default), each only while it's the very process found (pid and start time).
     /// </summary>
-    public async Task StopOrphansAsync(TimeSpan? grace = null)
+    public async Task StopOrphansAsync(TimeSpan? grace = null, bool stopping = false)
     {
         if (!sweepOrphans)
         {
             return;
         }
 
+        Reap();
         List<ProcessStatus> orphans;
         lock (_groups)
         {
+            if (_groups.Count > 0 && !stopping)
+            {
+                return;
+            }
+
             orphans = Orphans();
         }
 

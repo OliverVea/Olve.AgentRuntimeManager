@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Olve.AgentRuntimeManager.Tools;
 using Olve.AgentRuntimeManager.Tools.Tools;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Tools;
@@ -60,16 +61,142 @@ public class FileTransferTests
     }
 
     [Test]
-    public async Task Copy_OverwritingAFolder_ReplacesItWhole()
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task CopyOrMove_OntoAFolderThatExists_IsRefused_OverwriteOrNot(bool move)
     {
         _folder.Write("src/a.txt", "a");
-        _folder.Write("dst/stale.txt", "stale");
+        _folder.Write("dst/kept.txt", "kept");
+        _folder.Write("file.txt", "f");
 
-        var result = Copy("""{ "file_path": "src", "destination_path": "dst", "overwrite": true }""");
+        var folder = move ? Move("""{ "file_path": "src", "destination_path": "dst", "overwrite": true }""") : Copy("""{ "file_path": "src", "destination_path": "dst", "overwrite": true }""");
+        var file = move ? Move("""{ "file_path": "file.txt", "destination_path": "dst", "overwrite": true }""") : Copy("""{ "file_path": "file.txt", "destination_path": "dst", "overwrite": true }""");
+
+        foreach (var result in (Olve.AgentRuntimeManager.Tools.Calls.ToolResult[])[folder, file])
+        {
+            await Assert.That(result.IsError).IsTrue();
+            await Assert.That(result.Text).Contains("arm_file_delete");
+        }
+
+        await Assert.That(File.Exists(_folder.PathOf("dst/kept.txt"))).IsTrue();
+        await Assert.That(File.Exists(_folder.PathOf("src/a.txt"))).IsTrue();
+        await Assert.That(File.Exists(_folder.PathOf("file.txt"))).IsTrue();
+    }
+
+    [Test]
+    public async Task CopyOrMove_AFolderOntoAFile_IsRefused()
+    {
+        _folder.Write("src/a.txt", "a");
+        var file = _folder.Write("file.txt", "f");
+
+        var result = Move("""{ "file_path": "src", "destination_path": "file.txt", "overwrite": true }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(await File.ReadAllTextAsync(file)).IsEqualTo("f");
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task CopyOrMove_ALinkOntoItsOwnTarget_IsRefused(bool move)
+    {
+        var target = _folder.Write("b", "content");
+        File.CreateSymbolicLink(_folder.PathOf("a"), target);
+
+        var result = move ? Move("""{ "file_path": "a", "destination_path": "b", "overwrite": true }""") : Copy("""{ "file_path": "a", "destination_path": "b", "overwrite": true }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("are the same file");
+        await Assert.That(new FileInfo(target).LinkTarget).IsNull();
+        await Assert.That(await File.ReadAllTextAsync(target)).IsEqualTo("content");
+    }
+
+    [Test]
+    public async Task Copy_OntoAHardLinkOfItself_IsRefused()
+    {
+        var file = _folder.Write("a", "content");
+        using (var link = System.Diagnostics.Process.Start("ln", [file, _folder.PathOf("b")]))
+        {
+            await link.WaitForExitAsync();
+        }
+
+        var result = Copy("""{ "file_path": "a", "destination_path": "b", "overwrite": true }""");
+
+        await Assert.That(result.IsError).IsTrue();
+        await Assert.That(result.Text).Contains("are the same file");
+        await Assert.That(await File.ReadAllTextAsync(file)).IsEqualTo("content");
+    }
+
+    [Test]
+    public async Task Copy_OverwritingAFileWithALongName_FitsTheTemporaryName()
+    {
+        var name = new string('n', 250);
+        _folder.Write("a.txt", "new");
+        var target = _folder.Write(name, "old");
+
+        var result = Copy($$"""{ "file_path": "a.txt", "destination_path": "{{name}}", "overwrite": true }""");
 
         await Assert.That(result.IsError).IsFalse();
-        await Assert.That(File.Exists(_folder.PathOf("dst/a.txt"))).IsTrue();
-        await Assert.That(File.Exists(_folder.PathOf("dst/stale.txt"))).IsFalse();
+        await Assert.That(await File.ReadAllTextAsync(target)).IsEqualTo("new");
+        await Assert.That(Directory.GetFileSystemEntries(_folder.Workplace).Length).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Copy_AFolderThatFailsPartway_LeavesNoPartialCopy()
+    {
+        _folder.Write("src/a.txt", "a");
+        Directory.CreateDirectory(_folder.PathOf("src/z"));
+        _folder.MakeFifo("src/z/fifo");
+
+        await Assert.That(() => Copy("""{ "file_path": "src", "destination_path": "dst" }""")).Throws<IOException>().WithMessageContaining("a FIFO");
+
+        await Assert.That(ToolPaths.Exists(_folder.PathOf("dst"))).IsFalse();
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Move_ToAnotherFilesystem_CopiesThenDeletesTheSource(bool folder)
+    {
+        // /dev/shm is a tmpfs: another filesystem than the temp folder's, where it is one.
+        Skip.When(!Directory.Exists("/dev/shm") || Native.Identity("/dev/shm")?.Device == Native.Identity(_folder.Workplace)?.Device, "no second filesystem here");
+        var elsewhere = Directory.CreateTempSubdirectory("arm-tools-shm-");
+        try
+        {
+            var shm = Path.Combine("/dev/shm", Path.GetFileName(elsewhere.FullName));
+            Directory.CreateDirectory(shm);
+            try
+            {
+                if (folder)
+                {
+                    File.WriteAllText(Path.Combine(shm, "a.txt"), "a");
+                }
+                else
+                {
+                    File.WriteAllText(Path.Combine(shm, "file.txt"), "f");
+                    _folder.Write("file.txt", "old");
+                }
+
+                var source = folder ? shm : Path.Combine(shm, "file.txt");
+                var result = Move($$"""{ "file_path": "{{source}}", "destination_path": "{{(folder ? "moved" : "file.txt")}}", "overwrite": true }""");
+
+                await Assert.That(result.IsError).IsFalse();
+                await Assert.That(result.Text).Contains("another filesystem");
+                await Assert.That(ToolPaths.Exists(source)).IsFalse();
+                await Assert.That(await File.ReadAllTextAsync(_folder.PathOf(folder ? "moved/a.txt" : "file.txt"))).IsEqualTo(folder ? "a" : "f");
+            }
+            finally
+            {
+                if (Directory.Exists(shm))
+                {
+                    Directory.Delete(shm, recursive: true);
+                }
+            }
+        }
+        finally
+        {
+            elsewhere.Delete(recursive: true);
+        }
     }
 
     [Test]
@@ -117,18 +244,19 @@ public class FileTransferTests
     }
 
     [Test]
-    public async Task Move_OntoSomethingThatExists_IsRefused_UnlessOverwrite()
+    public async Task Move_OntoAFileThatExists_IsRefused_UnlessOverwrite()
     {
         _folder.Write("a.txt", "new");
-        _folder.Write("dst/old.txt", "old");
+        _folder.Write("dst.txt", "old");
 
-        var refused = Move("""{ "file_path": "a.txt", "destination_path": "dst" }""");
+        var refused = Move("""{ "file_path": "a.txt", "destination_path": "dst.txt" }""");
         await Assert.That(refused.IsError).IsTrue();
         await Assert.That(File.Exists(_folder.PathOf("a.txt"))).IsTrue();
 
-        var replaced = Move("""{ "file_path": "a.txt", "destination_path": "dst", "overwrite": true }""");
+        var replaced = Move("""{ "file_path": "a.txt", "destination_path": "dst.txt", "overwrite": true }""");
         await Assert.That(replaced.IsError).IsFalse();
-        await Assert.That(await File.ReadAllTextAsync(_folder.PathOf("dst"))).IsEqualTo("new");
+        await Assert.That(File.Exists(_folder.PathOf("a.txt"))).IsFalse();
+        await Assert.That(await File.ReadAllTextAsync(_folder.PathOf("dst.txt"))).IsEqualTo("new");
     }
 
     [Test]
@@ -160,21 +288,21 @@ public class FileTransferTests
     }
 
     [Test]
-    public async Task Move_ThatFails_LeavesTheDestinationItReplaced()
+    public async Task Move_ThatFails_LeavesTheFileItWouldReplace()
     {
         Skip.When(Supervisor.Protocol.Posix.GetEUid() == 0, "root may rename out of a read-only folder");
 
-        _folder.Write("locked/src/a.txt", "a");
-        var old = _folder.Write("dest/old.txt", "old");
+        _folder.Write("locked/a.txt", "a");
+        var old = _folder.Write("dest.txt", "old");
         var locked = _folder.PathOf("locked");
         File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            // Through the dispatcher, the IOException is the call's error result.
-            await Assert.That(() => Move("""{ "file_path": "locked/src", "destination_path": "dest", "overwrite": true }""")).Throws<IOException>();
+            var result = Move("""{ "file_path": "locked/a.txt", "destination_path": "dest.txt", "overwrite": true }""");
 
+            await Assert.That(result.IsError).IsTrue();
             await Assert.That(await File.ReadAllTextAsync(old)).IsEqualTo("old");
-            await Assert.That(Directory.GetFileSystemEntries(_folder.Workplace).Select(Path.GetFileName)).IsEquivalentTo((string?[])["locked", "dest"]);
+            await Assert.That(File.Exists(_folder.PathOf("locked/a.txt"))).IsTrue();
         }
         finally
         {
