@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ARM's tools (M10): an internal executable shipped next to ARM, never part of the API or the
+    `arm` CLI. The agent starts it per session as a stdio MCP server. Native AOT on publish, so
+    it's one file that keeps running when a deploy prunes its release folder. ARM references it
+    for the catalog and launch contract (Protocol/).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>olve-arm-tools</AssemblyName>
+    <RootNamespace>Olve.AgentRuntimeManager.Tools</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>

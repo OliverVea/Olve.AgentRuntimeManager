@@ -161,7 +161,7 @@ provider's built-ins are off); one that names none keeps the provider's built-in
 
 ```json
 // arm_bash call
-{ "command": "git push origin main", "purpose": "Deploy fix", "workingDir": "/path/to/repo" }
+{ "command": "git push origin main", "description": "Deploy fix", "working_dir": "/path/to/repo" }
 // blocked
 { "error": "BLOCKED", "reason": "rm commands are not allowed in this policy" }
 // denied by a human (or timed out)

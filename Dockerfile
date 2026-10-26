@@ -26,9 +26,11 @@ WORKDIR /src
 COPY src/backend/Directory.Build.props src/backend/Directory.Packages.props src/backend/
 COPY src/backend/Olve.AgentRuntimeManager/Olve.AgentRuntimeManager.csproj src/backend/Olve.AgentRuntimeManager/
 COPY src/backend/Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj src/backend/Olve.AgentRuntimeManager.Supervisor/
+COPY src/backend/Olve.AgentRuntimeManager.Tools/Olve.AgentRuntimeManager.Tools.csproj src/backend/Olve.AgentRuntimeManager.Tools/
 RUN dotnet restore src/backend/Olve.AgentRuntimeManager -r linux-x64
 
 COPY src/backend/Olve.AgentRuntimeManager.Supervisor/ src/backend/Olve.AgentRuntimeManager.Supervisor/
+COPY src/backend/Olve.AgentRuntimeManager.Tools/ src/backend/Olve.AgentRuntimeManager.Tools/
 COPY src/backend/Olve.AgentRuntimeManager/ src/backend/Olve.AgentRuntimeManager/
 # The API surface generated from the contract in the Node stage; SkipSpecGen compiles it as is.
 COPY --from=frontend /repo/artifacts/generated/backend/ artifacts/generated/backend/

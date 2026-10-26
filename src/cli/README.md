@@ -25,6 +25,7 @@ arm env [list] | arm env set <name> <value> [--default] | arm env delete <name>
 arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
 arm provider list | arm provider [health]
+arm tool [list]
 
 arm server [info]
 

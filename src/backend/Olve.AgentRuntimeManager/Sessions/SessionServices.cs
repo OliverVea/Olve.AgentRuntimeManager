@@ -43,6 +43,7 @@ public static class SessionServices
         services.AddSingleton<ISessionsDeleteHandler, DeleteSessionHandler>();
         services.AddSingleton<ISessionMessagesSendHandler, SendMessageHandler>();
         services.AddSingleton<IProvidersListHandler, ListProvidersHandler>();
+        services.AddSingleton<IToolsListHandler, ListToolsHandler>();
         services.AddSingleton<IProvidersHealthListHandler, ListProviderHealthHandler>();
         services.AddSingleton<ISessionConversationGetHandler, GetConversationHandler>();
         services.AddSingleton<ISessionActivityGetHandler, GetActivityHandler>();

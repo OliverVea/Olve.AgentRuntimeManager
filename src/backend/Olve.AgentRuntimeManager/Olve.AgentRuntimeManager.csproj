@@ -48,6 +48,7 @@
   <!-- The per-session supervisor (M5a): its protocol types, and its executable next to ARM's. -->
   <ItemGroup>
     <ProjectReference Include="../Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj" />
+    <ProjectReference Include="../Olve.AgentRuntimeManager.Tools/Olve.AgentRuntimeManager.Tools.csproj" />
   </ItemGroup>
 
   <ItemGroup>
