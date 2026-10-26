@@ -40,6 +40,10 @@ RUN dotnet publish src/backend/Olve.AgentRuntimeManager -c Release -r linux-x64 
 # running when a deploy prunes its release folder. (ARM itself only uses its dll's protocol types.)
 RUN dotnet publish src/backend/Olve.AgentRuntimeManager.Supervisor -c Release -r linux-x64 -o /supervisor \
     && cp /supervisor/olve-arm-supervisor /app/olve-arm-supervisor
+# ARM's tools (M10), next to ARM the same way: the agent starts it per session as a stdio MCP server,
+# and a session's agent (with it) outlives a deploy. Over the JIT apphost ARM's publish put there.
+RUN dotnet publish src/backend/Olve.AgentRuntimeManager.Tools -c Release -r linux-x64 -o /tools \
+    && cp /tools/olve-arm-tools /app/olve-arm-tools
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
 WORKDIR /app

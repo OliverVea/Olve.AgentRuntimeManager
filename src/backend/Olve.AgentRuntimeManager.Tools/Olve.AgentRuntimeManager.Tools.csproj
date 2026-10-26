@@ -16,4 +16,14 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The supervisor's POSIX helpers (Protocol/Posix.cs): a reference, not a linked copy, since
+         ARM references both and a public type in two assemblies would be ambiguous there. -->
+    <ProjectReference Include="../Olve.AgentRuntimeManager.Supervisor/Olve.AgentRuntimeManager.Supervisor.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Olve.AgentRuntimeManager.UnitTests" />
+  </ItemGroup>
+
 </Project>
