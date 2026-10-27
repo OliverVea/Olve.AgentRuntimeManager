@@ -8,7 +8,7 @@ with one line saying what it proved, or fails the step, saying plainly what fail
 a failed one are skipped (they build on it). Prod deploys only if every check passes.
 
 One model turn per deploy (Haiku): a `claude` session, created with a repository, whose agent runs
-one small command with its Bash tool; the command's output, in the conversation, says who it ran as,
+one small command with ARM's `arm_bash` tool (M10: the only tools an agent has); the command's output, in the conversation, says who it ran as,
 which variables reached it, and what is checked out in its workplace, which must be what ARM's API
 says (the repository's folder and branch). Everything else runs on the `fake` provider (no model; enabled on beta, never on prod): a
 conversation and its activity, a message continuing an ended session, a kill, a delete, the event
@@ -93,8 +93,10 @@ FOLDER_LINE = re.compile(r"folder=(?P<folder>\S*) path=(?P<path>\S*) toplevel=(?
                          r"common=(?P<common>\S*) branch=(?P<branch>\S*)$")
 # The repository the claude session is created with: one the agent user can clone on beta.
 DEFAULT_REPO_URL = "git@github.com:OliverVea/Olve.AgentRuntimeManager.git"
+# The shell tool a claude session's agent has: ARM's own (M10), never Claude Code's Bash.
+AGENT_SHELL = "arm_bash"
 TOOL_PROMPT = (
-    "This is ARM's deploy check. Run the command below with the Bash tool, exactly as written and "
+    "This is ARM's deploy check. Run the command below with the arm_bash tool, exactly as written and "
     "only once, then reply with one short sentence saying what it printed.\n\n```sh\n{command}\n```"
 )
 
@@ -517,16 +519,16 @@ def tool_calls(conversation, tool=None):
 
 
 def tool_output(conversation):
-    """The first Bash result's labelled line, parsed; CheckFailed when there's none."""
-    calls = tool_calls(conversation, "Bash")
+    """The first arm_bash result's labelled line, parsed; CheckFailed when there's none."""
+    calls = tool_calls(conversation, AGENT_SHELL)
     if not calls:
         tools = [e.get("tool") for e in conversation.get("entries") or [] if e.get("kind") == "tool_call"]
-        raise CheckFailed(f"the agent made no Bash tool call (tool calls: {tools or 'none'})")
+        raise CheckFailed(f"the agent made no {AGENT_SHELL} tool call (tool calls: {tools or 'none'})")
     for _, result in calls:
         for line in ((result or {}).get("text") or "").splitlines():
             if (match := TOOL_LINE.search(line)) is not None:
                 return match.groupdict()
-    raise CheckFailed(f"no Bash result has the command's 'user=… nonce=…' line: {short([r and r.get('text') for _, r in calls])}")
+    raise CheckFailed(f"no {AGENT_SHELL} result has the command's 'user=… nonce=…' line: {short([r and r.get('text') for _, r in calls])}")
 
 
 def conversation_problems(conversation, prompts):
@@ -723,7 +725,7 @@ def shown(url):
 def checkout_problems(conversation, folder, branch):
     """What the claude session's command saw of the folder and branch ARM's API named, if not what it said."""
     seen = {}
-    for _, result in tool_calls(conversation, "Bash"):
+    for _, result in tool_calls(conversation, AGENT_SHELL):
         for line in ((result or {}).get("text") or "").splitlines():
             if (match := FOLDER_LINE.search(line.strip())) is not None:
                 seen.setdefault(match["folder"], match.groupdict())
@@ -787,7 +789,7 @@ def check_claude_session(ctx):
     # Its worktree goes with it (the shared copy and the branch in it stay).
     ctx.api.call("DELETE", f"/api/sessions/{session_id}", expect=(204,))
     ctx.api.call("GET", f"/api/sessions/{session_id}", expect=(404,))
-    return (f"session {session_id} ({settings.provider}/{settings.model}) completed one turn: its Bash call ran as "
+    return (f"session {session_id} ({settings.provider}/{settings.model}) completed one turn: its arm_bash call ran as "
             f"{seen['user']}, the registered default and the session's own variables reached it, ARM's config didn't; "
             f"{folder} (the API's folder) is a work tree of its own on {branch} (the API's branch); the session is deleted")
 
