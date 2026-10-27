@@ -6,7 +6,19 @@ import { loginGroup, logoutGroup } from "./login";
 import { providerGroup } from "./provider";
 import { serverGroup } from "./server";
 import { sessionGroup } from "./session";
+import { skillGroup } from "./skill";
 import { toolGroup } from "./tool";
 
 /** Every command group the CLI exposes. Later milestones add their groups here. */
-export const groups: readonly CommandGroup[] = [loginGroup, logoutGroup, sessionGroup, envGroup, eventsGroup, providerGroup, toolGroup, serverGroup, configGroup];
+export const groups: readonly CommandGroup[] = [
+  loginGroup,
+  logoutGroup,
+  sessionGroup,
+  envGroup,
+  eventsGroup,
+  providerGroup,
+  toolGroup,
+  skillGroup,
+  serverGroup,
+  configGroup,
+];

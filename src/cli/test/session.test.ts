@@ -17,6 +17,7 @@ const session = {
   retriesLeft: 2,
   createdAt,
   tools: ["arm_bash"],
+  skills: ["pipelines"],
 };
 const created = { id };
 const page = {
@@ -118,6 +119,36 @@ describe("session create", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toContain("--no-tools and --tool exclude each other");
     expect(f.requests.length).toBe(0);
+  });
+
+  test("--skill repeats into skills, in order", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(["session", "create", "x", ...required, "--skill", "pipelines", "--skill", "pdf"], f);
+    expect(r.code).toBe(0);
+    expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, skills: ["pipelines", "pdf"] });
+  });
+
+  test("--no-skills sends an empty list; without --skill or --no-skills, skills is left out (the registered defaults)", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    await cli(["session", "create", "x", ...required, "--no-skills"], f);
+    await cli(["session", "create", "x", ...required], f);
+    expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, skills: [] });
+    expect(f.requests[1]!.body).toEqual({ prompt: "x", ...requiredBody });
+  });
+
+  test("--no-skills with --skill is a usage error", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(["session", "create", "x", ...required, "--no-skills", "--skill", "pdf"], f);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain("--no-skills and --skill exclude each other");
+    expect(f.requests.length).toBe(0);
+  });
+
+  test("an unknown skill is the server's 400, exit 1", async () => {
+    const f = fakeFetch(() => ({ status: 400, body: errorBody("UNKNOWN_SKILL", "No skill 'nope'. Installed skills: pipelines.") }));
+    const r = await cli(["session", "create", "x", ...required, "--skill", "nope"], f);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("UNKNOWN_SKILL");
   });
 
   test("an unknown tool is the server's 400, exit 1", async () => {
@@ -318,6 +349,15 @@ describe("session get", () => {
     expect(withTools.stdout).toContain("tools           arm_bash, arm_file_read");
     const none = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: [] } })));
     expect(none.stdout).toContain("tools           none");
+  });
+
+  test("always shows the session's skills on one line after its tools, `none` for an empty list", async () => {
+    const withSkills = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, skills: ["pipelines", "pdf"] } })));
+    const lines = withSkills.stdout.split("\n");
+    const tools = lines.findIndex((l) => l.startsWith("tools "));
+    expect(lines[tools + 1]).toBe("skills          pipelines, pdf");
+    const none = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, skills: [] } })));
+    expect(none.stdout).toContain("skills          none");
   });
 
   test("a session without repos has no repos line", async () => {

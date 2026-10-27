@@ -11,7 +11,7 @@ arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
-                   [--repo URL[#REF]]... [--tool NAME]... [--no-tools]
+                   [--repo URL[#REF]]... [--tool NAME]... [--no-tools] [--skill NAME]... [--no-skills]
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
@@ -26,6 +26,7 @@ arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 
 arm provider list | arm provider [health]
 arm tool [list]
+arm skill [list] | arm skill get <name> | arm skill install <name> <url>[#ref] [--path FOLDER] [--default] | arm skill remove <name>
 
 arm server [info]
 
@@ -137,6 +138,26 @@ the server's default tools (`default  yes` in `arm tool list`); the CLI has no d
 `tools  none`); its conversation and
 activity show them by ARM's name (`⚙ arm_bash → git status`). A name ARM doesn't have is the
 server's 400 `UNKNOWN_TOOL` (exit 1), listing the ones it has. If ARM's tools server can't start, the session fails at once with an error that says so.
+
+## Skills
+
+A skill is a folder with a `SKILL.md` (the open Agent Skills format: YAML frontmatter `name` and
+`description`, then the instructions) plus whatever files it brings along, so popular Claude skills
+(Anthropic's `anthropics/skills`, plugin marketplaces) install as they are. `arm skill install NAME
+URL[#REF] [--path FOLDER] [--default]` installs one from a git repository, or replaces it: `NAME` is
+what sessions call it (lower-case letters, digits and dashes), `#REF` a branch, tag or commit (split
+at the last `#`, like `--repo`), `--path` the skill's folder in the repository (default: the root).
+ARM fetches it and reads the `SKILL.md` for the description; a source it can't fetch is a 400
+`SKILL_SOURCE_FAILED` with git's error, a folder without a readable `SKILL.md` a 400 `INVALID_SKILL`
+(exit 1). `arm skill list` shows them (name, whether it's `--default`, the source as `url#ref path`,
+description), `arm skill get NAME` one in full, `arm skill remove NAME` removes one.
+
+`arm session create --skill NAME` (repeatable) gives the agent exactly those skills to load with
+`arm_skill_load` (which must be among its tools); `--no-skills` gives it none (it excludes
+`--skill`). With neither, the registered skills flagged `--default`. A session takes copies of its
+skills' folders when its agent first starts, so installing, replacing or removing a skill later
+doesn't touch sessions that exist. `arm session get` always shows them (`skills  pipelines, pdf`, or
+`skills  none`); a name ARM doesn't have is the server's 400 `UNKNOWN_SKILL` (exit 1).
 
 ## Environment variables
 
