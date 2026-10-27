@@ -141,7 +141,7 @@ public class SessionManagerTests : IDisposable
         await Assert.That(session.Model).IsEqualTo("m");
         await Assert.That(session.Caller).IsEqualTo("tests");
         await Assert.That(session.TimeoutSeconds).IsNull();
-        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id, session.RunId!.Value));
+        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id, session.RunId!.Value, Tools: session.Tools));
     }
 
     [Test]
@@ -405,13 +405,12 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
-    public async Task NoTools_AreUnset_AndAnEmptyListStaysEmpty()
+    public async Task AnEmptyList_IsStoredAndLaunchedAsNoTools()
     {
-        var none = Record(_sessions.Create(Request()));
         var empty = Record(_sessions.Create(Request() with { Tools = [] }));
 
-        await Assert.That(_database.Store().Get(none.Id)!.ToDto(2).Tools).IsNull();
-        await Assert.That(_database.Store().Get(empty.Id)!.ToDto(2).Tools).IsEquivalentTo(Array.Empty<string>());
+        await Assert.That(_database.Store().Get(empty.Id)!.ToDto(2).Tools).IsEmpty();
+        await Assert.That(_provider.RunOf(empty.Id).Launch.Tools).IsEmpty();
     }
 
     [Test]
@@ -690,7 +689,9 @@ public class SessionManagerTests : IDisposable
 
         Restart();
 
-        await Assert.That(_sessions.Get(done.Id)).IsEqualTo(_sessions.Search(new SessionSearch(), 10, 0).Items.Single());
+        // Two reads: equal but for their lists' identity (records compare lists by reference).
+        var found = _sessions.Search(new SessionSearch(), 10, 0).Items.Single();
+        await Assert.That(_sessions.Get(done.Id)! with { Tools = found.Tools }).IsEqualTo(found);
         await Assert.That(_sessions.Get(done.Id)!.ExitCode).IsEqualTo(4);
     }
 

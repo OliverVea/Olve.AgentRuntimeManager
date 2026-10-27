@@ -214,7 +214,8 @@ public sealed class SessionManager : IDisposable
                 UseEnv = request.UseEnv,
                 AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
                 Repos = request.Repos?.Select(r => RepoNames.Record(id, r.Url, r.Ref)).ToList(),
-                Tools = request.Tools,
+                // Resolved by the handler (the server's defaults when the request names none).
+                Tools = request.Tools ?? [],
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);

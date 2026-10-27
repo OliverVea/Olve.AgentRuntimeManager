@@ -87,6 +87,8 @@ public class ClaudeProviderTests
             "--session-id", launch.SessionId.ToString(),
             "--permission-mode", "bypassPermissions",
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
+            // No tools named: none at all, and never Claude Code's built-ins.
+            "--tools", "",
             "--model", "sonnet",
         ];
         // In order: each flag must be followed by its value.
@@ -221,14 +223,14 @@ public class ClaudeProviderTests
     }
 
     [Test]
-    public async Task NoList_KeepsTheBuiltIns()
+    public async Task NoList_IsNoToolsAtAll_TheBuiltInsAreNeverOn()
     {
         var unset = Launch("Say READY");
 
         await Provider().Start(unset).Completion.WaitAsync(Guard);
 
         var (arguments, _) = await Invocation(unset);
-        await Assert.That(arguments).DoesNotContain("--tools");
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
         await Assert.That(arguments).DoesNotContain("--mcp-config");
     }
 

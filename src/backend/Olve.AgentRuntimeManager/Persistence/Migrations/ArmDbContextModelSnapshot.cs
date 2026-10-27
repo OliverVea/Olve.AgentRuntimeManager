@@ -131,6 +131,7 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Tools")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("UseEnv")

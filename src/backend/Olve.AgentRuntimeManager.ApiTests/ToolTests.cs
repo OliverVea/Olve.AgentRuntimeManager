@@ -35,22 +35,26 @@ public class ToolTests(ApiTarget target)
     }
 
     [Test]
-    public async Task Session_WithoutTools_GetsTheServersDefaults_OrNoneWithoutAny()
+    public async Task Session_WithoutTools_GetsExactlyTheServersDefaults()
     {
         var client = target.CreateAuthenticatedClient();
         var defaults = (await client.GetFromJsonAsync<ToolBody[]>("/api/tools", Wire.JsonOptions))!.Where(t => t.Default).Select(t => t.Name).ToList();
 
         var session = await client.CreateSessionAsync("fake:sleep=0ms");
 
-        // Unset: the provider's built-in tools (a server without defaults).
-        if (defaults.Count == 0)
-        {
-            await Assert.That(session.Tools).IsNull();
-        }
-        else
-        {
-            await Assert.That(session.Tools).IsEquivalentTo(defaults);
-        }
+        // Always stated (never the provider's own tools): the defaults, in the server's order.
+        await Assert.That(session.Tools).IsNotNull();
+        await Assert.That(session.Tools!).IsEquivalentTo(defaults);
+    }
+
+    [Test]
+    public async Task ByDefault_EveryToolIsADefault()
+    {
+        Skip.When(Environment.GetEnvironmentVariable(ApiTarget.BaseUrlVariable) is { Length: > 0 }, "In-process only: a deployment may configure its own.");
+
+        var tools = (await target.CreateAuthenticatedClient().GetFromJsonAsync<ToolBody[]>("/api/tools", Wire.JsonOptions))!;
+
+        await Assert.That(tools.All(t => t.Default)).IsTrue();
     }
 
     [Test]

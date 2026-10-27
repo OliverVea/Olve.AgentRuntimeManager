@@ -90,10 +90,9 @@ model CreateSession {
   repos?: CreateSessionRepo[];
 
   /**
-   * ARM's tools to give the agent, by name (`GET /api/tools`); an unknown one is a 400
-   * `UNKNOWN_TOOL`. Naming any gives the agent only these (its provider's built-in tools are
-   * off). Empty: no tools at all (the provider's built-ins off too). Unset: the server's default
-   * tools (`default` in `GET /api/tools`), or the provider's built-in tools while it has none.
+   * The tools the agent gets, by name (`GET /api/tools`); an unknown one is a 400 `UNKNOWN_TOOL`.
+   * It gets exactly these and nothing else (its provider's own tools are always off). Empty: no
+   * tools at all. Unset: the server's default tools (`default` in `GET /api/tools`).
    */
   tools?: string[];
 }
@@ -123,8 +122,8 @@ model Session {
   /** The git repositories it was created with, as given. */
   repos?: SessionRepo[];
 
-  /** ARM's tools it got: as given, or the server's defaults when it gave none. Empty: no tools at all. Unset: the provider's built-in tools. */
-  tools?: string[];
+  /** Exactly the tools the agent has: as given, or the server's defaults when it gave none. Empty: no tools at all. */
+  tools: string[];
 
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;

@@ -161,7 +161,7 @@ public class ClaudeUpgradeTests : IDisposable
         _database.Store().Add(new SessionRecord
         {
             Id = id, Status = SessionStatus.Working, Prompt = prompt, Provider = ClaudeProvider.ProviderName, Model = "sonnet", Caller = "tests",
-            CreatedAt = now, StartedAt = now, Attempts = 1, ProviderSessionId = id.ToString(), RunId = run,
+            CreatedAt = now, StartedAt = now, Attempts = 1, ProviderSessionId = id.ToString(), RunId = run, Tools = [],
         });
         return (id, SupervisorFiles.ReadInfo(folder)!);
     }

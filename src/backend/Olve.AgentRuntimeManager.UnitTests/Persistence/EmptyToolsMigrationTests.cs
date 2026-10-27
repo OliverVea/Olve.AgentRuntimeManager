@@ -3,12 +3,14 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Persistence;
 
 /// <summary>
-/// Sessions stored while an empty <c>tools</c> still meant the provider's built-ins (before
-/// 2026-10-27) keep the built-ins: bringing the database up to date unsets it. Named tools stay.
+/// Sessions stored without tools (they ran on Claude Code's own, which can't be had any more since
+/// 2026-10-27) get all of ARM's tools when the database is brought up to date; a session always
+/// states its tools. Named ones stay.
 /// </summary>
 public sealed class EmptyToolsMigrationTests : IDisposable
 {
@@ -17,20 +19,21 @@ public sealed class EmptyToolsMigrationTests : IDisposable
     public void Dispose() => _database.Dispose();
 
     [Test]
-    public async Task AnEmptyListStoredBefore_BecomesUnset_NamedToolsStay()
+    public async Task ASessionStoredWithoutTools_GetsAllOfArmsTools_NamedToolsStay()
     {
-        var (empty, named) = (Guid.NewGuid(), Guid.NewGuid());
-        _database.Store().Add(Session(empty, []));
+        var (unset, named) = (Guid.NewGuid(), Guid.NewGuid());
+        _database.Store().Add(Session(unset, []));
         _database.Store().Add(Session(named, ["arm_bash"]));
         await using (var db = _database.Context())
         {
-            // Back to the database as it was then (the migration's Down keeps the data), then up again.
+            // Back to the database as it was then (Tools nullable), a session without, then up again.
             await db.GetService<IMigrator>().MigrateAsync("20261026131404_SessionTools");
-            await Assert.That(await db.Database.SqlQuery<string>($"SELECT Tools AS Value FROM Sessions WHERE Id = {empty}").SingleAsync()).IsEqualTo("[]");
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE Sessions SET Tools = NULL WHERE Id = {unset}");
             await db.Database.MigrateAsync();
         }
 
-        await Assert.That(_database.Store().Get(empty)!.Tools).IsNull();
+        await Assert.That(_database.Store().Get(unset)!.Tools)
+            .IsEquivalentTo(ToolCatalog.All.Select(t => t.Name), TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(_database.Store().Get(named)!.Tools).IsEquivalentTo(["arm_bash"]);
     }
 

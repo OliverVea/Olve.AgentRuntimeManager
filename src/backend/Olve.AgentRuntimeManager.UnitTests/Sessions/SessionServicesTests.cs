@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
@@ -88,19 +89,21 @@ public class SessionServicesTests
     }
 
     [Test]
-    public async Task ByDefault_ThereAreNoDefaultTools()
+    public async Task ByDefault_EveryToolIsADefault_InTheCatalogsOrder()
     {
         using var services = Services([]);
 
-        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Default).IsEmpty();
+        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Defaults)
+            .IsEquivalentTo(ToolCatalog.All.Select(t => t.Name), TUnit.Assertions.Enums.CollectionOrdering.Matching);
     }
 
+    /// <summary>Lists bind by index onto what's there: two configured tools must be exactly those two, not merged into the catalog.</summary>
     [Test]
-    public async Task ConfiguredDefaultTools_AreBound_InOrder()
+    public async Task ConfiguredDefaultTools_ReplaceEveryTool_InTheirOrder()
     {
         using var services = Services(new() { ["Tools:Default:0"] = "arm_file_read", ["Tools:Default:1"] = "arm_bash" });
 
-        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Default)
+        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Defaults)
             .IsEquivalentTo(["arm_file_read", "arm_bash"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
     }
 

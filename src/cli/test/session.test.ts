@@ -16,6 +16,7 @@ const session = {
   attempts: 1,
   retriesLeft: 2,
   createdAt,
+  tools: ["arm_bash"],
 };
 const created = { id };
 const page = {
@@ -312,13 +313,11 @@ describe("session get", () => {
     expect(JSON.parse(r.stdout).repos).toEqual(repos);
   });
 
-  test("shows the session's tools on one line, `none` for an empty list; unset (the built-ins) has no tools line", async () => {
+  test("always shows the session's tools on one line, `none` for an empty list", async () => {
     const withTools = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: ["arm_bash", "arm_file_read"] } })));
     expect(withTools.stdout).toContain("tools           arm_bash, arm_file_read");
     const none = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: [] } })));
     expect(none.stdout).toContain("tools           none");
-    const unset = await cli(["session", "get", id], fakeFetch(() => ({ body: session })));
-    expect(unset.stdout).not.toContain("tools");
   });
 
   test("a session without repos has no repos line", async () => {
