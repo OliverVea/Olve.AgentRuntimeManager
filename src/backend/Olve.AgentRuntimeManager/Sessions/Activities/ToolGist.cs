@@ -40,6 +40,7 @@ public static partial class ToolGist
         var gist = (Text("description") is { } description && !string.IsNullOrWhiteSpace(description) ? description : null)
             ?? (Text("command") is { } command ? Shell(command) : null)
             ?? Text("file_path")
+            ?? Text("name")
             ?? Text("pattern")
             ?? Text("url")
             ?? Json(input);

@@ -32,8 +32,9 @@ public sealed class EmptyToolsMigrationTests : IDisposable
             await db.Database.MigrateAsync();
         }
 
+        // The tools ARM had on 2026-10-27, frozen in the migration (a later tool, arm_skill_load, is not added to old sessions).
         await Assert.That(_database.Store().Get(unset)!.Tools)
-            .IsEquivalentTo(ToolCatalog.All.Select(t => t.Name), TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            .IsEquivalentTo([ToolCatalog.Bash, ToolCatalog.FileRead, ToolCatalog.FileEdit, ToolCatalog.FileCreate, ToolCatalog.FileDelete, ToolCatalog.FileCopy, ToolCatalog.FileMove], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(_database.Store().Get(named)!.Tools).IsEquivalentTo(["arm_bash"]);
     }
 

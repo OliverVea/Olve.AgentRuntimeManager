@@ -346,7 +346,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         {
             try
             {
-                await process.StandardInput.WriteAsync(JsonSerializer.Serialize(install));
+                await process.StandardInput.WriteAsync(JsonSerializer.Serialize(install, SupervisorJsonContext.Default.SupervisorSkillInstall));
                 process.StandardInput.Close();
             }
             catch (IOException)
