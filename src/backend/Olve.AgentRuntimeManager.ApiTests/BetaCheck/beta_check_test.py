@@ -26,11 +26,11 @@ PROMPT = "the prompt"
 LINE = "user=arm-agent nonce=abc version=1.2.3 withheld="
 
 
-def conversation():
+def conversation(tool="Bash"):
     entries = [
         {"seq": 1, "kind": "prompt", "text": PROMPT},
         {"seq": 2, "kind": "thinking", "text": "hm"},
-        {"seq": 3, "kind": "tool_call", "tool": "Bash", "toolId": "t1", "input": {"command": "echo"}},
+        {"seq": 3, "kind": "tool_call", "tool": tool, "toolId": "t1", "input": {"command": "echo"}},
         {"seq": 4, "kind": "tool_result", "toolId": "t1", "text": LINE, "isError": False},
         {"seq": 5, "kind": "text", "text": "It printed a line."},
         {"seq": 6, "kind": "turn_end", "text": "It printed a line.", "isError": False},
@@ -83,16 +83,16 @@ class ConversationTests(unittest.TestCase):
 
 class ToolOutputTests(unittest.TestCase):
     def test_reads_the_labelled_line(self):
-        self.assertEqual(check.tool_output(conversation()),
+        self.assertEqual(check.tool_output(conversation(check.AGENT_SHELL)),
                          {"user": "arm-agent", "nonce": "abc", "version": "1.2.3", "withheld": ""})
 
     def test_says_when_there_is_none(self):
-        c = conversation()
+        c = conversation(check.AGENT_SHELL)
         c["entries"][3]["text"] = "command not found"
-        with self.assertRaisesRegex(check.CheckFailed, "no Bash result has the command's"):
+        with self.assertRaisesRegex(check.CheckFailed, "no arm_bash result has the command's"):
             check.tool_output(c)
         c["entries"][2]["tool"] = "Read"
-        with self.assertRaisesRegex(check.CheckFailed, r"no Bash tool call \(tool calls: \['Read'\]\)"):
+        with self.assertRaisesRegex(check.CheckFailed, r"no arm_bash tool call \(tool calls: \['Read'\]\)"):
             check.tool_output(c)
 
 
@@ -174,7 +174,7 @@ class RepoTests(unittest.TestCase):
     @staticmethod
     def conversation(*lines):
         text = "user=arm-agent nonce=n version=v withheld=\n" + "\n".join(lines)
-        return {"entries": [{"seq": 1, "kind": "tool_call", "tool": "Bash", "toolId": "t", "input": {}},
+        return {"entries": [{"seq": 1, "kind": "tool_call", "tool": check.AGENT_SHELL, "toolId": "t", "input": {}},
                             {"seq": 2, "kind": "tool_result", "toolId": "t", "text": text}]}
 
     def problems(self, *lines):

@@ -75,7 +75,7 @@ public class BetaCheckTests
     [Test]
     [Arguments("no-env", "", "FAIL claude session: the registered default variable BETA_CHECK_NONCE didn't reach the agent (it saw '')")]
     [Arguments("leak-env", "", "FAIL claude session: ARM's own configuration (Auth__Authority) reached the agent's environment")]
-    [Arguments("no-tool", "", "FAIL claude session: the agent made no Bash tool call (tool calls: none)")]
+    [Arguments("no-tool", "", "FAIL claude session: the agent made no arm_bash tool call (tool calls: none)")]
     [Arguments("ok", "BETA_CHECK_AGENT_USER=nobody", "', expected 'nobody'")]
     [Arguments("ok", "BETA_CHECK_AGENT_USER=beta-check-agent BETA_CHECK_NOT_AGENT_USERS=arm,{user}", "', a user agents must never run as")]
     [Arguments("logged-out", "", "FAIL provider health: the claude provider (the model turn's) is unauthorized")]

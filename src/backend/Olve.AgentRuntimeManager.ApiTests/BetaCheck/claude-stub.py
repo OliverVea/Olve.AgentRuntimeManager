@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A stand-in for `claude` for the beta check's tests (BetaCheckTests): speaks Claude Code's
 stream-json like the CLI (an init, each message replayed with its uuid, a `result` per turn, done
-once its input closes), and runs, for real, the command a message gives in a ```sh block: a Bash
+once its input closes), and runs, for real, the command a message gives in a ```sh block: ARM's arm_bash
 tool call, its result and a sentence about it. A message without one gets a one-word answer.
 
 How it misbehaves is chosen by a `stub-mode` file next to it (one word, default `ok`):
@@ -68,7 +68,7 @@ def main(args):
         print(json.dumps({"loggedIn": logged_in, "authMethod": "oauth_token" if logged_in else "none"}))
         return 0 if logged_in else 1
     session = next((args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--session-id", "--resume")), "stub")
-    emit({"type": "system", "subtype": "init", "session_id": session, "tools": ["Bash", "Read", "Write"],
+    emit({"type": "system", "subtype": "init", "session_id": session, "tools": ["mcp__arm__arm_bash"],
           "mcp_servers": [], "model": MODEL, "claude_code_version": "stub", "skills": [],
           "plugins": [{"name": "agents-md", "path": "builtin", "source": "agents-md@builtin"}]})
     for line in sys.stdin:
@@ -84,7 +84,7 @@ def main(args):
         else:
             command = command.group(1)
             tool_id = "toolu_" + uuid.uuid4().hex
-            assistant(session, {"type": "tool_use", "id": tool_id, "name": "Bash",
+            assistant(session, {"type": "tool_use", "id": tool_id, "name": "mcp__arm__arm_bash",
                                 "input": {"command": command, "description": "Run the check's command"}})
             tamper()
             env = dict(os.environ)
