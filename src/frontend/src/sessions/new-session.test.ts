@@ -71,6 +71,19 @@ describe("newSession", () => {
     });
   });
 
+  it("sends skills as given: left out (the registered defaults), [] (none), or the list", () => {
+    const defaults = newSession({ ...fields, skills: undefined }, "oliver");
+    expect(defaults.ok && "skills" in defaults.value).toBe(false);
+    expect(newSession({ ...fields, skills: [] }, "oliver")).toMatchObject({
+      ok: true,
+      value: { skills: [] },
+    });
+    expect(newSession({ ...fields, skills: ["pipelines", "pdf"] }, "oliver")).toMatchObject({
+      ok: true,
+      value: { skills: ["pipelines", "pdf"] },
+    });
+  });
+
   it.each([
     [{ prompt: "  " }, "Say what the agent should do."],
     [{ model: "" }, "Pick a model."],

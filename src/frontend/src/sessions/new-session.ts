@@ -18,6 +18,8 @@ export type NewSessionFields = {
   repos?: readonly RepoRow[];
   /** ARM's tools to give it; `undefined` leaves the field out (the server's defaults), `[]` is none. */
   tools?: readonly string[];
+  /** The skills it can load; `undefined` leaves the field out (the registered defaults), `[]` is none. */
+  skills?: readonly string[];
 };
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
@@ -58,5 +60,6 @@ export function newSession(
   if (fields.useEnv?.length) body.useEnv = [...fields.useEnv];
   if (repos.repos.length) body.repos = repos.repos;
   if (fields.tools) body.tools = [...fields.tools];
+  if (fields.skills) body.skills = [...fields.skills];
   return { ok: true, value: body };
 }

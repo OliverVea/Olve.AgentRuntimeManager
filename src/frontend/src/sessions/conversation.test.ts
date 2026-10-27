@@ -63,6 +63,12 @@ describe("conversation helpers", () => {
     );
   });
 
+  it("gist of arm_skill_load is the skill's name", () => {
+    expect(
+      gist(entry(1, "tool_call", { tool: "arm_skill_load", input: { name: "pipelines" } })),
+    ).toBe("pipelines");
+  });
+
   it("gist prefers a description, then the command's gist, a file, a pattern", () => {
     expect(gist(entry(1, "tool_call", { tool: "Bash", input: { command: "cd x && ls" } }))).toBe(
       "ls",

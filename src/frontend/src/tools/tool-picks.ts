@@ -1,7 +1,10 @@
 import type { Tool } from "@arm/client";
 
+/** What the rules read of a tool: its name and whether the server gives it by default (a skill has the same). */
+type Pickable = Pick<Tool, "name" | "default">;
+
 /** The server's default tools: what a session that leaves `tools` out gets. */
-export function defaultTools(tools: readonly Tool[]): string[] {
+export function defaultTools(tools: readonly Pickable[]): string[] {
   return tools.filter((t) => t.default).map((t) => t.name);
 }
 
@@ -11,7 +14,7 @@ export function defaultTools(tools: readonly Tool[]): string[] {
  * picked (no tools at all); else the picked names, in the list's order.
  */
 export function toolsField(
-  tools: readonly Tool[] | undefined,
+  tools: readonly Pickable[] | undefined,
   picked: ReadonlySet<string>,
 ): string[] | undefined {
   if (!tools) return undefined;
