@@ -6,6 +6,7 @@ import type {
   ProviderHealth,
   Session,
   SessionSearch,
+  Tool,
 } from "@arm/client";
 import { vi } from "vitest";
 import { createApiClient } from "../api-client.js";
@@ -39,6 +40,15 @@ export const defaultModels: Provider[] = [
   { name: "fake", displayName: "fake", models: [{ id: "fake", displayName: "Instant" }] },
 ];
 
+/** What `GET /api/tools` answers by default: four of the server's defaults, and one not. */
+export const defaultToolList: Tool[] = [
+  { name: "arm_bash", description: "Run a shell command.", default: true },
+  { name: "arm_file_read", description: "Read a text file.", default: true },
+  { name: "arm_file_edit", description: "Replace an exact string in a file.", default: true },
+  { name: "arm_file_create", description: "Create a new file.", default: true },
+  { name: "arm_file_delete", description: "Delete a file.", default: false },
+];
+
 export type Call = { method: string; path: string; search: string; body: unknown };
 
 /**
@@ -49,7 +59,8 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * `holdSearch` makes searches wait for `releaseSearch`, to deliver events before the snapshot.
  * `providers` is what `GET /api/providers/health` answers (every provider available by default),
  * `models` what `GET /api/providers` answers (Claude Code's Opus and Sonnet and fake's Instant by
- * default; a status: that error instead).
+ * default; a status: that error instead), `tools` what `GET /api/tools` answers (`defaultToolList`
+ * by default; a status: that error instead).
  * `env` is the registered variables `/api/env` lists, sets and deletes; `failEnv` makes the next
  * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
  * DELETEs wait for `releaseEnvWrites`. `activity` is what `GET /api/sessions/{id}/activity`
@@ -62,6 +73,7 @@ export function fakeApi(
     search?: () => Response;
     providers?: ProviderHealth[];
     models?: Provider[] | number;
+    tools?: Tool[] | number;
     env?: EnvVariable[];
     activity?: (id: string) => ActivityLine[] | undefined | "hang";
   } = {},
@@ -136,6 +148,15 @@ export function fakeApi(
             { status: models },
           )
         : Response.json(models);
+    }
+    if (request.method === "GET" && url.pathname === "/api/tools") {
+      const tools = options.tools ?? defaultToolList;
+      return typeof tools === "number"
+        ? Response.json(
+            { error: { code: "INTERNAL", message: "The server failed.", details: {} } },
+            { status: tools },
+          )
+        : Response.json(tools);
     }
     if (request.method === "GET" && url.pathname === "/api/providers/health") {
       return Response.json(

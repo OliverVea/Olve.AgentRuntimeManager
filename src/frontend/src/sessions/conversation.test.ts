@@ -125,6 +125,20 @@ describe("conversation helpers", () => {
     ]);
   });
 
+  it("inputFields: ARM's arm_file_edit as a diff, as an Edit", () => {
+    expect(
+      inputFields(
+        entry(1, "tool_call", {
+          tool: "arm_file_edit",
+          input: { file_path: "src/a.ts", old_string: "x\ny", new_string: "z" },
+        }),
+      ),
+    ).toEqual([
+      { kind: "short", name: "file_path", value: "src/a.ts" },
+      { kind: "diff", before: "x\ny", after: "z" },
+    ]);
+  });
+
   it("topLevel leaves out results, subagent entries and text repeated as the answer", () => {
     const entries = [
       entry(1, "prompt", { text: "go" }),

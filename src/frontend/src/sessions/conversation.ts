@@ -148,14 +148,17 @@ export type InputField =
   | { kind: "text"; name: string; value: string; shell: boolean }
   | { kind: "diff"; before: string; after: string };
 
+/** The tools whose `old_string`/`new_string` are an edit: Claude Code's and ARM's (M10). */
+const EDIT_TOOLS = ["Edit", "arm_file_edit"];
+
 /**
  * A tool's input as fields: short values (numbers, flags, one-line strings) as `name value`, text
- * as real multi-line text, and an Edit's `old_string`/`new_string` as a diff.
+ * as real multi-line text, and an edit's `old_string`/`new_string` as a diff.
  */
 export function inputFields(call: ConversationEntry): InputField[] {
   const input = inputOf(call);
   const long = (v: unknown) => typeof v === "string" && (v.includes("\n") || v.length > 80);
-  const edit = call.tool === "Edit" && "old_string" in input;
+  const edit = EDIT_TOOLS.includes(call.tool ?? "") && "old_string" in input;
   const fields: InputField[] = [];
   for (const [name, value] of Object.entries(input)) {
     if (edit && /_string$/.test(name)) continue;

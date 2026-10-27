@@ -16,6 +16,8 @@ export type NewSessionFields = {
   useEnv?: readonly string[];
   /** The session's repos: a clone URL and an optional ref each; blank rows are ignored. */
   repos?: readonly RepoRow[];
+  /** ARM's tools to give it; `undefined` leaves the field out (the server's defaults), `[]` is none. */
+  tools?: readonly string[];
 };
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
@@ -55,5 +57,6 @@ export function newSession(
   if (Object.keys(env.env).length) body.env = env.env;
   if (fields.useEnv?.length) body.useEnv = [...fields.useEnv];
   if (repos.repos.length) body.repos = repos.repos;
+  if (fields.tools) body.tools = [...fields.tools];
   return { ok: true, value: body };
 }
