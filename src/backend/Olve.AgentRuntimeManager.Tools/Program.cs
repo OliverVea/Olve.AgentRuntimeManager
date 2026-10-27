@@ -5,8 +5,9 @@ using Olve.AgentRuntimeManager.Tools.Journal;
 using Olve.AgentRuntimeManager.Tools.Server;
 using Olve.AgentRuntimeManager.Tools.Tools;
 
-// `olve-arm-tools --workplace <folder> --journal <file> --tool <name>…`: ARM's tools (M10) for one
-// session, served to the agent as a stdio MCP server (docs/MILESTONES.md M10). It ends when its
+// `olve-arm-tools --workplace <folder> --journal <file> --tool <name>… [--skill <name>=<folder>…]`:
+// ARM's tools (M10) for one session, and its skills (M10b, loaded with arm_skill_load), served to
+// the agent as a stdio MCP server (docs/MILESTONES.md M10). It ends when its
 // input does, on SIGTERM (Claude Code ends its MCP servers with a signal, even on a normal exit)
 // and when the agent dies (ParentDeath), stopping every running call with it.
 // Unix only: process groups and signals (ARM runs on Linux).
@@ -48,8 +49,10 @@ using (journal)
     }
 
     var groups = new ProcessGroups(sweepOrphans: subreaper);
-    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups), options.Tools, journal);
-    var server = new McpServer(options, dispatcher, groups, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
+    // The skills' descriptions are read now, once: the tool's description lists them.
+    var skills = new SessionSkills(options.Skills);
+    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups, skills), options.Tools, journal);
+    var server = new McpServer(options, dispatcher, groups, skills, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
 
     var stop = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
     using var terminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);
@@ -60,7 +63,7 @@ using (journal)
         stop.TrySetResult("the agent that started it is gone");
     }
 
-    await Console.Error.WriteLineAsync($"olve-arm-tools: serving {string.Join(", ", options.Tools)} for {options.Workplace}.");
+    await Console.Error.WriteLineAsync($"olve-arm-tools: serving {string.Join(", ", options.Tools)} for {options.Workplace}; skills: {skills.Names}.");
     var reading = server.ReadAsync();
     var ended = await Task.WhenAny(reading, stop.Task);
     var reason = ended == reading

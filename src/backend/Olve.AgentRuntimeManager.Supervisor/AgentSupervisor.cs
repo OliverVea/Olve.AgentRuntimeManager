@@ -254,25 +254,45 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
         }
     }
 
-    /// <summary>The session's repositories, checked out in its workplace (M5e); the first error, if one failed.</summary>
+    /// <summary>
+    /// The session's repositories, checked out in its workplace (M5e), then its skills, copied into
+    /// its folder (M10b); the first error, if one failed (the run then ends without an agent).
+    /// </summary>
     private async Task<string?> CheckoutAsync()
     {
-        if (launch.Repos.Count == 0)
+        if (launch.Repos.Count > 0)
         {
-            return null;
+            using var done = new CancellationTokenSource();
+            var watching = WatchKillMarkAsync(done.Token);
+            try
+            {
+                if (await CheckOutReposAsync() is { } error)
+                {
+                    return error;
+                }
+            }
+            finally
+            {
+                await done.CancelAsync();
+                await watching;
+            }
         }
 
-        using var done = new CancellationTokenSource();
-        var watching = WatchKillMarkAsync(done.Token);
-        try
+        return CopySkills();
+    }
+
+    /// <summary>The session's skills, copied into its folder (M10b); the first error, if one failed.</summary>
+    private string? CopySkills()
+    {
+        foreach (var skill in launch.Skills)
         {
-            return await CheckOutReposAsync();
+            if (SkillCopy.Copy(skill, _log) is { } error)
+            {
+                return error;
+            }
         }
-        finally
-        {
-            await done.CancelAsync();
-            await watching;
-        }
+
+        return null;
     }
 
     private async Task<string?> CheckOutReposAsync()

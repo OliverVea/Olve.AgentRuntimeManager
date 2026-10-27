@@ -18,7 +18,7 @@ namespace Olve.AgentRuntimeManager.Tools.Server;
 /// so a long <c>arm_bash</c> holds up nothing and can be cancelled.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher, ProcessGroups groups, Stream input, Stream output, TextWriter log)
+internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher, ProcessGroups groups, SessionSkills skills, Stream input, Stream output, TextWriter log)
 {
     /// <summary>The MCP versions spoken, newest first: a client's is answered with its own if it's here, else the newest.</summary>
     public static readonly string[] ProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -189,7 +189,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                 await SendResultAsync(id, new JsonObject());
                 break;
             case "tools/list" when isRequest:
-                await SendResultAsync(id, new JsonObject { ["tools"] = ToolDefinitions.List(options.Tools) });
+                await SendResultAsync(id, new JsonObject { ["tools"] = ToolDefinitions.List(options.Tools, skills) });
                 break;
             case "tools/call" when isRequest:
                 await StartCallAsync(id, parameters);
