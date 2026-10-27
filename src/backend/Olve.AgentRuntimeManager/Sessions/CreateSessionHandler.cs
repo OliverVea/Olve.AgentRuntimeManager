@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Tools.Protocol;
@@ -9,9 +10,12 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// <c>POST /api/sessions</c>: the new session's id, 201 when started, 202 when queued. Its agent's
 /// environment is resolved here, from the registered variables and the request's own; its
 /// <c>repos</c> are checked here too (M5e: a blank URL, two in one folder), and its <c>tools</c>
-/// against ARM's catalog (M10: every one must be known).
+/// against ARM's catalog (M10: every one must be known). A session that leaves <c>tools</c> out gets
+/// the server's default tools (<see cref="ToolsOptions.Default"/>), resolved here and stored with
+/// it, so a later change of the configuration changes neither it nor its resumes.
 /// </summary>
-public sealed class CreateSessionHandler(SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env) : ISessionsCreateHandler
+public sealed class CreateSessionHandler(
+    SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env, IOptions<ToolsOptions> tools) : ISessionsCreateHandler
 {
     public Task<SessionsCreateResponse> HandleAsync(SessionsCreateRequest request, CancellationToken cancellationToken)
     {
@@ -45,7 +49,7 @@ public sealed class CreateSessionHandler(SessionManager sessions, IdempotencySto
             return new SessionsCreateResponse.BadRequest(problem);
         }
 
-        return sessions.Create(body, agentEnv) switch
+        return sessions.Create(body with { Tools = tools.Value.For(body.Tools) }, agentEnv) switch
         {
             CreateOutcome.Started started => new SessionsCreateResponse.Created(new CreatedSession { Id = started.Session.Id }),
             CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(new CreatedSession { Id = queued.Session.Id }),

@@ -13,7 +13,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// with <paramref name="Messages"/> as what it's told next instead of the prompt
 /// (<paramref name="ProviderSessionId"/> is then unused).
 /// <paramref name="Repos"/>: the git repositories to check out in its workplace before it starts (M5e; null: none).
-/// <paramref name="Tools"/>: ARM's tools it gets instead of the provider's built-ins (M10; null or empty: the built-ins).
+/// <paramref name="Tools"/>: ARM's tools it gets instead of the provider's built-ins (M10; empty: no tools at all; null: the built-ins).
 /// </summary>
 public sealed record AgentLaunch(Guid SessionId, string Prompt, string Model, int Attempt, Guid ProviderSessionId, Guid RunId,
     IReadOnlyDictionary<string, string>? Env = null, IReadOnlyList<string>? Messages = null, string? Resume = null,

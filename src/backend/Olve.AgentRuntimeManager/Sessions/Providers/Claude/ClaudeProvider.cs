@@ -15,8 +15,8 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// machine's Claude Code setup: no user or project settings, plugins, MCP servers, claude.ai
 /// connectors, skills or memory. Only the login is shared. A session that names ARM's tools (M10)
 /// gets only those, served by <c>olve-arm-tools</c> as its one MCP server, with every built-in off;
-/// one that names none has Claude Code's built-in tools. Either way without permission prompts: the
-/// VM is the sandbox.
+/// one with an empty list has no tools at all; one without a list has Claude Code's built-in tools.
+/// Without permission prompts: the VM is the sandbox.
 /// </summary>
 public sealed class ClaudeProvider(
     IOptions<ClaudeProviderOptions> options, Supervisors supervisors, RepoCheckouts repos, ILogger<ClaudeProvider> logger, IOptions<ToolsOptions>? tools = null)
@@ -208,8 +208,9 @@ public sealed class ClaudeProvider(
     /// as its first messages (each with its uuid) and the session's <paramref name="env"/> in its environment.
     /// The supervisor checks out <paramref name="sessionRepos"/> in the workplace first (M5e; those
     /// already there are kept); the agent starts in the workplace, as without repositories, each in its own folder there.
-    /// With <paramref name="sessionTools"/> (M10) it gets only those, from ARM's tools server; every
-    /// launch of the session passes them (a start, a retry, a continuation, a resume), so none gets the built-ins back.
+    /// With <paramref name="sessionTools"/> (M10) it gets only those, from ARM's tools server (none
+    /// at all for an empty list); every launch of the session passes them (a start, a retry, a
+    /// continuation, a resume), so none gets the built-ins back.
     /// </summary>
     private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session,
         IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env, IReadOnlyList<RepoRecord>? sessionRepos,
@@ -225,17 +226,18 @@ public sealed class ClaudeProvider(
             ? McpConfig((tools?.Value ?? new ToolsOptions()).Resolved(), workDirectory, Path.Combine(folder, ToolsLaunch.JournalFileName), sessionTools)
             : null;
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
-            ResolveCommand(settings.Command), Arguments(session, model, mcpConfig), AgentEnvironment(settings, env),
+            ResolveCommand(settings.Command), Arguments(session, model, builtInsOff: sessionTools is not null, mcpConfig), AgentEnvironment(settings, env),
             [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))],
             repos.Plan(sessionId, workDirectory, sessionRepos), repos.GitTimeout, repos.CheckoutTimeout);
     }
 
     /// <summary>
     /// How the agent is launched: the lockdown flags, and <paramref name="session"/>
-    /// (<c>--session-id &lt;id&gt;</c> for a new one, <c>--resume &lt;id&gt;</c>), and with
-    /// <paramref name="mcpConfig"/> (<see cref="McpConfig"/>, M10) ARM's tools instead of the built-ins.
+    /// (<c>--session-id &lt;id&gt;</c> for a new one, <c>--resume &lt;id&gt;</c>), and for a session
+    /// with a list of tools (M10, <paramref name="builtInsOff"/>) no built-in tools, with
+    /// <paramref name="mcpConfig"/> (<see cref="McpConfig"/>) ARM's tools instead (none: no tools at all).
     /// </summary>
-    internal static IReadOnlyList<string> Arguments(string[] session, string model, string? mcpConfig = null)
+    internal static IReadOnlyList<string> Arguments(string[] session, string model, bool builtInsOff = false, string? mcpConfig = null)
     {
         List<string> arguments =
         [
@@ -250,10 +252,16 @@ public sealed class ClaudeProvider(
             // Nothing of the user's: settings (and with them hooks and plugins), MCP servers, skills.
             "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
         ];
+        if (builtInsOff || mcpConfig is not null)
+        {
+            // A list of ARM's tools (M10): no built-in at all.
+            arguments.AddRange(["--tools", ""]);
+        }
+
         if (mcpConfig is not null)
         {
-            // ARM's tools (M10): no built-in at all, and their server the only MCP server.
-            arguments.AddRange(["--tools", "", "--mcp-config", mcpConfig]);
+            // Their server the only MCP server.
+            arguments.AddRange(["--mcp-config", mcpConfig]);
         }
 
         if (!string.IsNullOrWhiteSpace(model))

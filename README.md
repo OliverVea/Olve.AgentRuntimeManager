@@ -80,8 +80,9 @@ Agents run through the `IAgentProvider` seam. `fake` runs no LLM and follows `fa
 the prompt (`fake:sleep=2s`, `fake:hang`, `fake:exit=3`, `fake:fail=…`, `fake:down=unreachable:1`; see
 `FakeScript`). `claude` runs Claude Code (`Providers/Claude/`): one `claude -p` process per session,
 spoken to in its `stream-json` protocol, with no permission prompts (the VM is the sandbox) and
-either Claude Code's built-in tools or, for a session that names `tools` (M10), only ARM's tools
-from `olve-arm-tools` as its one MCP server, but locked down otherwise (none of the machine's
+either Claude Code's built-in tools or, for a session with `tools` (M10: named, or the server's
+`Tools:Default`), only ARM's tools from `olve-arm-tools` as its one MCP server (`[]`: no tools at
+all), but locked down otherwise (none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
 variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers its
 prompt and each message after it with a turn, and ends once its last turn is over; its
@@ -348,6 +349,7 @@ Sources in priority order (highest wins):
 | `Supervisor:User` | *(ARM's own user)* | The user agents and their supervisors run as, started with `sudo -n -u` ([`docs/AGENT-USER.md`](docs/AGENT-USER.md)); `arm-agent` on the VMs |
 | `Supervisor:Sudo` | `sudo` | The `sudo` used for `Supervisor:User` |
 | `Tools:Command` | *(`olve-arm-tools` next to ARM's own executable)* | ARM's tools server (M10), which the agent of a session that names `tools` starts as its only MCP server (as the agents' user); a path, or a name on the agents' `PATH`. If it doesn't start, such a session fails at once, naming it |
+| `Tools:Default` | *(none)* | The tools a session that leaves `tools` out gets, a list of names (`Tools__Default__0=arm_bash`; `default` in `GET /api/tools`), resolved and stored when it's created; none: the provider's built-in tools. A name ARM has no tool for fails startup |
 
 ### Persistence
 

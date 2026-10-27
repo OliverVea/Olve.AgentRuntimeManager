@@ -11,6 +11,9 @@ model Tool {
 
   /** What it does, in one line. */
   description: string;
+
+  /** Whether a session that leaves `tools` out gets it (the server's configuration). */
+  default: boolean;
 }
 
 @route("/tools")

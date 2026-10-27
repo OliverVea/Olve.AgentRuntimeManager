@@ -103,6 +103,22 @@ describe("session create", () => {
     expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, tools: ["arm_bash", "arm_file_read"] });
   });
 
+  test("--no-tools sends an empty list; without --tool or --no-tools, tools is left out (the server's defaults)", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    await cli(["session", "create", "x", ...required, "--no-tools"], f);
+    await cli(["session", "create", "x", ...required], f);
+    expect(f.requests[0]!.body).toEqual({ prompt: "x", ...requiredBody, tools: [] });
+    expect(f.requests[1]!.body).toEqual({ prompt: "x", ...requiredBody });
+  });
+
+  test("--no-tools with --tool is a usage error", async () => {
+    const f = fakeFetch(() => ({ status: 201, body: created }));
+    const r = await cli(["session", "create", "x", ...required, "--no-tools", "--tool", "arm_bash"], f);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain("--no-tools and --tool exclude each other");
+    expect(f.requests.length).toBe(0);
+  });
+
   test("an unknown tool is the server's 400, exit 1", async () => {
     const f = fakeFetch(() => ({ status: 400, body: errorBody("UNKNOWN_TOOL", "No tool 'nope'. ARM's tools: arm_bash.") }));
     const r = await cli(["session", "create", "x", ...required, "--tool", "nope"], f);
@@ -296,13 +312,13 @@ describe("session get", () => {
     expect(JSON.parse(r.stdout).repos).toEqual(repos);
   });
 
-  test("shows the session's tools on one line; without any (or an empty list) there is no tools line", async () => {
+  test("shows the session's tools on one line, `none` for an empty list; unset (the built-ins) has no tools line", async () => {
     const withTools = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: ["arm_bash", "arm_file_read"] } })));
     expect(withTools.stdout).toContain("tools           arm_bash, arm_file_read");
-    for (const body of [session, { ...session, tools: [] }]) {
-      const r = await cli(["session", "get", id], fakeFetch(() => ({ body })));
-      expect(r.stdout).not.toContain("tools");
-    }
+    const none = await cli(["session", "get", id], fakeFetch(() => ({ body: { ...session, tools: [] } })));
+    expect(none.stdout).toContain("tools           none");
+    const unset = await cli(["session", "get", id], fakeFetch(() => ({ body: session })));
+    expect(unset.stdout).not.toContain("tools");
   });
 
   test("a session without repos has no repos line", async () => {

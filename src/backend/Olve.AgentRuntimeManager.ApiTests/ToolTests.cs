@@ -35,15 +35,26 @@ public class ToolTests(ApiTarget target)
     }
 
     [Test]
-    public async Task Session_WithoutTools_HasNone()
+    public async Task Session_WithoutTools_GetsTheServersDefaults_OrNoneWithoutAny()
     {
-        var session = await target.CreateAuthenticatedClient().CreateSessionAsync("fake:sleep=0ms");
+        var client = target.CreateAuthenticatedClient();
+        var defaults = (await client.GetFromJsonAsync<ToolBody[]>("/api/tools", Wire.JsonOptions))!.Where(t => t.Default).Select(t => t.Name).ToList();
 
-        await Assert.That(session.Tools).IsNull();
+        var session = await client.CreateSessionAsync("fake:sleep=0ms");
+
+        // Unset: the provider's built-in tools (a server without defaults).
+        if (defaults.Count == 0)
+        {
+            await Assert.That(session.Tools).IsNull();
+        }
+        else
+        {
+            await Assert.That(session.Tools).IsEquivalentTo(defaults);
+        }
     }
 
     [Test]
-    public async Task Session_WithAnEmptyList_KeepsItAsGiven()
+    public async Task Session_WithAnEmptyList_HasNoTools_EvenWithDefaults()
     {
         var session = await target.CreateAuthenticatedClient().CreateSessionAsync(new CreateSessionBody("fake:sleep=0ms") { Tools = [] });
 

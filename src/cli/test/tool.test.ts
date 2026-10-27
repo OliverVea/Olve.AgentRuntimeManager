@@ -7,8 +7,8 @@ const cli = (argv: string[], f: ReturnType<typeof fakeFetch>) =>
   runCli([...argv, "--url", url, "--token", "tok"], { fetch: f.fetch });
 
 const tools = [
-  { name: "arm_bash", description: "Run a shell command." },
-  { name: "arm_file_read", description: "Read a text file." },
+  { name: "arm_bash", description: "Run a shell command.", default: true },
+  { name: "arm_file_read", description: "Read a text file.", default: false },
 ];
 
 describe("tool list", () => {
@@ -19,9 +19,9 @@ describe("tool list", () => {
     expect(f.requests[0]!.method).toBe("GET");
     expect(f.requests[0]!.url).toBe(`${url}/api/tools`);
     expect(r.stdout.split("\n")).toEqual([
-      "TOOL           DESCRIPTION",
-      "arm_bash       Run a shell command.",
-      "arm_file_read  Read a text file.",
+      "TOOL           DEFAULT  DESCRIPTION",
+      "arm_bash       yes      Run a shell command.",
+      "arm_file_read  no       Read a text file.",
     ]);
   });
 

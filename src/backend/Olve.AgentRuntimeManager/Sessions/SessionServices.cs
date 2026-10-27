@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Activities;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
@@ -22,7 +23,8 @@ public static class SessionServices
             .Validate(o => ModelOptions.AreValid(o.Models), ModelOptions.Invalid(ClaudeProviderOptions.Section)).ValidateOnStart();
         services.Configure<SupervisorOptions>(configuration.GetSection(SupervisorOptions.Section));
         services.Configure<RepoOptions>(configuration.GetSection(RepoOptions.Section));
-        services.Configure<ToolsOptions>(configuration.GetSection(ToolsOptions.Section));
+        services.AddOptions<ToolsOptions>().Bind(configuration.GetSection(ToolsOptions.Section)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ToolsOptions>, ToolsOptionsValidation>();
         services.AddSingleton<Supervisors>();
         services.AddSingleton<RepoCheckouts>();
         services.TryAddSingleton(TimeProvider.System);

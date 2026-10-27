@@ -11,7 +11,7 @@ arm <group> <command> [arguments] [options]
 
 arm session create <prompt> [--provider X] [--model X] [--caller X] [--timeout-seconds N]
                    [--idempotency-key KEY] [--env NAME=VALUE]... [--use-env NAME]...
-                   [--repo URL[#REF]]... [--tool NAME]...
+                   [--repo URL[#REF]]... [--tool NAME]... [--no-tools]
 arm session list [--status X,Y] [--caller X] [--after DATE] [--before DATE] [--limit N] [--offset N]
 arm session get <id>
 arm session conversation <id>
@@ -128,10 +128,14 @@ repositories that would land in one folder are the server's 400.
 
 ## Tools
 
-`arm tool list` shows ARM's own tools (`arm_bash`, `arm_file_read`, …), each with what it does.
-`arm session create --tool NAME` (repeatable) gives the agent those tools and only those: naming any
-turns the provider's built-in tools off. Without `--tool` the agent has the provider's built-ins.
-`arm session get` shows them as given (`tools  arm_bash, arm_file_read`); its conversation and
+`arm tool list` shows ARM's own tools (`arm_bash`, `arm_file_read`, …), each with whether it's one
+of the server's defaults and what it does. `arm session create --tool NAME` (repeatable) gives the
+agent those tools and only those: naming any turns the provider's built-in tools off.
+`--no-tools` gives it no tools at all, neither ARM's nor the built-ins (it excludes `--tool`).
+With neither, the server decides: its default tools (`default  yes` in `arm tool list`), or the
+provider's built-ins when it has none; the CLI has no defaults of its own.
+`arm session get` shows what the session got (`tools  arm_bash, arm_file_read`, `tools  none`;
+no `tools` line: the provider's built-ins); its conversation and
 activity show them by ARM's name (`⚙ arm_bash → git status`). A name ARM doesn't have is the
 server's 400 `UNKNOWN_TOOL` (exit 1), listing the ones it has. If ARM's tools server can't start, the session fails at once with an error that says so.
 

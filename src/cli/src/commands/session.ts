@@ -47,8 +47,8 @@ export function formatSession(s: Session): string {
     ["timeoutSeconds", s.timeoutSeconds],
     ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
-    // None (or an empty list): the provider's built-in tools.
-    ["tools", s.tools?.length ? s.tools.join(", ") : undefined],
+    // Unset: the provider's built-in tools; an empty list: none at all.
+    ["tools", s.tools === undefined || s.tools === null ? undefined : s.tools.length ? s.tools.join(", ") : "none"],
     // One line per repo: as given, then the folder and branch ARM gave it.
     ...(s.repos ?? []).map(
       (r, i) =>
@@ -107,10 +107,18 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
     env: keyValues(options, "env"),
     useEnv: repeated(options, "use-env"),
     repos: repos(options, "repo"),
-    tools: repeated(options, "tool"),
+    tools: tools(options),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
+}
+
+/** `--tool` as given, `--no-tools` as `[]` (no tools at all), neither unset (the server's defaults). */
+function tools(options: OptionValues): string[] | undefined {
+  const named = repeated(options, "tool");
+  if (options["no-tools"] !== true) return named;
+  if (named !== undefined) throw new UsageError("--no-tools and --tool exclude each other");
+  return [];
 }
 
 /** What became of a message, in words (typed, so a delivery added to the contract fails to compile here). */
@@ -179,9 +187,13 @@ export const sessionGroup: CommandGroup = {
         tool: {
           type: "string",
           description:
-            "One of ARM's tools to give the agent (see `arm tool list`); naming any gives it only these, without the provider's built-in tools (default: the built-ins)",
+            "One of ARM's tools to give the agent (see `arm tool list`); naming any gives it only these, without the provider's built-in tools (default: the server's default tools, else the built-ins)",
           valueName: "NAME",
           multiple: true,
+        },
+        "no-tools": {
+          type: "boolean",
+          description: "Give the agent no tools at all: neither ARM's nor the provider's built-ins (excludes --tool)",
         },
       },
       async run({ args, options, client, settings, user }) {

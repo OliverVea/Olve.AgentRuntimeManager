@@ -87,6 +87,32 @@ public class SessionServicesTests
         await Assert.That(() => services.GetRequiredService<IOptions<FakeProviderOptions>>().Value).Throws<OptionsValidationException>();
     }
 
+    [Test]
+    public async Task ByDefault_ThereAreNoDefaultTools()
+    {
+        using var services = Services([]);
+
+        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Default).IsEmpty();
+    }
+
+    [Test]
+    public async Task ConfiguredDefaultTools_AreBound_InOrder()
+    {
+        using var services = Services(new() { ["Tools:Default:0"] = "arm_file_read", ["Tools:Default:1"] = "arm_bash" });
+
+        await Assert.That(services.GetRequiredService<IOptions<ToolsOptions>>().Value.Default)
+            .IsEquivalentTo(["arm_file_read", "arm_bash"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task ADefaultToolArmDoesntHave_FailsValidation_NamingIt()
+    {
+        using var services = Services(new() { ["Tools:Default:0"] = "arm_bash", ["Tools:Default:1"] = "Bash" });
+
+        var failure = await Assert.That(() => services.GetRequiredService<IOptions<ToolsOptions>>().Value).Throws<OptionsValidationException>();
+        await Assert.That(failure!.Message).StartsWith("Tools:Default names 'Bash', which ARM has no tool for. ARM's tools: arm_bash, ");
+    }
+
     private static Type[] Providers(Dictionary<string, string?> settings)
     {
         var services = new ServiceCollection();

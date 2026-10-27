@@ -3,11 +3,12 @@ import { unwrap } from "../api";
 import { formatTable } from "../output";
 import type { CommandGroup } from "../registry";
 
-/** One row per tool: its name, what a session names in `--tool`, and what it does. */
+/** One row per tool: its name (what a session names in `--tool`), whether a session without `--tool` gets it, and what it does. */
 export function formatTools(tools: readonly Tool[]): string {
   if (tools.length === 0) return "No tools.";
   return formatTable(tools, [
     { header: "tool", value: (t: Tool) => t.name },
+    { header: "default", value: (t: Tool) => (t.default ? "yes" : "no") },
     { header: "description", value: (t: Tool) => t.description },
   ]);
 }

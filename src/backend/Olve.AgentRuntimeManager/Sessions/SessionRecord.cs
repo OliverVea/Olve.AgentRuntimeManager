@@ -35,8 +35,9 @@ public sealed record SessionRecord
     public IReadOnlyList<RepoRecord>? Repos { get; init; }
 
     /// <summary>
-    /// ARM's tools its agent gets (M10), as given: naming any turns the provider's built-in tools
-    /// off. Null or empty: the built-ins. Every launch, retry, resume and continuation uses it.
+    /// ARM's tools its agent gets (M10): as given, or the server's defaults when it gave none
+    /// (resolved when it's created). Any turn the provider's built-in tools off; empty: no tools at
+    /// all; null: the built-ins. Every launch, retry, resume and continuation uses it.
     /// </summary>
     public IReadOnlyList<string>? Tools { get; init; }
 

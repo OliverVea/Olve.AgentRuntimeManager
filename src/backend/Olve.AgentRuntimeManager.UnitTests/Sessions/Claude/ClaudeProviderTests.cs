@@ -208,13 +208,26 @@ public class ClaudeProviderTests
     }
 
     [Test]
-    public async Task NoTools_OrAnEmptyList_KeepTheBuiltIns()
+    public async Task AnEmptyList_IsNoToolsAtAll_NeitherBuiltInsNorArmsServer()
     {
         var empty = Launch("Say READY") with { Tools = [] };
 
         await Provider().Start(empty).Completion.WaitAsync(Guard);
 
         var (arguments, _) = await Invocation(empty);
+        await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
+        await Assert.That(arguments).DoesNotContain("--mcp-config");
+        await Assert.That(arguments).Contains("--strict-mcp-config");
+    }
+
+    [Test]
+    public async Task NoList_KeepsTheBuiltIns()
+    {
+        var unset = Launch("Say READY");
+
+        await Provider().Start(unset).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(unset);
         await Assert.That(arguments).DoesNotContain("--tools");
         await Assert.That(arguments).DoesNotContain("--mcp-config");
     }

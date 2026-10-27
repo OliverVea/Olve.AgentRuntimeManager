@@ -10,8 +10,8 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// <paramref name="Repos"/> (null: none; checked out already, or checked out by a run launched again).
 /// <paramref name="Resume"/> and <paramref name="Messages"/>: how the run was launched (the provider
 /// session it resumed, if it did, and the messages it was given), to launch it again the same way
-/// if its agent never started. <paramref name="Tools"/>: ARM's tools its agent gets (M10; null or
-/// empty: the provider's built-ins), on a run launched again or resumed as at its start.
+/// if its agent never started. <paramref name="Tools"/>: ARM's tools its agent gets (M10; empty: none at
+/// all; null: the provider's built-ins), on a run launched again or resumed as at its start.
 /// </summary>
 public sealed record AgentRecovery(Guid SessionId, string Prompt, string Model, string ProviderSessionId, Guid RunId, Guid ResumeRunId,
     IReadOnlyDictionary<string, string>? Env = null, IReadOnlyList<RepoRecord>? Repos = null,
