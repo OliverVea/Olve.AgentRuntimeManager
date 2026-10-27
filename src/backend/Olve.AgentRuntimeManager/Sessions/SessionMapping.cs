@@ -23,6 +23,7 @@ public static class SessionMapping
         Repos = session.Repos?.Where(r => r.Folder is not null && r.Branch is not null)
             .Select(r => new SessionRepo { Url = r.Url, Ref = r.Ref, Folder = r.Folder, Branch = r.Branch }).ToList(),
         Tools = session.Tools,
+        Skills = session.Skills,
         Attempts = session.Attempts,
         RetriesLeft = Math.Max(0, providerRetries - session.FailedAttempts),
         CreatedAt = session.CreatedAt,

@@ -26,6 +26,10 @@ public static class SessionErrors
     public static ArmError UnknownTool(IReadOnlyList<string> unknown, IReadOnlyList<string> known) =>
         ArmError.Create("UNKNOWN_TOOL", $"No tool {string.Join(", ", unknown.Select(name => $"'{name}'"))}. ARM's tools: {string.Join(", ", known)}.");
 
+    public static ArmError UnknownSkill(IReadOnlyList<string> unknown, IReadOnlyList<string> known) =>
+        ArmError.Create("UNKNOWN_SKILL", $"No skill {string.Join(", ", unknown.Select(name => $"'{name}'"))}. "
+            + (known.Count == 0 ? "No skills are registered." : $"Registered skills: {string.Join(", ", known)}."));
+
     public static ArmError BlankPrompt() =>
         ArmError.Create(ArmErrors.InvalidRequest, "'prompt' cannot be blank.");
 

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Persistence;
 
@@ -34,6 +35,9 @@ public sealed class TestDatabase : IDisposable
 
     /// <summary>The deleted sessions' worktrees still to be removed, on this database.</summary>
     public IWorktreeRemovalStore Removals() => new EfWorktreeRemovalStore(new PooledDbContextFactory<ArmDbContext>(_options));
+
+    /// <summary>The skills registry (M10b), on this database.</summary>
+    public ISkillStore Skills() => new EfSkillStore(new PooledDbContextFactory<ArmDbContext>(_options));
 
     public void Dispose() => Directory.Delete(_folder, recursive: true);
 }

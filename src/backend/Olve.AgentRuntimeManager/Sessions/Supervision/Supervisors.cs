@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Supervision;
@@ -34,10 +35,12 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <paramref name="repos"/> in the workplace first (M5e), each git command bounded by
     /// <paramref name="gitTimeout"/> and the whole of it by <paramref name="checkoutTimeout"/>; the agent
     /// starts in the workplace, whatever the number of repositories (each in its own folder there).
+    /// Then it copies the session's <paramref name="skills"/> into its folder (M10b; those already there are kept).
     /// </summary>
     public SupervisedAgent Launch(Guid sessionId, Guid runId, string folder, string workingDirectory,
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input,
-        IReadOnlyList<SupervisorRepo>? repos = null, TimeSpan? gitTimeout = null, TimeSpan? checkoutTimeout = null)
+        IReadOnlyList<SupervisorRepo>? repos = null, TimeSpan? gitTimeout = null, TimeSpan? checkoutTimeout = null,
+        IReadOnlyList<SupervisorSkill>? skills = null)
     {
         var settings = options.Value;
         var socketPath = SupervisorSockets.Run(SocketRoot(settings), sessionId, runId);
@@ -76,6 +79,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             WorkingDirectory = workingDirectory,
             Workplace = workingDirectory,
             Repos = repos ?? [],
+            Skills = skills ?? [],
             GitTimeout = gitTimeout ?? SupervisorLaunch.DefaultGitTimeout,
             CheckoutTimeout = checkoutTimeout,
             Input = input,
@@ -87,14 +91,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         var info = StartInfo(settings, account, [Command(settings)]);
         info.WorkingDirectory = folder;
         info.RedirectStandardInput = true;
-        info.Environment.Clear();
-        foreach (var name in SupervisorEnvironment)
-        {
-            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
-            {
-                info.Environment[name] = value;
-            }
-        }
+        SupervisorOnly(info);
 
         var process = Process.Start(info) ?? throw new InvalidOperationException($"The supervisor '{info.FileName}' did not start.");
         try
@@ -291,15 +288,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         var settings = options.Value;
         var start = StartInfo(settings, _account.Value, [Command(settings), "remove-worktree", shared, worktree]);
         start.RedirectStandardError = true;
-        start.Environment.Clear();
-        foreach (var name in SupervisorEnvironment)
-        {
-            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
-            {
-                start.Environment[name] = value;
-            }
-        }
-
+        SupervisorOnly(start);
         try
         {
             using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
@@ -322,6 +311,115 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
 
     /// <summary>The supervisor's <c>remove-worktree</c> bounds itself at 20 s; this leaves it room to say so.</summary>
     public static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(25);
+
+    /// <summary>The supervisor's <c>skill-install</c> exit code for a source with no valid <c>SKILL.md</c> at its path (what's wrong is on stderr).</summary>
+    public const int SkillInstallInvalid = 3;
+
+    /// <summary>
+    /// Installs a skill into the registry (M10b), as the user whose the registry is (the agent
+    /// user's, like the checkouts): the supervisor's <c>skill-install</c>, given <paramref name="install"/>
+    /// as JSON on its standard input. It fetches the source, requires a valid <c>SKILL.md</c>, puts the
+    /// folder at <c>&lt;root&gt;/&lt;name&gt;</c> and prints the <c>SKILL.md</c>. Exit 0: installed, the file
+    /// in the output; 1: the fetch failed, git's message in the error; <see cref="SkillInstallInvalid"/>:
+    /// no valid <c>SKILL.md</c>. Bounded by <paramref name="timeout"/> (the supervisor's git timeout) and a
+    /// little, so its own message about a slow git arrives first; past that it's killed and the result says so.
+    /// </summary>
+    public async Task<SupervisorCommandResult> InstallSkillAsync(SupervisorSkillInstall install, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, _account.Value, [Command(settings), "skill-install"]);
+        start.RedirectStandardInput = true;
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        SupervisorOnly(start);
+        Process process;
+        try
+        {
+            process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return new SupervisorCommandResult(-1, "", exception.Message);
+        }
+
+        using (process)
+        {
+            try
+            {
+                await process.StandardInput.WriteAsync(JsonSerializer.Serialize(install));
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // It exited before taking its input: its exit code and error say why.
+            }
+
+            var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var error = process.StandardError.ReadToEndAsync(cancellationToken);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limit.CancelAfter(timeout + settings.ConnectTimeout);
+            try
+            {
+                await process.WaitForExitAsync(limit.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Its git too (a fetch that hangs): nothing of the install may outlive the request.
+                process.Kill(entireProcessTree: true);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                return new SupervisorCommandResult(-1, "", $"installing it took more than {timeout.TotalSeconds:0} s", TimedOut: true);
+            }
+
+            return new SupervisorCommandResult(process.ExitCode, (await output).Trim(), (await error).Trim());
+        }
+    }
+
+    /// <summary>
+    /// Removes a skill's folder from the registry (M10b), as the user whose it is: the supervisor's
+    /// <c>skill-remove</c> (fine with one already gone). The error if it couldn't (bounded).
+    /// </summary>
+    public string? RemoveSkill(string root, string name)
+    {
+        var settings = options.Value;
+        var start = StartInfo(settings, _account.Value, [Command(settings), "skill-remove", root, name]);
+        start.RedirectStandardError = true;
+        SupervisorOnly(start);
+        try
+        {
+            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(RemoveTimeout))
+            {
+                process.Kill(entireProcessTree: true);
+                return $"removing it took more than {RemoveTimeout.TotalSeconds:0} s";
+            }
+
+            return process.ExitCode == 0 ? null
+                : error.Wait(settings.ConnectTimeout) && error.Result.Trim() is { Length: > 0 } message ? message
+                : $"exit code {process.ExitCode}";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    /// <summary>The supervisor's own environment (<see cref="SupervisorEnvironment"/>), nothing of ARM's: what git needs comes in the launch.</summary>
+    private static void SupervisorOnly(ProcessStartInfo start)
+    {
+        start.Environment.Clear();
+        foreach (var name in SupervisorEnvironment)
+        {
+            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
+            {
+                start.Environment[name] = value;
+            }
+        }
+    }
 
     /// <summary>
     /// How the supervisor binary is started with <paramref name="arguments"/> (the binary first):

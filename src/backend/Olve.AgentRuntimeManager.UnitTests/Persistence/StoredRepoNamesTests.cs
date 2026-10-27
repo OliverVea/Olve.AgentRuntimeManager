@@ -144,5 +144,6 @@ public sealed class StoredRepoNamesTests : IDisposable
         CreatedAt = DateTimeOffset.UnixEpoch,
         Repos = [RepoNames.Record(id, "https://x/placeholder")],
         Tools = [],
+        Skills = [],
     };
 }

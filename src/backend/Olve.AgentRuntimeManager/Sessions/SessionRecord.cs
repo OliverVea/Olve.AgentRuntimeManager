@@ -42,6 +42,13 @@ public sealed record SessionRecord
     public required IReadOnlyList<string> Tools { get; init; }
 
     /// <summary>
+    /// The skills its agent can load (M10b): as given, or the registered defaults when it gave none
+    /// (resolved when it's created); empty: none. Copied into the session's folder when its agent
+    /// first starts; every launch names them to the tools server.
+    /// </summary>
+    public required IReadOnlyList<string> Skills { get; init; }
+
+    /// <summary>
     /// Messages held for its agent (M11), in the order they came: sent while it was queued, or
     /// while its agent could no longer take them. Its next agent gets them when it starts, after
     /// the prompt (or instead of it, when the session continues).

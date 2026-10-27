@@ -47,5 +47,6 @@ public sealed class EmptyToolsMigrationTests : IDisposable
         Caller = "tests",
         CreatedAt = DateTimeOffset.UnixEpoch,
         Tools = tools,
+        Skills = [],
     };
 }

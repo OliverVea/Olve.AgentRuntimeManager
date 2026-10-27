@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Variables;
 
 namespace Olve.AgentRuntimeManager.Persistence;
@@ -14,11 +15,14 @@ public sealed class ArmDbContext(DbContextOptions<ArmDbContext> options) : DbCon
 
     public DbSet<WorktreeRemovalRecord> WorktreeRemovals => Set<WorktreeRemovalRecord>();
 
+    public DbSet<SkillRecord> Skills => Set<SkillRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new SessionRecordConfiguration());
         modelBuilder.ApplyConfiguration(new EnvVariableRecordConfiguration());
         modelBuilder.ApplyConfiguration(new WorktreeRemovalRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new SkillRecordConfiguration());
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
