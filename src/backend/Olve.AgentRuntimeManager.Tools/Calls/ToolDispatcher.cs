@@ -86,6 +86,7 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         ToolCatalog.FileDelete => Task.Run(() => FileDeleteTool.Run(arguments, context), CancellationToken.None),
         ToolCatalog.FileCopy => Task.Run(() => FileTransfer.Copy(arguments, context), CancellationToken.None),
         ToolCatalog.FileMove => Task.Run(() => FileTransfer.Move(arguments, context), CancellationToken.None),
+        ToolCatalog.SkillLoad => Task.Run(() => SkillLoadTool.Run(arguments, context), CancellationToken.None),
         _ => throw new InvalidOperationException($"No handler for the catalog's tool '{name}'."),
     };
 }

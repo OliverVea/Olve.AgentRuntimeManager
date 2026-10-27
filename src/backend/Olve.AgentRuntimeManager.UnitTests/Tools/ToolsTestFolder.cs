@@ -17,7 +17,10 @@ public sealed class ToolsTestFolder : IDisposable
 
     internal ProcessGroups Groups { get; } = new();
 
-    internal ToolContext Context => new(Workplace, Groups);
+    /// <summary>The session's skills (M10b): none unless a test sets some.</summary>
+    internal SessionSkills Skills { get; set; } = SessionSkills.None;
+
+    internal ToolContext Context => new(Workplace, Groups, Skills);
 
     public string PathOf(string relative) => Path.Combine(Workplace, relative);
 

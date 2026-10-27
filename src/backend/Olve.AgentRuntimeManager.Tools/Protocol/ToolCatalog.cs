@@ -29,6 +29,9 @@ public static class ToolCatalog
     /// <summary><c>file_path</c> (the source), <c>destination_path</c>, <c>overwrite</c>?.</summary>
     public const string FileMove = "arm_file_move";
 
+    /// <summary><c>name</c>: one of the session's skills (M10b); the tool's description lists them.</summary>
+    public const string SkillLoad = "arm_skill_load";
+
     public static IReadOnlyList<ArmTool> All { get; } =
     [
         new(Bash, "Run a shell command in a fresh bash, in the workplace or a given folder."),
@@ -38,6 +41,7 @@ public static class ToolCatalog
         new(FileDelete, "Delete a file, or a folder with recursive."),
         new(FileCopy, "Copy a file or folder; refuses an existing target (overwrite replaces files only, never folders)."),
         new(FileMove, "Move or rename a file or folder; refuses an existing target (overwrite replaces files only, never folders)."),
+        new(SkillLoad, "Load one of the session's skills: instructions to follow for a kind of task."),
     ];
 
     public static ArmTool? Find(string name) => All.FirstOrDefault(tool => tool.Name == name);
