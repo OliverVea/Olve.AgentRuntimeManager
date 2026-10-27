@@ -8,6 +8,7 @@ import "./conversation.tsp";
 import "./activity.tsp";
 import "./providers.tsp";
 import "./tools.tsp";
+import "./skills.tsp";
 import "./env.tsp";
 import "./events.tsp";
 

@@ -6,6 +6,7 @@ namespace Olve.AgentRuntimeManager.Supervisor.Protocol;
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SupervisorLaunch))]
 [JsonSerializable(typeof(SupervisorRepo))]
+[JsonSerializable(typeof(SupervisorSkill))]
 [JsonSerializable(typeof(SupervisorInfo))]
 [JsonSerializable(typeof(SupervisorExit))]
 [JsonSerializable(typeof(SupervisorMessage))]

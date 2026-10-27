@@ -156,7 +156,7 @@ provider's built-ins are off); one that names none keeps the provider's built-in
 |---|---|
 | Shell | `arm_bash` |
 | Files | `arm_file_read`, `arm_file_edit`, `arm_file_create`, `arm_file_delete`, `arm_file_copy`, `arm_file_move` |
-| Skills | `arm_skill_list`, `arm_skill_load` (M10b) |
+| Skills | `arm_skill_load` (M10b; its description lists the session's skills) |
 | Messaging | `arm_message_user`, `arm_check_user_replies` |
 
 ```json
@@ -204,20 +204,22 @@ policy allow reads broadly while restricting writes.
 
 | CLI | API | Purpose |
 |---|---|---|
-| `arm skill list [--text "..."] [--source github\|local]` | `POST /api/skills/search` | Search |
-| `arm skill get <name>` | `GET /api/skills/:name` | Metadata + content |
-| `arm skill install <source> [--name override]` | `POST /api/skills` | Install/upsert (`github:user/repo[/path]` or a local directory) |
+| `arm skill list` | `GET /api/skills` | Every registered skill |
+| `arm skill get <name>` | `GET /api/skills/:name` | Metadata and source |
+| `arm skill install <name> <url>[#ref] [--path skills/pdf] [--default]` | `PUT /api/skills/:name` | Install from a git repository, or replace (M10b) |
 | `arm skill remove <name>` | `DELETE /api/skills/:name` | Remove |
-| `arm tool list [--text "..."]` | `POST /api/tools/search` | Search |
-| `arm tool get <name>` | `GET /api/tools/:name` | Get |
-| `arm tool add <name> --command "..." [--args "..."] [--env K=V]` | `POST /api/tools` | Add an external MCP server |
-| `arm tool update <name> [--command …] [--args …] [--env …]` | `PATCH /api/tools/:name` | Update |
-| `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove |
+| `arm tool list` | `GET /api/tools` | ARM's tools, and the registered external servers (M10c) |
+| `arm tool add <name> --command "..." [--args "..."] [--env K=V]` | `POST /api/tools` | Add an external MCP server (M10c) |
+| `arm tool remove <name>` | `DELETE /api/tools/:name` | Remove (M10c) |
 
-A skill is a directory with a `SKILL.md` (YAML frontmatter: name, description, triggers). When a
-session enables `arm_skill_list`/`arm_skill_load`, the agent sees the list of its skills and
-loads full content on demand with `arm_skill_load`. ARM's own tools (`arm_*`) are always listed;
-custom tools are external MCP servers a session can enable (M10b).
+A skill is a folder with a `SKILL.md` (the open Agent Skills format: YAML frontmatter `name` and
+`description`, then the instructions) and the files it brings along, installed from a folder of a
+git repository, so published Claude skills install as they are. A session names its skills
+(`skills`; unset: the ones flagged `default`) and copies them when its agent first starts. The
+agent loads one on demand with `arm_skill_load`, whose description lists the session's skills.
+ARM's own tools (`arm_*`) are always listed; external tools are MCP servers a session turns on
+by naming the server in `tools` (M10c). Nothing of this depends on the provider: skills reach the
+agent through ARM's tools server, whatever runs the agent.
 
 ---
 

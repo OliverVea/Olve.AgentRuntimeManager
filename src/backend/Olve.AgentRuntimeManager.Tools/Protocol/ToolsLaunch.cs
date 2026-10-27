@@ -2,7 +2,7 @@ namespace Olve.AgentRuntimeManager.Tools.Protocol;
 
 /// <summary>
 /// How ARM starts <c>olve-arm-tools</c> through the agent (the provider's MCP config):
-/// <c>olve-arm-tools --workplace &lt;folder&gt; --journal &lt;file&gt; --tool &lt;name&gt; [--tool …]</c>.
+/// <c>olve-arm-tools --workplace &lt;folder&gt; --journal &lt;file&gt; --tool &lt;name&gt; [--tool …] [--skill &lt;name&gt;=&lt;folder&gt; …]</c>.
 /// It lists only the tools named and refuses calls to any other.
 /// </summary>
 public static class ToolsLaunch
@@ -21,6 +21,16 @@ public static class ToolsLaunch
 
     /// <summary>A tool to serve, by name (<see cref="ToolCatalog"/>); repeated for each.</summary>
     public const string Tool = "--tool";
+
+    /// <summary>
+    /// A skill the session's agent can load with <c>arm_skill_load</c> (M10b), as <c>&lt;name&gt;=&lt;folder&gt;</c>:
+    /// the name sessions use and the skill's folder (its <c>SKILL.md</c> and other files), the
+    /// session's own copy; repeated for each. The tool's description lists them.
+    /// </summary>
+    public const string Skill = "--skill";
+
+    /// <summary>The folder in the session's folder that holds its copies of its skills, one folder per skill, by name.</summary>
+    public const string SkillsFolderName = "skills";
 
     /// <summary>The journal's file name in the session's folder.</summary>
     public const string JournalFileName = "tools.jsonl";

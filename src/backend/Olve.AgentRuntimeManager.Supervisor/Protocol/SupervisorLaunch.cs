@@ -31,6 +31,13 @@ public sealed record SupervisorLaunch
     /// </summary>
     public IReadOnlyList<SupervisorRepo> Repos { get; init; } = [];
 
+    /// <summary>
+    /// Skills to copy into the session's folder before the agent starts (M10b), after the checkout;
+    /// one already there is left as it is. A copy that fails ends the run without an agent, like a
+    /// checkout that fails.
+    /// </summary>
+    public IReadOnlyList<SupervisorSkill> Skills { get; init; } = [];
+
     /// <summary>The longest any one git command of a checkout may take; then it's killed and the checkout fails.</summary>
     public TimeSpan GitTimeout { get; init; } = DefaultGitTimeout;
 
