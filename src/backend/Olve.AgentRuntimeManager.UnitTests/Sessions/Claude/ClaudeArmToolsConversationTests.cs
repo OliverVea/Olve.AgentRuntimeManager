@@ -24,6 +24,7 @@ public class ClaudeArmToolsConversationTests
         Caller = "tests",
         CreatedAt = DateTimeOffset.UnixEpoch,
         Tools = ["arm_probe"],
+        Skills = [],
     };
 
     [Test]

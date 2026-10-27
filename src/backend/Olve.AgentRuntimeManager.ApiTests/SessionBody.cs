@@ -24,4 +24,5 @@ public sealed record SessionBody(
     IReadOnlyDictionary<string, string>? Env = null,
     IReadOnlyList<string>? UseEnv = null,
     IReadOnlyList<SessionRepoBody>? Repos = null,
-    IReadOnlyList<string>? Tools = null);
+    IReadOnlyList<string>? Tools = null,
+    IReadOnlyList<string>? Skills = null);

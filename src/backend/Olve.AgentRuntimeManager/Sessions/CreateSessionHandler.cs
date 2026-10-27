@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Tools.Protocol;
 using Olve.AgentRuntimeManager.Variables;
 
@@ -12,10 +13,13 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// <c>repos</c> are checked here too (M5e: a blank URL, two in one folder), and its <c>tools</c>
 /// against ARM's catalog (M10: every one must be known). A session that leaves <c>tools</c> out gets
 /// the server's default tools (<see cref="ToolsOptions.Default"/>), resolved here and stored with
-/// it, so a later change of the configuration changes neither it nor its resumes.
+/// it, so a later change of the configuration changes neither it nor its resumes. Its <c>skills</c>
+/// the same way (M10b): every one must be registered, and one that leaves them out gets the
+/// registered skills flagged default.
 /// </summary>
 public sealed class CreateSessionHandler(
-    SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env, IOptions<ToolsOptions> tools) : ISessionsCreateHandler
+    SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env, IOptions<ToolsOptions> tools, ISkillStore skills)
+    : ISessionsCreateHandler
 {
     public Task<SessionsCreateResponse> HandleAsync(SessionsCreateRequest request, CancellationToken cancellationToken)
     {
@@ -43,13 +47,19 @@ public sealed class CreateSessionHandler(
             return new SessionsCreateResponse.BadRequest(SessionErrors.UnknownTool(unknownTools, [.. ToolCatalog.All.Select(t => t.Name)]));
         }
 
+        var (sessionSkills, skillProblem) = SessionSkills.Resolve(body.Skills, skills);
+        if (skillProblem is not null)
+        {
+            return new SessionsCreateResponse.BadRequest(skillProblem);
+        }
+
         var (agentEnv, problem) = SessionEnv.Resolve(body, env);
         if (problem is not null)
         {
             return new SessionsCreateResponse.BadRequest(problem);
         }
 
-        return sessions.Create(body with { Tools = tools.Value.For(body.Tools) }, agentEnv) switch
+        return sessions.Create(body with { Tools = tools.Value.For(body.Tools), Skills = sessionSkills }, agentEnv) switch
         {
             CreateOutcome.Started started => new SessionsCreateResponse.Created(new CreatedSession { Id = started.Session.Id }),
             CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(new CreatedSession { Id = queued.Session.Id }),

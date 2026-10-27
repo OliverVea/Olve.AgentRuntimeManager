@@ -4,6 +4,7 @@ using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Health;
 using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Variables;
 using Olve.Utilities.AsyncOnStartup;
 
@@ -17,6 +18,7 @@ builder.Services.AddEventServices(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddSessionServices(builder.Configuration);
 builder.Services.AddEnvServices();
+builder.Services.AddSkillServices(builder.Configuration);
 builder.Services.AddSingleton<IAuthConfigGetHandler, GetAuthConfigHandler>();
 builder.Services.AddSingleton<IServerInfoApiGetHandler, GetServerInfoHandler>();
 

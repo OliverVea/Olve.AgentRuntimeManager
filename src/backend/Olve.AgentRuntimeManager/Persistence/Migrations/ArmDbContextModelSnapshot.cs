@@ -120,6 +120,10 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                     b.Property<string>("RunResume")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Skills")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("StartedAt")
                         .HasColumnType("TEXT");
 
@@ -144,6 +148,36 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("Sessions", (string)null);
+                });
+
+            modelBuilder.Entity("Olve.AgentRuntimeManager.Sessions.Skills.SkillRecord", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceRef")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("Skills", (string)null);
                 });
 
             modelBuilder.Entity("Olve.AgentRuntimeManager.Variables.EnvVariableRecord", b =>

@@ -5,6 +5,7 @@ using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Sessions.Supervision;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.UnitTests.Support;
@@ -233,6 +234,61 @@ public class ClaudeProviderTests
         await Assert.That(arguments[Array.IndexOf(arguments, "--tools") + 1]).IsEqualTo("");
         await Assert.That(arguments).DoesNotContain("--mcp-config");
     }
+
+    [Test]
+    public async Task Skills_AreTheSupervisorsToCopy_AndNamedToTheToolsServer_EachOnce_AfterTheTools()
+    {
+        Register("pdf");
+        Register("pipelines");
+        var launch = Launch("Say READY") with { Tools = ["arm_bash"], Skills = ["pipelines", "pdf", "pipelines"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(McpServers(arguments)).IsEqualTo(ArmServer(launch, ["arm_bash"], ["pipelines", "pdf"]));
+    }
+
+    [Test]
+    public async Task Skills_WithoutTools_AreNotNamed_TheToolsServerIsntStarted()
+    {
+        Register("pdf");
+        var launch = Launch("Say READY") with { Tools = [], Skills = ["pdf"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(arguments).DoesNotContain("--mcp-config");
+    }
+
+    [Test]
+    public async Task Skills_OnAContinuation_AreTheSame()
+    {
+        Register("pdf");
+        var launch = Launch("the original prompt") with { Attempt = 2, Resume = "the-claude-session", Messages = ["go on"], Tools = ["arm_bash"], Skills = ["pdf"] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(McpServers(arguments)).IsEqualTo(ArmServer(launch, ["arm_bash"], ["pdf"]));
+    }
+
+    [Test]
+    public async Task SkillCopies_GoFromTheRegistryToTheSessionsFolder_EachOnce()
+    {
+        var settings = new SkillsOptions { Root = "/var/lib/olve-arm/skills" };
+
+        var copies = ClaudeProvider.SkillCopies(settings, "/srv/sessions/s1", ["pdf", "pipelines", "pdf"]);
+
+        await Assert.That(copies).IsEquivalentTo([
+            new SupervisorSkill { Name = "pdf", Source = "/var/lib/olve-arm/skills/pdf", Target = "/srv/sessions/s1/skills/pdf" },
+            new SupervisorSkill { Name = "pipelines", Source = "/var/lib/olve-arm/skills/pipelines", Target = "/srv/sessions/s1/skills/pipelines" },
+        ], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(ClaudeProvider.SkillCopies(settings, "/srv/sessions/s1", null)).IsEmpty();
+    }
+
+    [Test]
+    public async Task SkillCopies_RefuseANameThatIsntOne() =>
+        await Assert.That(() => ClaudeProvider.SkillCopies(new SkillsOptions(), "/srv/sessions/s1", ["../etc"])).ThrowsException();
 
     [Test]
     public async Task ToolsServerThatFailedToStart_StopsTheAgent_AndFailsTheRun_NamingIt()
@@ -511,7 +567,18 @@ public class ClaudeProviderTests
         configure?.Invoke(options);
         var supervisors = Supervisors();
         return new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance,
-            Options.Create(new ToolsOptions { Command = ToolsCommand }));
+            Options.Create(new ToolsOptions { Command = ToolsCommand }), Options.Create(new SkillsOptions { Root = Registry }));
+    }
+
+    /// <summary>The skills registry the tests' sessions copy from (M10b): under the test's folder.</summary>
+    private string Registry => Path.Combine(_root, "skills");
+
+    /// <summary>Puts a skill into the registry: its folder with a <c>SKILL.md</c>; the folder.</summary>
+    private string Register(string name)
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Registry, name)).FullName;
+        File.WriteAllText(Path.Combine(folder, SkillFile.FileName), $"---\nname: {name}\ndescription: The {name} skill.\n---\n\nSteps.\n");
+        return folder;
     }
 
     /// <summary>The tools server the tests' agents are told to start (the stub never starts it).</summary>
@@ -521,16 +588,24 @@ public class ClaudeProviderTests
     internal static string McpServers(string[] arguments) =>
         JsonNode.Parse(arguments[Array.IndexOf(arguments, "--mcp-config") + 1])!.ToJsonString();
 
-    /// <summary>The MCP configuration of ARM's tools server for a session in <paramref name="root"/>: its workplace, journal and tools.</summary>
-    internal static string ArmServer(string root, Guid sessionId, string[] tools)
+    /// <summary>
+    /// The MCP configuration of ARM's tools server for a session in <paramref name="root"/>: its
+    /// workplace, journal and tools, and its <paramref name="skills"/> (M10b) as the session's copies.
+    /// </summary>
+    internal static string ArmServer(string root, Guid sessionId, string[] tools, string[]? skills = null)
     {
         var folder = Path.Combine(root, sessionId.ToString());
-        string[] args = ["--workplace", Path.Combine(folder, "work"), "--journal", Path.Combine(folder, "tools.jsonl"), .. tools.SelectMany(t => new[] { "--tool", t })];
+        string[] args =
+        [
+            "--workplace", Path.Combine(folder, "work"), "--journal", Path.Combine(folder, "tools.jsonl"),
+            .. tools.SelectMany(t => new[] { "--tool", t }),
+            .. (skills ?? []).SelectMany(s => new[] { "--skill", $"{s}={Path.Combine(folder, "skills", s)}" }),
+        ];
         var server = new JsonObject { ["type"] = "stdio", ["command"] = ToolsCommand, ["args"] = new JsonArray([.. args.Select(a => (JsonNode)a)]) };
         return new JsonObject { ["mcpServers"] = new JsonObject { ["arm"] = server } }.ToJsonString();
     }
 
-    private string ArmServer(AgentLaunch launch, string[] tools) => ArmServer(_root, launch.SessionId, tools);
+    private string ArmServer(AgentLaunch launch, string[] tools, string[]? skills = null) => ArmServer(_root, launch.SessionId, tools, skills);
 
     /// <summary>The real supervisor (built next to the tests), with its sockets under the test's folder.</summary>
     private Supervisors Supervisors() =>
