@@ -254,6 +254,30 @@ describe("<session-page>", () => {
     expect(page.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("");
   });
 
+  it("Details' tools row: the session's tools in mono, else none (named none, or the provider's own)", async () => {
+    const page = await mount();
+    const tools = () => {
+      const row = $$(page, ".meta > div").find(
+        (d) => d.querySelector("dt")?.textContent === "tools",
+      );
+      const value = row?.querySelector("dd > span");
+      return [row?.className, value?.className, value?.textContent];
+    };
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", {
+      tools: ["arm_bash", "arm_file_read", "<b>"],
+    });
+    await Promise.resolve();
+    expect(tools()).toEqual(["wide", "mono", "arm_bash, arm_file_read, <b>"]);
+
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", { tools: [] });
+    await Promise.resolve();
+    expect(tools()).toEqual(["wide", "tools-own", "none"]);
+
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38");
+    await Promise.resolve();
+    expect(tools()).toEqual(["wide", "tools-own", "none"]);
+  });
+
   it("Details has no repos row for a session without repos", async () => {
     const page = await mount();
     expect(text(page, ".meta dt")).not.toContain("repos");

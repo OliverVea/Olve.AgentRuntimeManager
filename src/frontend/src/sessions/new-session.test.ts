@@ -58,6 +58,19 @@ describe("newSession", () => {
     expect(bare.ok && "repos" in bare.value).toBe(false);
   });
 
+  it("sends tools as given: left out (the server's defaults), [] (none), or the list", () => {
+    const defaults = newSession({ ...fields, tools: undefined }, "oliver");
+    expect(defaults.ok && "tools" in defaults.value).toBe(false);
+    expect(newSession({ ...fields, tools: [] }, "oliver")).toMatchObject({
+      ok: true,
+      value: { tools: [] },
+    });
+    expect(newSession({ ...fields, tools: ["arm_bash"] }, "oliver")).toMatchObject({
+      ok: true,
+      value: { tools: ["arm_bash"] },
+    });
+  });
+
   it.each([
     [{ prompt: "  " }, "Say what the agent should do."],
     [{ model: "" }, "Pick a model."],

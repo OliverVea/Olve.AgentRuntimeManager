@@ -1111,3 +1111,44 @@ dialog.env-dialog {
     grid-column: 2;
   }
 }
+
+/* The composer's tools (M10): a third button in the settings row, styled as env's and repos'
+   (.env-toggle), and a panel under the row, styled as theirs (.env-panel): a checkbox per tool. */
+.tool-rows {
+  display: grid;
+  gap: 2px;
+}
+.tool-pick {
+  display: grid;
+  grid-template-columns: auto minmax(9em, 10.5em) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tool-pick:hover {
+  background: var(--hover);
+}
+.tool-pick input {
+  margin: 0;
+  align-self: center;
+}
+.tool-pick .name {
+  font: 12.5px var(--mono);
+}
+.tool-pick .desc {
+  color: var(--dim);
+}
+.tool-pick.on .name {
+  color: var(--accent);
+}
+@media (max-width: 720px) {
+  .tool-pick {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .tool-pick .desc {
+    grid-column: 2;
+  }
+}

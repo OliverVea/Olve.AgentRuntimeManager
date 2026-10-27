@@ -26,6 +26,8 @@ import { ModelCatalog, modelChoice } from "./sessions/model-catalog.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
 import { isPaused, timesText, untilText, willQueueText } from "./sessions/provider-health.js";
 import { SessionStore, type StreamState } from "./sessions/session-store.js";
+import { ToolCatalog } from "./tools/tool-catalog.js";
+import { ToolPanel } from "./tools/tool-panel.js";
 
 // In dev, same-origin → Vite proxies /api to the backend (see vite.config.ts). In a build, set
 // VITE_API_BASE_URL to point at the API host (defaults to same-origin, which is how we deploy).
@@ -41,6 +43,7 @@ const store = new SessionStore(client);
 const activity = new ActivityStore(client, store);
 const envRegistry = new EnvRegistry(client);
 const models = new ModelCatalog(client);
+const tools = new ToolCatalog(client);
 let prefs: Prefs = loadPrefs();
 
 const $ = <E extends HTMLElement = HTMLElement>(selector: string) => {
@@ -222,6 +225,7 @@ function renderAuthState(): void {
     readActivity();
     void envRegistry.load();
     void models.load();
+    void tools.load();
     void loadServerInfo();
     fillComposer();
     route();
@@ -230,6 +234,7 @@ function renderAuthState(): void {
     activity.stop();
     envRegistry.clear();
     models.clear();
+    tools.clear();
     $("#env").innerHTML = "";
     closeProviders();
   }
@@ -264,6 +269,10 @@ $("#manage-env").addEventListener("click", () => envDialog.open());
 const repoPanel = new RepoPanel($<HTMLButtonElement>("#repos-toggle"), $("#repos-panel"), {
   change: updateCreate,
 });
+
+// ARM's tools (M10): a checkbox each in their own panel, the server's defaults ticked to start with.
+const toolPanel = new ToolPanel($<HTMLButtonElement>("#tools-toggle"), $("#tools-panel"));
+tools.addEventListener("change", () => toolPanel.setTools(tools.loaded ? tools.tools : undefined));
 
 /** Whether a create is in flight: Start stays disabled until it settles (no duplicate sessions). */
 let creating = false;
@@ -323,6 +332,7 @@ async function create(): Promise<void> {
       env: envPanel.rows,
       useEnv: envPanel.useEnv,
       repos: repoPanel.rows,
+      tools: toolPanel.field,
     },
     fallbackCaller(),
   );
@@ -343,6 +353,7 @@ async function create(): Promise<void> {
     prompt.value = "";
     envPanel.clear();
     repoPanel.clear();
+    toolPanel.clear();
     fitPrompt();
     fillComposer();
     setView("overview");
@@ -357,6 +368,8 @@ async function create(): Promise<void> {
     if (error instanceof ApiError && error.code === "ENV_NOT_FOUND") void envRegistry.load();
     // The model is no longer offered (the server's configuration changed): the fresh list.
     if (error instanceof ApiError && error.code === "UNKNOWN_MODEL") void models.load();
+    // A picked tool is no longer offered: the fresh list.
+    if (error instanceof ApiError && error.code === "UNKNOWN_TOOL") void tools.load();
   } finally {
     creating = false;
   }

@@ -309,6 +309,15 @@ export class SessionPage extends BaseElement {
       row("env", env ? escapeHtml(env) : undefined, "mono"),
       row("uses env", s.useEnv?.length ? escapeHtml(s.useEnv.join(", ")) : undefined, "mono"),
       row("repos", repos || undefined, "", "full"),
+      // ARM's tools it got; none (or the provider's built-ins): "none".
+      row(
+        "tools",
+        s.tools?.length
+          ? `<span class="mono">${escapeHtml(s.tools.join(", "))}</span>`
+          : `<span class="tools-own">none</span>`,
+        "",
+        "wide",
+      ),
       row(
         "provider id",
         s.providerSessionId
@@ -626,6 +635,8 @@ const pageStyles = `
   .meta .repo + .repo { margin-top: 6px; }
   .meta .repo .facts { display: flex; flex-wrap: wrap; gap: 0 16px; color: var(--dim); font-size: 12.5px; }
   .meta .repo .facts .mono { color: var(--text); }
+  /* Details' tools (M10): none, dim. */
+  .meta .tools-own { color: var(--dim); }
 
   /* The transcript. */
   .transcript { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
