@@ -47,8 +47,8 @@ export function formatSession(s: Session): string {
     ["timeoutSeconds", s.timeoutSeconds],
     ["env", s.env && Object.keys(s.env).length ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(" ") : undefined],
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
-    // Unset: the provider's built-in tools; an empty list: none at all.
-    ["tools", s.tools === undefined || s.tools === null ? undefined : s.tools.length ? s.tools.join(", ") : "none"],
+    // Always stated: exactly what the agent has; an empty list: none at all.
+    ["tools", s.tools.length ? s.tools.join(", ") : "none"],
     // One line per repo: as given, then the folder and branch ARM gave it.
     ...(s.repos ?? []).map(
       (r, i) =>
@@ -187,13 +187,13 @@ export const sessionGroup: CommandGroup = {
         tool: {
           type: "string",
           description:
-            "One of ARM's tools to give the agent (see `arm tool list`); naming any gives it only these, without the provider's built-in tools (default: the server's default tools, else the built-ins)",
+            "One of ARM's tools to give the agent (see `arm tool list`); the agent gets exactly these (default: the server's default tools)",
           valueName: "NAME",
           multiple: true,
         },
         "no-tools": {
           type: "boolean",
-          description: "Give the agent no tools at all: neither ARM's nor the provider's built-ins (excludes --tool)",
+          description: "Give the agent no tools at all (excludes --tool)",
         },
       },
       async run({ args, options, client, settings, user }) {

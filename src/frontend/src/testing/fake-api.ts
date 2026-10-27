@@ -23,6 +23,7 @@ export function session(id: string, overrides: Partial<Session> = {}): Session {
     attempts: overrides.status === "queued" ? 0 : 1,
     retriesLeft: 2,
     createdAt: "2026-09-26T10:00:00Z",
+    tools: ["arm_bash", "arm_file_read"],
     ...overrides,
   };
 }

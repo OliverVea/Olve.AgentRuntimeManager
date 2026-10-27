@@ -1,8 +1,10 @@
 using Olve.AgentRuntimeManager.Sessions;
+using Olve.AgentRuntimeManager.Tools.Protocol;
+using TUnit.Assertions.Enums;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Sessions;
 
-/// <summary>Which tools a new session gets (M10): what it named, else the server's defaults, else the built-ins.</summary>
+/// <summary>Which tools a new session gets (M10): what it named, else the server's defaults (by default every tool). Never null.</summary>
 public class ToolsOptionsTests
 {
     private static readonly ToolsOptions WithDefaults = new() { Default = ["arm_bash", "arm_file_read", "arm_bash"] };
@@ -22,10 +24,14 @@ public class ToolsOptionsTests
     }
 
     [Test]
-    public async Task NoneNamed_AreTheDefaults_EachOnce_InOrder() =>
-        await Assert.That(WithDefaults.For(null)).IsEquivalentTo(["arm_bash", "arm_file_read"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    public async Task NoneNamed_AreTheConfiguredDefaults_EachOnce_InOrder() =>
+        await Assert.That(WithDefaults.For(null)).IsEquivalentTo(["arm_bash", "arm_file_read"], CollectionOrdering.Matching);
 
     [Test]
-    public async Task NoneNamed_WithoutDefaults_IsUnset_TheBuiltIns() =>
-        await Assert.That(new ToolsOptions().For(null)).IsNull();
+    public async Task NoneNamed_WithoutConfiguredDefaults_AreEveryTool_InTheCatalogsOrder() =>
+        await Assert.That(new ToolsOptions().For(null)).IsEquivalentTo(ToolCatalog.All.Select(t => t.Name), CollectionOrdering.Matching);
+
+    [Test]
+    public async Task AnEmptyConfiguredList_IsNoToolsByDefault() =>
+        await Assert.That(new ToolsOptions { Default = [] }.For(null)).IsEmpty();
 }

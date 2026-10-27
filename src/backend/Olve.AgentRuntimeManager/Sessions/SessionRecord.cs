@@ -36,10 +36,10 @@ public sealed record SessionRecord
 
     /// <summary>
     /// ARM's tools its agent gets (M10): as given, or the server's defaults when it gave none
-    /// (resolved when it's created). Any turn the provider's built-in tools off; empty: no tools at
-    /// all; null: the built-ins. Every launch, retry, resume and continuation uses it.
+    /// (resolved when it's created): exactly what its agent has, the provider's own tools never;
+    /// empty: no tools at all. Every launch, retry, resume and continuation uses it.
     /// </summary>
-    public IReadOnlyList<string>? Tools { get; init; }
+    public required IReadOnlyList<string> Tools { get; init; }
 
     /// <summary>
     /// Messages held for its agent (M11), in the order they came: sent while it was queued, or

@@ -23,6 +23,7 @@ public class ClaudeArmToolsConversationTests
         Model = "sonnet",
         Caller = "tests",
         CreatedAt = DateTimeOffset.UnixEpoch,
+        Tools = ["arm_probe"],
     };
 
     [Test]

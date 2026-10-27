@@ -20,6 +20,7 @@ public class ActivityLinesTests
         Model = "fake",
         Caller = "tests",
         CreatedAt = DateTimeOffset.UnixEpoch,
+        Tools = [],
     };
 
     private static readonly ConversationEntryRecord[] Conversation =

@@ -9,5 +9,5 @@ public sealed class ListToolsHandler(IOptions<ToolsOptions> options) : IToolsLis
 {
     public Task<ToolsListResponse> HandleAsync(ToolsListRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<ToolsListResponse>(new ToolsListResponse.Ok(
-            [.. ToolCatalog.All.Select(t => new Tool { Name = t.Name, Description = t.Description, Default = options.Value.Default.Contains(t.Name) })]));
+            [.. ToolCatalog.All.Select(t => new Tool { Name = t.Name, Description = t.Description, Default = options.Value.Defaults.Contains(t.Name) })]));
 }
