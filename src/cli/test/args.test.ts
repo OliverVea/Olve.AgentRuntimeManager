@@ -108,7 +108,7 @@ describe("option parsing", () => {
   });
 
   test("'--' lets an argument start with a dash", async () => {
-    const { fetch, requests } = fakeFetch(() => ({ body: { id: "-1", tools: [] } }));
+    const { fetch, requests } = fakeFetch(() => ({ body: { id: "-1", tools: [], skills: [] } }));
     const r = await runCli(["session", "get", "--", "-1"], { fetch });
     expect(r.code).toBe(0);
     expect(requests[0]!.url).toBe(`${DEFAULT_URL}/api/sessions/-1`);
