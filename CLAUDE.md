@@ -25,6 +25,11 @@ From the repo root: `npx mise run ci` (the pipeline gate), `npx mise run codegen
 snapshots + the generator's conformance suite), `npx mise run api:image` (API tests against the
 Docker image; needs Docker).
 
+Before every push, `tools/check.sh --changed` runs the gate's checks for what changed (docs and
+mocks: none; the contract, emitter or toolchain: all of `ci`). A `PreToolUse` hook in
+`.claude/settings.json` runs it before every `git push` in agent sessions; `.githooks/pre-push` is
+the same gate for humans (`git config core.hooksPath .githooks`).
+
 ## Conventions
 
 - .NET 10, C# with file-scoped namespaces, nullable enabled, implicit usings
