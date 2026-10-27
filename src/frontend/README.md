@@ -50,6 +50,16 @@ src/frontend/
 │  ├─ repos/                   a session's git repositories (M5e)
 │  │  ├─ repo-rows.ts         the server's checks on new repos, mirrored; the composer's rows → a session's repos
 │  │  └─ repo-panel.ts        the composer's repos button and panel (light DOM)
+│  ├─ tools/                   ARM's tools (M10)
+│  │  ├─ tool-catalog.ts      the tools the server offers and gives by default
+│  │  ├─ tool-picks.ts        a pick → the create request's `tools` (left out, [] or the names)
+│  │  └─ tool-panel.ts        the composer's tools button and panel (light DOM)
+│  ├─ skills/                  the skills agents can load (M10b)
+│  │  ├─ skill-registry.ts    the registered skills (list, install, default, delete), shared by the two below
+│  │  ├─ skill-names.ts       the name rule, as the server's
+│  │  ├─ skill-picks.ts       a pick → the create request's `skills`, by the tools' rule
+│  │  ├─ skill-panel.ts       the composer's skills button and panel (light DOM)
+│  │  └─ skill-dialog.ts      the Skills dialog, from Options (light DOM)
 │  ├─ components/
 │  │  ├─ session-list.ts      <session-list> — the Overview or History as cards
 │  │  ├─ session-page.ts      <session-page> — one session: its card, Details (its repos, with the
@@ -158,7 +168,8 @@ composer's validation, the `SessionStore` over the real generated client and a s
 `<session-list>` (cards, outcomes, "load older", what a click or key asks for, the log column),
 the `ActivityStore` (what it reads, when it re-reads and stops), and the env
 name rules, the composer's env panel and the Environment variables dialog, the repos checks and
-the composer's repos panel, and `<session-page>` (Details' repos included).
+the composer's repos panel, the tools and skills panels and the Skills dialog, and
+`<session-page>` (Details' repos, tools and skills included).
 
 ## Lint & format
 

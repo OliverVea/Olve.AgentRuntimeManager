@@ -52,6 +52,7 @@
               <button type="button" class="env-toggle" id="env-toggle" aria-controls="env-panel" aria-expanded="false">env <span class="caret">▸</span></button>
               <button type="button" class="env-toggle" id="repos-toggle" aria-controls="repos-panel" aria-expanded="false">repos <span class="caret">▸</span></button>
               <button type="button" class="env-toggle" id="tools-toggle" aria-controls="tools-panel" aria-expanded="false">tools <span class="caret">▸</span></button>
+              <button type="button" class="env-toggle" id="skills-toggle" aria-controls="skills-panel" aria-expanded="false">skills <span class="caret">▸</span></button>
             </div>
             <span class="spacer"></span>
             <span class="will-queue" id="will-queue" hidden></span>
@@ -62,6 +63,7 @@
           <div class="env-panel" id="env-panel" hidden></div>
           <div class="env-panel" id="repos-panel" hidden></div>
           <div class="env-panel" id="tools-panel" hidden></div>
+          <div class="env-panel" id="skills-panel" hidden></div>
           <div class="toast" id="toast" role="status"></div>
         </form>
 
@@ -128,6 +130,7 @@
         <section class="opt">
           <h4>Server</h4>
           <div class="server-row"><span>Environment variables for agents, shared by everyone on this server.</span><button type="button" class="ghost" id="manage-env">Manage…</button></div>
+          <div class="server-row"><span>Skills agents can load, shared by everyone on this server.</span><button type="button" class="ghost" id="manage-skills">Manage…</button></div>
         </section>
         <p class="problem" id="options-problem"></p>
         <div class="buttons">
@@ -138,6 +141,7 @@
     </dialog>
 
     <dialog id="env-dialog"></dialog>
+    <dialog id="skills-dialog"></dialog>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
