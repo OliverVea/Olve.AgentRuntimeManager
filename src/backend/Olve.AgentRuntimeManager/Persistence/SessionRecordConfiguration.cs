@@ -24,6 +24,8 @@ public sealed class SessionRecordConfiguration : IEntityTypeConfiguration<Sessio
         session.Property(s => s.Repos).HasConversion(JsonColumn.Converter<IReadOnlyList<RepoRecord>>(), JsonColumn.Comparer<IReadOnlyList<RepoRecord>>());
         // Never null (M10: a session always states its tools); typed nullable for the shared converter.
         session.Property<IReadOnlyList<string>?>(nameof(SessionRecord.Tools)).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>()).IsRequired();
+        // Never null either (M10b: a session always states its skills).
+        session.Property<IReadOnlyList<string>?>(nameof(SessionRecord.Skills)).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>()).IsRequired();
         session.Property(s => s.AgentEnv).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());
         session.HasIndex(s => s.CreatedAt);
         session.HasIndex(s => s.Status);

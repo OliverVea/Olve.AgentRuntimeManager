@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Olve.AgentRuntimeManager.Tools.Protocol;
+using Olve.AgentRuntimeManager.Tools.Tools;
 
 namespace Olve.AgentRuntimeManager.Tools.Server;
 
@@ -104,19 +105,41 @@ internal static class ToolDefinitions
             A file, or a folder with everything in it. `destination_path` is the new path itself, not a folder to put it in. A file that exists there is refused unless `overwrite`, which replaces it (with a file only). A folder that exists there is always refused: delete it first (arm_file_delete with `recursive`). A link moves as a link.
             """,
             TransferSchema("move")),
+        [ToolCatalog.SkillLoad] = (
+            """
+            A skill is instructions for a kind of task, with files of its own (references, scripts, templates). Before a task one of the skills below covers, load it by `name` and follow what comes back: the skill's instructions, and the folder its files are in (read them with arm_file_read, run its scripts with arm_bash). Load it again whenever needed; the text is the same every time.
+            """,
+            """
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "description": "The skill's name, one of those listed." }
+              },
+              "required": ["name"]
+            }
+            """),
     };
 
-    /// <summary>The <c>tools/list</c> entries of <paramref name="tools"/>, in the catalog's order.</summary>
-    public static JsonArray List(IReadOnlyCollection<string> tools)
+    /// <summary>
+    /// The <c>tools/list</c> entries of <paramref name="tools"/>, in the catalog's order;
+    /// <c>arm_skill_load</c>'s description ends with the session's <paramref name="skills"/>.
+    /// </summary>
+    public static JsonArray List(IReadOnlyCollection<string> tools, SessionSkills skills)
     {
         var list = new JsonArray();
         foreach (var tool in ToolCatalog.All.Where(tool => tools.Contains(tool.Name)))
         {
             var (details, schema) = Definitions[tool.Name];
+            var description = $"{tool.Description}\n\n{details.Trim()}";
+            if (tool.Name == ToolCatalog.SkillLoad)
+            {
+                description = $"{description}\n\n{skills.Listing}";
+            }
+
             list.Add((JsonNode)new JsonObject
             {
                 ["name"] = tool.Name,
-                ["description"] = $"{tool.Description}\n\n{details.Trim()}",
+                ["description"] = description,
                 ["inputSchema"] = JsonNode.Parse(schema),
             });
         }

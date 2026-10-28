@@ -39,6 +39,26 @@
   },
   {
     "input": {
+      "name": "pipelines"
+    },
+    "gist": "pipelines"
+  },
+  {
+    "input": {
+      "file_path": "a.txt",
+      "name": "pipelines"
+    },
+    "gist": "a.txt"
+  },
+  {
+    "input": {
+      "name": "pipelines",
+      "pattern": "TODO"
+    },
+    "gist": "pipelines"
+  },
+  {
+    "input": {
       "pattern": "TODO",
       "path": "src"
     },

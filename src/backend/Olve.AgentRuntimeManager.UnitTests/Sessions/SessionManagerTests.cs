@@ -141,7 +141,8 @@ public class SessionManagerTests : IDisposable
         await Assert.That(session.Model).IsEqualTo("m");
         await Assert.That(session.Caller).IsEqualTo("tests");
         await Assert.That(session.TimeoutSeconds).IsNull();
-        await Assert.That(_provider.RunOf(session.Id).Launch).IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id, session.RunId!.Value, Tools: session.Tools));
+        await Assert.That(_provider.RunOf(session.Id).Launch)
+            .IsEqualTo(new AgentLaunch(session.Id, "do it", "m", 1, session.Id, session.RunId!.Value, Tools: session.Tools, Skills: session.Skills));
     }
 
     [Test]
@@ -691,7 +692,7 @@ public class SessionManagerTests : IDisposable
 
         // Two reads: equal but for their lists' identity (records compare lists by reference).
         var found = _sessions.Search(new SessionSearch(), 10, 0).Items.Single();
-        await Assert.That(_sessions.Get(done.Id)! with { Tools = found.Tools }).IsEqualTo(found);
+        await Assert.That(_sessions.Get(done.Id)! with { Tools = found.Tools, Skills = found.Skills }).IsEqualTo(found);
         await Assert.That(_sessions.Get(done.Id)!.ExitCode).IsEqualTo(4);
     }
 

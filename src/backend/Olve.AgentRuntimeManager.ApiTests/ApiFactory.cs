@@ -30,6 +30,8 @@ public class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Auth:Audience", Tokens.Audience);
         // A database of its own, next to the (empty) content root; a subclass may point elsewhere.
         builder.UseSetting("ConnectionStrings:Arm", ConnectionString(_contentRoot));
+        // The skills registry too (M10b): never the user's own.
+        builder.UseSetting("Skills:Root", Path.Combine(_contentRoot, "skills"));
         foreach (var (key, value) in Settings)
         {
             builder.UseSetting(key, value);

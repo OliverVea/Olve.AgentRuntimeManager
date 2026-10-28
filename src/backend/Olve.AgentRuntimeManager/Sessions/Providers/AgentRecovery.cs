@@ -12,7 +12,8 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// session it resumed, if it did, and the messages it was given), to launch it again the same way
 /// if its agent never started. <paramref name="Tools"/>: ARM's tools its agent gets (M10, its only
 /// tools; empty or null: none at all), on a run launched again or resumed as at its start.
+/// <paramref name="Skills"/>: the skills it can load (M10b; empty or null: none), the same way.
 /// </summary>
 public sealed record AgentRecovery(Guid SessionId, string Prompt, string Model, string ProviderSessionId, Guid RunId, Guid ResumeRunId,
     IReadOnlyDictionary<string, string>? Env = null, IReadOnlyList<RepoRecord>? Repos = null,
-    string? Resume = null, IReadOnlyList<string>? Messages = null, IReadOnlyList<string>? Tools = null);
+    string? Resume = null, IReadOnlyList<string>? Messages = null, IReadOnlyList<string>? Tools = null, IReadOnlyList<string>? Skills = null);

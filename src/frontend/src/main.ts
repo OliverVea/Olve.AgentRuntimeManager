@@ -26,6 +26,9 @@ import { ModelCatalog, modelChoice } from "./sessions/model-catalog.js";
 import { newSession, parseTimeout } from "./sessions/new-session.js";
 import { isPaused, timesText, untilText, willQueueText } from "./sessions/provider-health.js";
 import { SessionStore, type StreamState } from "./sessions/session-store.js";
+import { SkillDialog } from "./skills/skill-dialog.js";
+import { SkillPanel } from "./skills/skill-panel.js";
+import { SkillRegistry } from "./skills/skill-registry.js";
 import { ToolCatalog } from "./tools/tool-catalog.js";
 import { ToolPanel } from "./tools/tool-panel.js";
 
@@ -44,6 +47,7 @@ const activity = new ActivityStore(client, store);
 const envRegistry = new EnvRegistry(client);
 const models = new ModelCatalog(client);
 const tools = new ToolCatalog(client);
+const skillRegistry = new SkillRegistry(client);
 let prefs: Prefs = loadPrefs();
 
 const $ = <E extends HTMLElement = HTMLElement>(selector: string) => {
@@ -226,6 +230,7 @@ function renderAuthState(): void {
     void envRegistry.load();
     void models.load();
     void tools.load();
+    void skillRegistry.load();
     void loadServerInfo();
     fillComposer();
     route();
@@ -235,6 +240,7 @@ function renderAuthState(): void {
     envRegistry.clear();
     models.clear();
     tools.clear();
+    skillRegistry.clear();
     $("#env").innerHTML = "";
     closeProviders();
   }
@@ -273,6 +279,14 @@ const repoPanel = new RepoPanel($<HTMLButtonElement>("#repos-toggle"), $("#repos
 // ARM's tools (M10): a checkbox each in their own panel, the server's defaults ticked to start with.
 const toolPanel = new ToolPanel($<HTMLButtonElement>("#tools-toggle"), $("#tools-panel"));
 tools.addEventListener("change", () => toolPanel.setTools(tools.loaded ? tools.tools : undefined));
+// The skills the agent can load (M10b): a checkbox each in their own panel, the registered
+// defaults ticked to start with; the registry is managed in its own dialog, from Options.
+const skillDialog = new SkillDialog($<HTMLDialogElement>("#skills-dialog"), skillRegistry);
+$("#manage-skills").addEventListener("click", () => skillDialog.open());
+const skillPanel = new SkillPanel($<HTMLButtonElement>("#skills-toggle"), $("#skills-panel"));
+skillRegistry.addEventListener("change", () =>
+  skillPanel.setSkills(skillRegistry.loaded ? skillRegistry.skills : undefined),
+);
 
 /** Whether a create is in flight: Start stays disabled until it settles (no duplicate sessions). */
 let creating = false;
@@ -333,6 +347,7 @@ async function create(): Promise<void> {
       useEnv: envPanel.useEnv,
       repos: repoPanel.rows,
       tools: toolPanel.field,
+      skills: skillPanel.field,
     },
     fallbackCaller(),
   );
@@ -354,6 +369,7 @@ async function create(): Promise<void> {
     envPanel.clear();
     repoPanel.clear();
     toolPanel.clear();
+    skillPanel.clear();
     fitPrompt();
     fillComposer();
     setView("overview");
@@ -370,6 +386,8 @@ async function create(): Promise<void> {
     if (error instanceof ApiError && error.code === "UNKNOWN_MODEL") void models.load();
     // A picked tool is no longer offered: the fresh list.
     if (error instanceof ApiError && error.code === "UNKNOWN_TOOL") void tools.load();
+    // A picked skill was removed meanwhile: the fresh list drops the pick.
+    if (error instanceof ApiError && error.code === "UNKNOWN_SKILL") void skillRegistry.load();
   } finally {
     creating = false;
   }

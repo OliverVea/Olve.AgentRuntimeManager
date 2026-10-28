@@ -95,6 +95,13 @@ model CreateSession {
    * tools at all. Unset: the server's default tools (`default` in `GET /api/tools`).
    */
   tools?: string[];
+
+  /**
+   * The skills the agent can load, by name (`GET /api/skills`); an unknown one is a 400
+   * `UNKNOWN_SKILL`. Empty: no skills. Unset: the registered skills flagged `default`. Loaded on
+   * demand with `arm_skill_load`, which needs to be among its tools.
+   */
+  skills?: string[];
 }
 
 /** A session: what it was created with (defaults resolved) and its lifecycle. */
@@ -124,6 +131,9 @@ model Session {
 
   /** Exactly the tools the agent has: as given, or the server's defaults when it gave none. Empty: no tools at all. */
   tools: string[];
+
+  /** Exactly the skills the agent can load: as given, or the registered defaults when it gave none. Empty: no skills. */
+  skills: string[];
 
   /** How often the agent was started: 0 while first queued, more than 1 after retries. */
   attempts: int32;

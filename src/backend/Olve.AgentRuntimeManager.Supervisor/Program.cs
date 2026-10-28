@@ -12,6 +12,12 @@ using Olve.AgentRuntimeManager.Supervisor.Protocol;
 // `olve-arm-supervisor remove-worktree <shared copy> <worktree>`: removes a deleted session's
 // worktree (M5e) from the shared copy of its repository, its branch kept, as the user who made it
 // (ARM runs this as the agent user, like `kill`). Exit code 1: it couldn't.
+// `olve-arm-supervisor skill-install`: reads a SupervisorSkillInstall (one JSON document) from stdin
+// and puts the skill (M10b) in the registry, fetched from git, whole or not at all; the installed
+// SKILL.md's text goes to stdout (ARM runs this as the agent user too). Exit codes: 1 the fetch
+// failed (git's error on stderr), 2 a request it can't act on, 3 no valid SKILL.md at the path.
+// `olve-arm-supervisor skill-remove <root> <name>`: removes the skill `<root>/<name>` from the
+// registry (fine if it's gone already). Exit code 1: it couldn't.
 // Unix only: sockets and file modes, setsid, process groups (ARM runs on Linux).
 if (OperatingSystem.IsWindows())
 {
@@ -62,6 +68,65 @@ if (args is ["remove-worktree", ..])
     if (error is not null)
     {
         await Console.Error.WriteLineAsync($"olve-arm-supervisor: {error}");
+        return 1;
+    }
+
+    return 0;
+}
+
+if (args is ["skill-install", ..])
+{
+    if (args is not ["skill-install"])
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: skill-install takes no arguments: a SupervisorSkillInstall on stdin.");
+        return SkillInstaller.BadUsage;
+    }
+
+    SupervisorSkillInstall? install;
+    try
+    {
+        install = JsonSerializer.Deserialize(await Console.In.ReadToEndAsync(), SupervisorJsonContext.Default.SupervisorSkillInstall);
+    }
+    catch (JsonException exception)
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: unreadable skill install on stdin: {exception.Message}");
+        return SkillInstaller.BadUsage;
+    }
+
+    if (install is null)
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: expected a skill install on stdin.");
+        return SkillInstaller.BadUsage;
+    }
+
+    // The errors stand alone (no prefix): ARM shows them as they are, as the request's own message.
+    var installed = await SkillInstaller.InstallAsync(install);
+    if (installed.Error is not null)
+    {
+        await Console.Error.WriteLineAsync(installed.Error);
+    }
+
+    if (installed.Output is not null)
+    {
+        await Console.Out.WriteAsync(installed.Output);
+        await Console.Out.FlushAsync();
+    }
+
+    return installed.ExitCode;
+}
+
+if (args is ["skill-remove", ..])
+{
+    if (args is not [_, var root, var name] || !Path.IsPathFullyQualified(root) || name.Length == 0 || name is "." or ".." || name.Contains('/'))
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: skill-remove <root> <name>, the root an absolute path and the name a folder name.");
+        return 2;
+    }
+
+    var error = SkillInstaller.Remove(root, name);
+    if (error is not null)
+    {
+        await Console.Error.WriteLineAsync(error);
         return 1;
     }
 

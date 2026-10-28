@@ -1152,3 +1152,47 @@ dialog.env-dialog {
     grid-column: 2;
   }
 }
+
+/* The composer's skills (M10b): a fourth button and a panel in the tools panel's style; with no
+   skill registered, its one line. */
+.tool-rows .defaults.none {
+  margin: 0;
+  padding: 6px 0;
+}
+
+/* The Skills dialog (M10b): the env dialog's rows, with a description and a source line. */
+.skills-dialog .env-item {
+  grid-template-columns: minmax(0, 10em) minmax(0, 1fr) auto auto auto;
+}
+.skills-dialog .env-item .desc {
+  font:
+    12.5px system-ui,
+    sans-serif;
+}
+.skills-dialog .env-item .src {
+  grid-column: 1 / -1;
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -3px;
+}
+.skills-dialog .env-item.confirming .src {
+  display: none;
+}
+.skills-dialog .env-form .fields {
+  grid-template-columns: minmax(0, 10em) minmax(0, 1fr);
+}
+@media (max-width: 720px) {
+  .skills-dialog .env-item {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .skills-dialog .env-item .desc {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+  .skills-dialog .env-form .fields {
+    grid-template-columns: 1fr;
+  }
+}

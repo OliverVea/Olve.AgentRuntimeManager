@@ -214,8 +214,9 @@ public sealed class SessionManager : IDisposable
                 UseEnv = request.UseEnv,
                 AgentEnv = agentEnv is { Count: > 0 } ? agentEnv : null,
                 Repos = request.Repos?.Select(r => RepoNames.Record(id, r.Url, r.Ref)).ToList(),
-                // Resolved by the handler (the server's defaults when the request names none).
+                // Both resolved by the handler (the server's defaults when the request names none).
                 Tools = request.Tools ?? [],
+                Skills = request.Skills ?? [],
                 CreatedAt = _time.GetUtcNow(),
             };
             _store.Add(session);
@@ -583,7 +584,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv, session.Repos,
-                session.RunResume, session.RunMessages, session.Tools)) is { } agent
+                session.RunResume, session.RunMessages, session.Tools, session.Skills)) is { } agent
                 ? (agent, agent.Resumed ? resumeRunId : runId)
                 : null;
         }
@@ -629,7 +630,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             run = _providers[session.Provider].Start(new AgentLaunch(
-                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos, session.Tools));
+                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos, session.Tools, session.Skills));
         }
         catch (Exception exception)
         {

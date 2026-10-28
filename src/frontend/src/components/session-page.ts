@@ -318,6 +318,15 @@ export class SessionPage extends BaseElement {
         "",
         "wide",
       ),
+      // Exactly the skills its agent can load (always stated), as the tools.
+      row(
+        "skills",
+        s.skills.length
+          ? `<span class="mono">${escapeHtml(s.skills.join(", "))}</span>`
+          : `<span class="tools-none">none</span>`,
+        "",
+        "wide",
+      ),
       row(
         "provider id",
         s.providerSessionId
@@ -635,7 +644,7 @@ const pageStyles = `
   .meta .repo + .repo { margin-top: 6px; }
   .meta .repo .facts { display: flex; flex-wrap: wrap; gap: 0 16px; color: var(--dim); font-size: 12.5px; }
   .meta .repo .facts .mono { color: var(--text); }
-  /* Details' tools (M10): none, dim. */
+  /* Details' tools (M10) and skills (M10b): none, dim. */
   .meta .tools-none { color: var(--dim); }
 
   /* The transcript. */

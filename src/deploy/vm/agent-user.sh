@@ -11,6 +11,7 @@ agent=arm-agent
 state=/var/lib/olve-arm
 sessions=$state/sessions
 repos=$state/repos
+skills=$state/skills
 
 id -u $agent >/dev/null 2>&1 || useradd --create-home --user-group --shell /bin/bash $agent
 # ARM reads the agents' output and connects to their supervisors through the group (after its restart).
@@ -60,6 +61,10 @@ install -d -o arm -g $agent -m 2750 $sessions
 # given worktrees by the supervisors, as the agent user; ARM itself never reads it (it removes a
 # deleted session's worktrees through the supervisor, as the agent). The agent's alone.
 install -d -o $agent -g $agent -m 0700 $repos
+
+# The skills registry (M10b, Skills__Root): installed, replaced, removed and copied into sessions
+# by the supervisor, as the agent user; ARM keeps only their metadata. The agent's alone.
+install -d -o $agent -g $agent -m 0700 $skills
 
 # What agents still running as arm (from before the agent user) keep making, carried over to the
 # agent user on every deploy. Best effort: run as `f || warn`, where set -e doesn't stop them.

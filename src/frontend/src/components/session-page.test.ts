@@ -274,6 +274,28 @@ describe("<session-page>", () => {
     expect(tools()).toEqual(["wide", "tools-none", "none"]);
   });
 
+  it("Details' skills row, after tools: the session's skills in mono, or none for an empty list", async () => {
+    const page = await mount();
+    const rows = () => $$(page, ".meta > div").map((d) => d.querySelector("dt")?.textContent);
+    const skills = () => {
+      const row = $$(page, ".meta > div").find(
+        (d) => d.querySelector("dt")?.textContent === "skills",
+      );
+      const value = row?.querySelector("dd > span");
+      return [row?.className, value?.className, value?.textContent];
+    };
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", {
+      skills: ["pipelines", "pdf", "<b>"],
+    });
+    await Promise.resolve();
+    expect(skills()).toEqual(["wide", "mono", "pipelines, pdf, <b>"]);
+    expect(rows().indexOf("skills")).toBe(rows().indexOf("tools") + 1);
+
+    page.session = session("d27b5e90-1c3a-4f8e-a471-9b0e6c2d5f38", { skills: [] });
+    await Promise.resolve();
+    expect(skills()).toEqual(["wide", "tools-none", "none"]);
+  });
+
   it("Details has no repos row for a session without repos", async () => {
     const page = await mount();
     expect(text(page, ".meta dt")).not.toContain("repos");

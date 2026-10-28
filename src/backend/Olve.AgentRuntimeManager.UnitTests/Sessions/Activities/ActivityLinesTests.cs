@@ -21,6 +21,7 @@ public class ActivityLinesTests
         Caller = "tests",
         CreatedAt = DateTimeOffset.UnixEpoch,
         Tools = [],
+        Skills = [],
     };
 
     private static readonly ConversationEntryRecord[] Conversation =

@@ -37,7 +37,10 @@ public class ToolsServerTests
         _folder.Dispose();
     }
 
-    private Process Start(params string[] tools)
+    private Process Start(params string[] tools) => Start(skills: [], tools);
+
+    /// <summary>The server with <paramref name="skills"/> (<c>name=folder</c> each, M10b) and <paramref name="tools"/>.</summary>
+    private Process Start(IReadOnlyList<string> skills, params string[] tools)
     {
         var info = new ProcessStartInfo(Server)
         {
@@ -55,6 +58,12 @@ public class ToolsServerTests
         {
             info.ArgumentList.Add(ToolsLaunch.Tool);
             info.ArgumentList.Add(tool);
+        }
+
+        foreach (var skill in skills)
+        {
+            info.ArgumentList.Add(ToolsLaunch.Skill);
+            info.ArgumentList.Add(skill);
         }
 
         var process = Process.Start(info)!;
@@ -278,6 +287,43 @@ public class ToolsServerTests
         }
 
         return found;
+    }
+
+    [Test]
+    public async Task Server_ListsTheSessionsSkills_InTheLoadToolsDescription_AndLoadsOne()
+    {
+        var pdf = Path.GetDirectoryName(_folder.Write("skills/pdf/SKILL.md", "---\nname: pdf\ndescription: Work with PDFs.\n---\n\n# PDF\n\nDo the thing.\n"))!;
+        var broken = Directory.CreateDirectory(_folder.PathOf("skills/broken")).FullName;
+        var process = Start([$"pdf={pdf}", $"broken={broken}"], ToolCatalog.SkillLoad);
+        await Initialize(process);
+
+        await Send(process, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var list = await Receive(process);
+        await Send(process, CallMessage(2, ToolCatalog.SkillLoad, """{"name":"pdf"}""", "toolu_1"));
+        var loaded = await Receive(process);
+        await Send(process, CallMessage(3, ToolCatalog.SkillLoad, """{"name":"nope"}""", "toolu_2"));
+        var unknown = await Receive(process);
+
+        var tool = list["result"]!["tools"]!.AsArray().Single()!;
+        await Assert.That(tool["name"]!.GetValue<string>()).IsEqualTo(ToolCatalog.SkillLoad);
+        await Assert.That(tool["description"]!.GetValue<string>()).EndsWith(
+            $"This session's skills:\n- pdf: Work with PDFs.\n- broken: (its SKILL.md couldn't be read: no SKILL.md in {broken})");
+        await Assert.That(loaded["result"]!["isError"]!.GetValue<bool>()).IsFalse();
+        await Assert.That(loaded["result"]!["content"]![0]!["text"]!.GetValue<string>())
+            .IsEqualTo($"Skill 'pdf' (its files are in {pdf}: read them with arm_file_read, run its scripts with arm_bash):\n\n# PDF\n\nDo the thing.");
+        await Assert.That(unknown["result"]!["isError"]!.GetValue<bool>()).IsTrue();
+        await Assert.That(unknown["result"]!["content"]![0]!["text"]!.GetValue<string>()).IsEqualTo("There's no skill 'nope' in this session. Its skills: pdf, broken.");
+    }
+
+    [Test]
+    public async Task Server_ASkillWithoutAFolder_ExitsWithAnError()
+    {
+        using var process = Process.Start(new ProcessStartInfo(Server, ["--workplace", _folder.Workplace, "--journal", _folder.PathOf("tools.jsonl"), "--skill", "pdf"]) { RedirectStandardError = true, UseShellExecute = false })!;
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        await Assert.That(process.ExitCode).IsEqualTo(2);
+        await Assert.That(error).Contains("--skill takes <name>=<folder>, not 'pdf'");
     }
 
     [Test]

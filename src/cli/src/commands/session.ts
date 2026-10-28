@@ -49,6 +49,7 @@ export function formatSession(s: Session): string {
     ["useEnv", s.useEnv?.length ? s.useEnv.join(", ") : undefined],
     // Always stated: exactly what the agent has; an empty list: none at all.
     ["tools", s.tools.length ? s.tools.join(", ") : "none"],
+    ["skills", s.skills.length ? s.skills.join(", ") : "none"],
     // One line per repo: as given, then the folder and branch ARM gave it.
     ...(s.repos ?? []).map(
       (r, i) =>
@@ -107,17 +108,21 @@ function createBody(prompt: string, options: OptionValues, ctx: Pick<CommandCont
     env: keyValues(options, "env"),
     useEnv: repeated(options, "use-env"),
     repos: repos(options, "repo"),
-    tools: tools(options),
+    tools: namedOrNone(options, "tool", "no-tools"),
+    skills: namedOrNone(options, "skill", "no-skills"),
   };
   // Leave unset fields out of the request, so the server applies its defaults.
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateSession;
 }
 
-/** `--tool` as given, `--no-tools` as `[]` (no tools at all), neither unset (the server's defaults). */
-function tools(options: OptionValues): string[] | undefined {
-  const named = repeated(options, "tool");
-  if (options["no-tools"] !== true) return named;
-  if (named !== undefined) throw new UsageError("--no-tools and --tool exclude each other");
+/**
+ * A list the server has defaults for (tools, skills): `--<one>` as given, `--<none>` as `[]`
+ * (none at all), neither unset (the server's defaults).
+ */
+function namedOrNone(options: OptionValues, one: string, none: string): string[] | undefined {
+  const named = repeated(options, one);
+  if (options[none] !== true) return named;
+  if (named !== undefined) throw new UsageError(`--${none} and --${one} exclude each other`);
   return [];
 }
 
@@ -194,6 +199,17 @@ export const sessionGroup: CommandGroup = {
         "no-tools": {
           type: "boolean",
           description: "Give the agent no tools at all (excludes --tool)",
+        },
+        skill: {
+          type: "string",
+          description:
+            "A skill the agent can load (see `arm skill list`); the agent gets exactly these (default: the registered skills flagged default)",
+          valueName: "NAME",
+          multiple: true,
+        },
+        "no-skills": {
+          type: "boolean",
+          description: "Give the agent no skills (excludes --skill)",
         },
       },
       async run({ args, options, client, settings, user }) {

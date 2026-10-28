@@ -64,7 +64,8 @@ const inputOf = (call: ConversationEntry): Input =>
   call.input && typeof call.input === "object" ? (call.input as Input) : {};
 
 /**
- * What a tool call is about, in one line: its description (unless blank), command, file, pattern or URL. The
+ * What a tool call is about, in one line: its description (unless blank), command, file, name
+ * (`arm_skill_load`'s skill), pattern or URL. The
  * server picks a session's activity by the same rules (`ToolGist`, M5f); both are tested against
  * `tool-gist.cases.json`, so every client shows the same line. This copy stays: the conversation
  * has the input, not a line made from it.
@@ -78,6 +79,7 @@ export function gist(call: ConversationEntry): string {
     (description?.trim() ? description : undefined) ??
     (command !== undefined ? shellGist(command) : undefined) ??
     text("file_path") ??
+    text("name") ??
     text("pattern") ??
     text("url") ??
     JSON.stringify(call.input ?? {})
