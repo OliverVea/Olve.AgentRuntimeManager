@@ -28,7 +28,7 @@ if [ $changed = 1 ]; then
     [ -n "$f" ] || continue
     case "$f" in
       docs/*|*.md|src/frontend/mocks/*|.claude/*) ;;
-      src/spec/*|src/codegen/*|mise.toml|package.json|package-lock.json) want[all]=1 ;;
+      src/spec/*|mise.toml|package.json|package-lock.json) want[all]=1 ;;
       src/backend/*) want[backend]=1 ;;
       # The beta check's own tests are in the backend's API tests.
       .pipelines/*) want[backend]=1; want[pipeline]=1 ;;

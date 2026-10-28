@@ -1,8 +1,8 @@
 # Node stage: compiles the contract and builds the SPA (src/frontend/dist, shipped as static files
 # in the app's wwwroot). The repo root is an npm workspace, so this stage installs from the root
 # lockfile, and the frontend build compiles the contract first: src/spec/main.tsp →
-# artifacts/spec/openapi.json → Hey API → artifacts/clients/ts → vite, and (our own emitter,
-# src/codegen/typespec-arm-csharp) → artifacts/generated/backend/*.g.cs, which the .NET stage
+# artifacts/spec/openapi.json → Hey API → artifacts/clients/ts → vite, and (the
+# @olivervea/typespec-csharp emitter) → artifacts/generated/backend/*.g.cs, which the .NET stage
 # below compiles (it has no Node).
 FROM node:24-alpine AS frontend
 WORKDIR /repo
@@ -10,12 +10,10 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY src/frontend/package.json src/frontend/
 COPY src/cli/package.json src/cli/
-COPY src/codegen/typespec-arm-csharp/package.json src/codegen/typespec-arm-csharp/
 # --ignore-scripts: the SPA build doesn't need the bun/mise binaries those scripts download.
 RUN npm ci --ignore-scripts
 COPY tspconfig.yaml openapi-ts.config.mjs ./
 COPY src/spec/ src/spec/
-COPY src/codegen/ src/codegen/
 COPY src/frontend/ src/frontend/
 RUN npm run build --workspace src/frontend
 

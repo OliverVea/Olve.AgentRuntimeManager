@@ -19,10 +19,6 @@ run = "npm ci"
 description = "TypeSpec → artifacts/spec/openapi.json + artifacts/generated/backend (C#) → artifacts/clients/ts"
 run = "npm run generate"
 
-[tasks."codegen:test"]
-description = "Emitter tests: snapshots + the tooling conformance suite (fixture → C# → HTTP vs OpenAPI; runs dotnet)"
-run = "npm run codegen:test"
-
 [tasks."backend:test"]
 description = "Backend build + unit and API tests (API tests in-process)"
 dir = "src/backend"
@@ -84,7 +80,6 @@ description = "Everything the pipeline gate runs"
 run = [
   { task = "install" },
   { task = "generate" },
-  { task = "codegen:test" },
   { task = "backend:test" },
   { task = "frontend:check" },
   { task = "cli:check" },

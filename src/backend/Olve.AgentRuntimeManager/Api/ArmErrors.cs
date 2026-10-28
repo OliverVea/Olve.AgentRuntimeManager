@@ -21,13 +21,4 @@ public static class ArmErrors
         var message = entries.FirstOrDefault()?.Message ?? "The request is invalid.";
         return new ArmError(InvalidRequest, message, new ArmErrorDetails { Problems = entries.Count > 1 ? entries : null });
     }
-
-    /// <summary>
-    /// Answers <paramref name="error"/> with <paramref name="status"/> if <paramref name="operation"/>
-    /// declares it (the envelope), else with the status alone, as ASP.NET Core would.
-    /// </summary>
-    public static IResult ToHttpResult(ArmError error, int status, ArmOperation? operation) =>
-        operation?.Declares(status) == true
-            ? TypedResults.Json(new ArmErrorEnvelope(error), ArmErrorJsonContext.Default.ArmErrorEnvelope, statusCode: status)
-            : TypedResults.StatusCode(status);
 }

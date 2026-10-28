@@ -77,11 +77,13 @@ and in the pipeline.
 
 A TypeSpec emitter (local workspace package, plain ESM) that reads the TypeSpec program and
 writes C# to `artifacts/generated/backend/`. Prototyped in a spike (~190 LOC for Message + a
-union). Lives in [`src/codegen/typespec-arm-csharp`](../src/codegen/typespec-arm-csharp):
-`collect.js` walks the HTTP program into a small C#-shaped model, `render.js` formats it, and
-`test/` holds the fixture specs, their snapshots and the conformance suite. The hand-written runtime it targets (`IArmHandler`, `IArmResponse`, `ArmOperation`,
-the error envelope, `ArmValidation`, `ArmBindingFailures`, `UseArmApi`) is backend source in
-`src/backend/Olve.AgentRuntimeManager/Api/`.
+union), built here as `src/codegen/typespec-arm-csharp` with its runtime in the backend's `Api/`.
+**Since 2026-10-28 both live in Olve.Utilities** as the npm package `@olivervea/typespec-csharp`
+(emitter: `collect.js` walks the HTTP program into a small C#-shaped model, `render.js` formats
+it; `test/` holds the fixture specs and snapshots) and the NuGet package `Olve.TypeSpec`
+(`IOperationHandler`, `IOperationResponse`, `ApiOperation`, `IApiErrorWriter`, request validation,
+binding failures, SSE), with the conformance suite in `tests/Olve.TypeSpec.Conformance`. ARM
+keeps its error envelope and an `ArmErrorWriter`; the copies here were deleted.
 
 - [x] Emitter package + `tspconfig.yaml` wiring; output never in `src/`
 - [x] Records per model: `required`/`T?` right, read-only split into request models (per visibility: `…Writable` for Create|Update, `…Create`/`…Update` when the property sets differ), `Guid`/`int`/dates/enums/dictionaries, `JsonIgnore(WhenWritingNull)` for optional
@@ -97,7 +99,7 @@ the error envelope, `ArmValidation`, `ArmBindingFailures`, `UseArmApi`) is backe
 - [x] Migrate `Message` + auth-config onto the generated surface; delete the hand-written DTOs/mapping
 - [ ] Later milestones extend it: PATCH tri-state, `Id<T>` decorator (`explode:false` string arrays in the query and SSE landed in M3; several 2xx and the error envelope in M4, as typed response unions)
 
-Not yet covered (reported as `typespec-arm-csharp/unsupported-*` warnings where the spec uses
+Not yet covered (reported as `@olivervea/typespec-csharp/unsupported-*` warnings where the spec uses
 them, so nothing is silently mistyped): untagged unions, enveloped discriminated unions and
 model-inheritance `@discriminator`, cookie parameters, multipart bodies, status ranges/default
 responses, array parameters other than `explode: false` string lists in the query, SSE streams

@@ -24,10 +24,11 @@
     <!-- The hang dump for dotnet test (mise.toml): a hang dumps the testhost and names the tests still running. Same version as TUnit's Microsoft.Testing.Platform. -->
     <PackageVersion Include="Microsoft.Testing.Extensions.HangDump" Version="2.2.3" />
     <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.9" />
-    <PackageVersion Include="Olve.Results" Version="0.48.0" />
-    <PackageVersion Include="Olve.Results.TUnit" Version="0.48.0" />
-    <PackageVersion Include="Olve.Utilities" Version="0.48.0" />
-    <PackageVersion Include="Olve.Validation" Version="0.48.0" />
+    <PackageVersion Include="Olve.Results" Version="0.58.0" />
+    <PackageVersion Include="Olve.Results.TUnit" Version="0.58.0" />
+    <PackageVersion Include="Olve.Utilities" Version="0.58.0" />
+    <PackageVersion Include="Olve.TypeSpec" Version="0.58.0" />
+    <PackageVersion Include="Olve.Validation" Version="0.58.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.16.0" />

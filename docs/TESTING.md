@@ -81,8 +81,8 @@ The scaffold's Testcontainers `AppFixture` / IntegrationTests project is gone. N
 
 Contract conformance (every operation routed, responses valid for their declared statuses) is
 **not** re-tested per service: it's the generator's responsibility, covered once by the
-emitter's conformance suite (`src/codegen/typespec-arm-csharp/test/conformance`, run by
-`mise run codegen:test`; see [`SPEC-FIRST.md`](SPEC-FIRST.md) M2).
+emitter's conformance suite (`tests/Olve.TypeSpec.Conformance` in Olve.Utilities; see
+[`SPEC-FIRST.md`](SPEC-FIRST.md) M2).
 
 ### `beta-test` specifics (from QuestionBank)
 

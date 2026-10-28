@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Olve.AgentRuntimeManager.Api;
+using Olve.TypeSpec;
 using Olve.AgentRuntimeManager.Events;
 
 namespace Olve.AgentRuntimeManager.UnitTests.Events;
@@ -24,13 +25,13 @@ public class StreamEventsHandlerTests
 
     private static SessionQueued Queued() => new() { At = Start, SessionId = Guid.NewGuid(), Position = 1 };
 
-    private async Task<IAsyncEnumerator<ArmSseItem<ArmEvent>>> Open(string[]? include = null, string[]? exclude = null, string? lastEventId = null)
+    private async Task<IAsyncEnumerator<ServerSentEvent<ArmEvent>>> Open(string[]? include = null, string[]? exclude = null, string? lastEventId = null)
     {
         var response = await _handler.HandleAsync(new EventsStreamRequest(include, exclude, lastEventId), CancellationToken.None);
         return ((EventsStreamResponse.Ok)response).Events.GetAsyncEnumerator();
     }
 
-    private static async Task<ArmSseItem<ArmEvent>> Next(IAsyncEnumerator<ArmSseItem<ArmEvent>> stream)
+    private static async Task<ServerSentEvent<ArmEvent>> Next(IAsyncEnumerator<ServerSentEvent<ArmEvent>> stream)
     {
         var moved = await stream.MoveNextAsync().AsTask().WaitAsync(Guard);
         return moved ? stream.Current : throw new InvalidOperationException("The stream ended.");

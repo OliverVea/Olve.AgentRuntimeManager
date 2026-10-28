@@ -5,18 +5,17 @@
   "description": "Workspace root: TypeSpec contract tooling, generated clients, frontend and CLI.",
   "workspaces": [
     "src/frontend",
-    "src/cli",
-    "src/codegen/typespec-arm-csharp"
+    "src/cli"
   ],
   "scripts": {
     "spec": "tsp compile src/spec/main.tsp",
     "client": "openapi-ts -f openapi-ts.config.mjs",
-    "generate": "npm run spec && npm run client",
-    "codegen:test": "npm test --workspace src/codegen/typespec-arm-csharp"
+    "generate": "npm run spec && npm run client"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
     "@jdxcode/mise": "2026.9.13",
+    "@olivervea/typespec-csharp": "0.58.0",
     "@typespec/compiler": "1.16.0",
     "@typespec/events": "0.86.0",
     "@typespec/http": "1.16.0",

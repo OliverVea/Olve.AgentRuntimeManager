@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Api;
+using Olve.TypeSpec;
 
 namespace Olve.AgentRuntimeManager.ApiTests;
 
@@ -12,7 +13,7 @@ public class StartupTests(ApiTarget target)
     [Test]
     public async Task EveryGeneratedHandler_IsRegistered()
     {
-        var missing = target.Factory.Services.MissingHandlers();
+        var missing = target.Factory.Services.MissingHandlers(ArmApi.HandlerTypes);
 
         await Assert.That(ArmApi.HandlerTypes).IsNotEmpty();
         await Assert.That(missing.Select(t => t.Name).ToList()).IsEmpty();

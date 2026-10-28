@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
+using Olve.TypeSpec;
 
 namespace Olve.AgentRuntimeManager.Events;
 
@@ -35,7 +36,7 @@ public sealed class StreamEventsHandler(EventBus bus, TimeProvider time, IOption
         return Task.FromResult<EventsStreamResponse>(new EventsStreamResponse.Ok(Stream(filter, after, cancellationToken)));
     }
 
-    private async IAsyncEnumerable<ArmSseItem<ArmEvent>> Stream(
+    private async IAsyncEnumerable<ServerSentEvent<ArmEvent>> Stream(
         EventFilter filter,
         long? after,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -90,8 +91,8 @@ public sealed class StreamEventsHandler(EventBus bus, TimeProvider time, IOption
         }
     }
 
-    private static ArmSseItem<ArmEvent> Item(StoredEvent stored) =>
+    private static ServerSentEvent<ArmEvent> Item(StoredEvent stored) =>
         new(stored.Data, stored.Id.ToString(CultureInfo.InvariantCulture));
 
-    private ArmSseItem<ArmEvent> Heartbeat() => new(new Heartbeat { At = time.GetUtcNow() });
+    private ServerSentEvent<ArmEvent> Heartbeat() => new(new Heartbeat { At = time.GetUtcNow() });
 }

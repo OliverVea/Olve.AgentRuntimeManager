@@ -7,10 +7,10 @@
 
   <!--
     The API surface is generated from the TypeSpec contract (docs/SPEC-FIRST.md, M2):
-    `npm run spec` compiles src/spec/main.tsp with our emitter (src/codegen/typespec-arm-csharp)
+    `npm run spec` compiles src/spec/main.tsp with @olivervea/typespec-csharp (the runtime is Olve.TypeSpec)
     into artifacts/generated/backend/*.g.cs, plus artifacts/spec/openapi.json for the clients.
     Incremental: skipped while the outputs are newer than the spec, the tsp config and the
-    emitter. -p:SkipSpecGen=true compiles already-generated files without Node
+    emitter version (package-lock.json). -p:SkipSpecGen=true compiles already-generated files without Node
     (the Dockerfile's .NET stage, which copies them from its Node stage).
   -->
   <PropertyGroup>
@@ -19,8 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ArmSpecInput Include="$(RepoRoot)src/spec/**/*.tsp;$(RepoRoot)tspconfig.yaml;$(RepoRoot)package.json" />
-    <ArmSpecInput Include="$(RepoRoot)src/codegen/typespec-arm-csharp/package.json;$(RepoRoot)src/codegen/typespec-arm-csharp/src/**/*.js" />
+    <ArmSpecInput Include="$(RepoRoot)src/spec/**/*.tsp;$(RepoRoot)tspconfig.yaml;$(RepoRoot)package.json;$(RepoRoot)package-lock.json" />
     <ArmSpecOutput Include="$(ArmGeneratedDir)ArmApi.g.cs;$(ArmGeneratedDir)ArmModels.g.cs;$(ArmGeneratedDir)ArmJsonContext.g.cs;$(RepoRoot)artifacts/spec/openapi.json" />
     <!-- Static include for IDEs; re-added after generation below for a clean checkout. -->
     <Compile Include="$(ArmGeneratedDir)*.g.cs" Link="Api/Generated/%(Filename)%(Extension)" />
@@ -66,6 +65,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Olve.Results" />
+    <PackageReference Include="Olve.TypeSpec" />
     <PackageReference Include="Olve.Validation" />
     <PackageReference Include="Olve.Utilities" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
