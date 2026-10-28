@@ -39,8 +39,6 @@ public sealed class ClaudeProvider(
         "ARM restarted and lost this session's supervisor, and its agent may still be running (it could not be killed), so it was not resumed.";
 
     /// <summary>Environment variables passed through to the agent; everything else is withheld (A5b).</summary>
-    private static readonly string[] PassedThrough = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "CLAUDE_CODE_OAUTH_TOKEN"];
-
     public string Name => ProviderName;
 
     public string? DisplayName => options.Value.DisplayName;
@@ -311,18 +309,16 @@ public sealed class ClaudeProvider(
     }
 
     /// <summary>
-    /// The session's own variables (<paramref name="env"/>), then the allowlisted ones and what keeps
-    /// Claude Code to itself on top: ARM's always win (their names are reserved, so they don't meet).
+    /// The session's own variables (<paramref name="env"/>), then the host's (<see cref="HostEnvironment"/>),
+    /// the login token and what keeps Claude Code to itself on top: ARM's always win (their names are
+    /// reserved, so they don't meet).
     /// </summary>
     internal static Dictionary<string, string> AgentEnvironment(ClaudeProviderOptions settings, IReadOnlyDictionary<string, string>? env = null)
     {
-        var environment = new Dictionary<string, string>(env ?? new Dictionary<string, string>(), StringComparer.Ordinal);
-        foreach (var name in PassedThrough)
+        var environment = HostEnvironment.With(env);
+        if (Environment.GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN") is { Length: > 0 } token)
         {
-            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value)
-            {
-                environment[name] = value;
-            }
+            environment["CLAUDE_CODE_OAUTH_TOKEN"] = token;
         }
 
         // The user's claude.ai connectors (Gmail, Calendar, …) load even with --strict-mcp-config.

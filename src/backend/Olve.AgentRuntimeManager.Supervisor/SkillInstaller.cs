@@ -113,10 +113,15 @@ internal static class SkillInstaller
     private static bool IsFolderName(string name) =>
         name.Length > 0 && name is not ("." or "..") && !name.StartsWith('.') && name.IndexOfAny(['/', '\\', '\0']) < 0;
 
-    /// <summary>A shallow fetch of one commit into a fresh repository at <paramref name="temp"/>; the error if git failed.</summary>
+    /// <summary>
+    /// A shallow fetch of one commit into a fresh repository at <paramref name="temp"/>; the error if
+    /// git failed. The three commands together are bounded by <see cref="SupervisorSkillInstall.GitTimeout"/>
+    /// (ARM waits that long and a little, then gives up on the install; the clone must be gone by then).
+    /// </summary>
     private static async Task<string?> FetchAsync(SupervisorSkillInstall install, string temp)
     {
-        var git = new Git(install.Environment, install.GitTimeout);
+        using var bounded = new CancellationTokenSource(install.GitTimeout);
+        var git = new Git(install.Environment, install.GitTimeout, bounded.Token);
         var what = install.Ref is null ? install.Url : $"{install.Url} at {install.Ref}";
         return Failed(await git.RunAsync("init", "--quiet", temp), what, "git init", install.GitTimeout)
             ?? Failed(await git.RunAsync("-C", temp, "fetch", "--quiet", "--depth", "1", install.Url, install.Ref ?? "HEAD"), what, "git fetch", install.GitTimeout)
@@ -159,8 +164,8 @@ internal static class SkillInstaller
             return null;
         }
 
-        var error = result.TimedOut
-            ? $"Fetching {what} failed: {command} took more than {timeout.TotalSeconds:0} s."
+        var error = result.TimedOut || result.Cancelled
+            ? $"Fetching {what} failed: it took more than {timeout.TotalSeconds:0} s (at {command})."
             : $"Fetching {what} failed: {(result.Error.Length > 0 ? result.Error : $"{command} exited with {result.ExitCode}.")}";
         return error.Length > ErrorLength ? error[..ErrorLength] : error;
     }

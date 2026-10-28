@@ -23,14 +23,16 @@ public sealed record SkillFile(IReadOnlyDictionary<string, string> Frontmatter, 
     /// </summary>
     public static SkillFile? Parse(string text, out string? error)
     {
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        if (lines.Length == 0 || lines[0].TrimEnd() != "---")
+        // A byte order mark or blank lines before the frontmatter are nothing (other hosts take them).
+        var lines = text.TrimStart('\uFEFF').Replace("\r\n", "\n").Split('\n');
+        var first = Array.FindIndex(lines, line => !string.IsNullOrWhiteSpace(line));
+        if (first < 0 || lines[first].TrimEnd() != "---")
         {
             error = "SKILL.md doesn't start with a YAML frontmatter (a '---' line).";
             return null;
         }
 
-        var end = Array.FindIndex(lines, 1, line => line.TrimEnd() == "---");
+        var end = Array.FindIndex(lines, first + 1, line => line.TrimEnd() == "---");
         if (end < 0)
         {
             error = "SKILL.md's frontmatter never closes (no second '---' line).";
@@ -38,7 +40,7 @@ public sealed record SkillFile(IReadOnlyDictionary<string, string> Frontmatter, 
         }
 
         var frontmatter = new Dictionary<string, string>(StringComparer.Ordinal);
-        for (var i = 1; i < end; i++)
+        for (var i = first + 1; i < end; i++)
         {
             var line = lines[i];
             if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#') || line.StartsWith(' ') || line.StartsWith('\t'))
@@ -69,9 +71,13 @@ public sealed record SkillFile(IReadOnlyDictionary<string, string> Frontmatter, 
 
                 value = string.Join(' ', parts);
             }
-            else if (value.Length >= 2 && (value[0] == '"' && value[^1] == '"' || value[0] == '\'' && value[^1] == '\''))
+            else if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
             {
-                value = value[1..^1].Replace("\\\"", "\"");
+                value = Unescape(value[1..^1]);
+            }
+            else if (value.Length >= 2 && value[0] == '\'' && value[^1] == '\'')
+            {
+                value = value[1..^1].Replace("''", "'");
             }
 
             frontmatter[key] = value;
@@ -85,5 +91,36 @@ public sealed record SkillFile(IReadOnlyDictionary<string, string> Frontmatter, 
 
         error = null;
         return new SkillFile(frontmatter, string.Join('\n', lines[(end + 1)..]).Trim('\n'));
+    }
+
+    /// <summary>A double-quoted YAML scalar's escapes, the ones a description meets: <c>\"</c>, <c>\\</c>, <c>\n</c>, <c>\t</c>; others are kept as written.</summary>
+    private static string Unescape(string value)
+    {
+        if (!value.Contains('\\'))
+        {
+            return value;
+        }
+
+        var result = new System.Text.StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] != '\\' || i + 1 == value.Length)
+            {
+                result.Append(value[i]);
+                continue;
+            }
+
+            i++;
+            result.Append(value[i] switch
+            {
+                '"' => "\"",
+                '\\' => "\\",
+                'n' => "\n",
+                't' => "\t",
+                var other => $"\\{other}",
+            });
+        }
+
+        return result.ToString();
     }
 }

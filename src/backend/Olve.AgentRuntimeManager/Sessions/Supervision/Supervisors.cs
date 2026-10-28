@@ -283,10 +283,23 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// user whose it is (the agent user's, like the checkout): the supervisor's <c>remove-worktree</c>.
     /// The error if it couldn't (bounded: a stuck git mustn't hold the request).
     /// </summary>
-    public string? RemoveWorktree(string shared, string worktree)
+    public string? RemoveWorktree(string shared, string worktree) => RunRemoval(["remove-worktree", shared, worktree]);
+
+    /// <summary>
+    /// Removes a skill's folder from the registry (M10b), as the user whose it is: the supervisor's
+    /// <c>skill-remove</c> (fine with one already gone). The error if it couldn't (bounded).
+    /// </summary>
+    public string? RemoveSkill(string root, string name) => RunRemoval(["skill-remove", root, name]);
+
+    /// <summary>
+    /// Runs one of the supervisor's removals (<paramref name="arguments"/>, the subcommand first) to
+    /// its end: null when it exited 0, else its error (stderr, or the exit code), or that it took more
+    /// than <see cref="RemoveTimeout"/> (then it's killed, as far as ARM may).
+    /// </summary>
+    private string? RunRemoval(IReadOnlyList<string> arguments)
     {
         var settings = options.Value;
-        var start = StartInfo(settings, _account.Value, [Command(settings), "remove-worktree", shared, worktree]);
+        var start = StartInfo(settings, _account.Value, [Command(settings), .. arguments]);
         start.RedirectStandardError = true;
         SupervisorOnly(start);
         try
@@ -295,7 +308,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             var error = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(RemoveTimeout))
             {
-                process.Kill(entireProcessTree: true);
+                Kill(process, arguments[0]);
                 return $"removing it took more than {RemoveTimeout.TotalSeconds:0} s";
             }
 
@@ -309,8 +322,28 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
         }
     }
 
+    /// <summary>
+    /// Kills a one-off supervisor command and what it started, as far as ARM may: as the agent user it
+    /// runs under <c>sudo</c>, which ARM can't signal (docs/AGENT-USER.md), so the command bounds itself
+    /// too and this is the backstop for when ARM is the user. A kill that isn't allowed is logged, not thrown.
+    /// </summary>
+    private void Kill(Process process, string command)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogWarning(exception, "The supervisor's {Command} outlived its timeout and could not be killed (pid {Pid})", command, process.Id);
+        }
+    }
+
     /// <summary>The supervisor's <c>remove-worktree</c> bounds itself at 20 s; this leaves it room to say so.</summary>
     public static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(25);
+
+    /// <summary>The supervisor's <c>skill-install</c> exit code for a request it won't act on (a blank url, a path that leaves the repository; what's wrong is on stderr).</summary>
+    public const int SkillInstallBadUsage = 2;
 
     /// <summary>The supervisor's <c>skill-install</c> exit code for a source with no valid <c>SKILL.md</c> at its path (what's wrong is on stderr).</summary>
     public const int SkillInstallInvalid = 3;
@@ -320,14 +353,23 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// user's, like the checkouts): the supervisor's <c>skill-install</c>, given <paramref name="install"/>
     /// as JSON on its standard input. It fetches the source, requires a valid <c>SKILL.md</c>, puts the
     /// folder at <c>&lt;root&gt;/&lt;name&gt;</c> and prints the <c>SKILL.md</c>. Exit 0: installed, the file
-    /// in the output; 1: the fetch failed, git's message in the error; <see cref="SkillInstallInvalid"/>:
-    /// no valid <c>SKILL.md</c>. Bounded by <paramref name="timeout"/> (the supervisor's git timeout) and a
-    /// little, so its own message about a slow git arrives first; past that it's killed and the result says so.
+    /// in the output; 1: the fetch failed, git's message in the error; <see cref="SkillInstallBadUsage"/>:
+    /// a request it won't act on; <see cref="SkillInstallInvalid"/>: no valid <c>SKILL.md</c>. Its git runs
+    /// with <see cref="SupervisorSkillInstall.Environment"/> as the agent user's, like a checkout's (that
+    /// user's <c>HOME</c>, so its ssh keys and git configuration apply). Bounded by <paramref name="timeout"/>
+    /// (the supervisor's own bound on the whole fetch) and a little, so its own message about a slow git
+    /// arrives first; past that it's killed and the result says so.
     /// </summary>
     public async Task<SupervisorCommandResult> InstallSkillAsync(SupervisorSkillInstall install, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var settings = options.Value;
-        var start = StartInfo(settings, _account.Value, [Command(settings), "skill-install"]);
+        var account = _account.Value;
+        if (account is not null)
+        {
+            install = install with { Environment = account.Identify(install.Environment) };
+        }
+
+        var start = StartInfo(settings, account, [Command(settings), "skill-install"]);
         start.RedirectStandardInput = true;
         start.RedirectStandardOutput = true;
         start.RedirectStandardError = true;
@@ -364,8 +406,8 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             }
             catch (OperationCanceledException)
             {
-                // Its git too (a fetch that hangs): nothing of the install may outlive the request.
-                process.Kill(entireProcessTree: true);
+                // Its git too (a fetch that hangs): nothing of the install should outlive the request.
+                Kill(process, "skill-install");
                 if (cancellationToken.IsCancellationRequested)
                 {
                     throw;
@@ -375,36 +417,6 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             }
 
             return new SupervisorCommandResult(process.ExitCode, (await output).Trim(), (await error).Trim());
-        }
-    }
-
-    /// <summary>
-    /// Removes a skill's folder from the registry (M10b), as the user whose it is: the supervisor's
-    /// <c>skill-remove</c> (fine with one already gone). The error if it couldn't (bounded).
-    /// </summary>
-    public string? RemoveSkill(string root, string name)
-    {
-        var settings = options.Value;
-        var start = StartInfo(settings, _account.Value, [Command(settings), "skill-remove", root, name]);
-        start.RedirectStandardError = true;
-        SupervisorOnly(start);
-        try
-        {
-            using var process = Process.Start(start) ?? throw new InvalidOperationException($"'{start.FileName}' did not start.");
-            var error = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(RemoveTimeout))
-            {
-                process.Kill(entireProcessTree: true);
-                return $"removing it took more than {RemoveTimeout.TotalSeconds:0} s";
-            }
-
-            return process.ExitCode == 0 ? null
-                : error.Wait(settings.ConnectTimeout) && error.Result.Trim() is { Length: > 0 } message ? message
-                : $"exit code {process.ExitCode}";
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return exception.Message;
         }
     }
 

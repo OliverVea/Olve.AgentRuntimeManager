@@ -25,6 +25,6 @@ public sealed record SupervisorSkillInstall
     /// <summary>The environment git runs with (<c>PATH</c>, <c>HOME</c>, <c>GIT_SSH_COMMAND</c>): the same one the checkouts get.</summary>
     public required IReadOnlyDictionary<string, string> Environment { get; init; }
 
-    /// <summary>The longest any one git command may take; then it's killed and the install fails.</summary>
+    /// <summary>The longest the fetch (init, fetch and checkout together) may take; then git is killed and the install fails.</summary>
     public TimeSpan GitTimeout { get; init; } = SupervisorLaunch.DefaultGitTimeout;
 }

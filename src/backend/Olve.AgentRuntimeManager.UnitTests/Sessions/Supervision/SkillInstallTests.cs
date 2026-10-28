@@ -222,6 +222,25 @@ public class SkillInstallTests
     }
 
     [Test]
+    public async Task Install_AFetchThatHangs_Exits1_AtTheGitTimeout_AndLeavesNothing()
+    {
+        // ssh is what hangs here: a command that sleeps in its place, with git's arguments commented away.
+        var install = Install("ssh://nowhere.invalid/skill.git");
+        install = install with
+        {
+            Environment = new Dictionary<string, string>(install.Environment) { ["GIT_SSH_COMMAND"] = "sleep 60 #" },
+            GitTimeout = TimeSpan.FromSeconds(2),
+        };
+
+        var (exitCode, output, error) = await RunInstall(install);
+
+        await Assert.That(exitCode).IsEqualTo(1);
+        await Assert.That(output).IsEqualTo("");
+        await Assert.That(error).Contains("took more than 2 s");
+        await Assert.That(Directory.GetFileSystemEntries(Registry)).IsEmpty();
+    }
+
+    [Test]
     public async Task Install_ABadRef_Exits1()
     {
         var repo = SkillRepo();

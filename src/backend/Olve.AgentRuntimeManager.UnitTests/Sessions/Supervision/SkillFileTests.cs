@@ -19,11 +19,26 @@ public class SkillFileTests
     [Test]
     [Arguments("\"Quoted: with a \\\"word\\\" in it\"", "Quoted: with a \"word\" in it")]
     [Arguments("'Single quoted'", "Single quoted")]
+    [Arguments("\"Line one.\\nLine two.\"", "Line one.\nLine two.")]
+    [Arguments("\"A back\\\\slash and \\x\"", "A back\\slash and \\x")]
+    [Arguments("'It''s quoted'", "It's quoted")]
     public async Task Parse_QuotedValues_LoseTheirQuotes(string value, string expected)
     {
         var file = SkillFile.Parse($"---\nname: x\ndescription: {value}\n---\nbody", out _);
 
         await Assert.That(file!.Description).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("\uFEFF---\nname: x\ndescription: d\n---\nbody")]
+    [Arguments("\n  \n---\nname: x\ndescription: d\n---\nbody")]
+    public async Task Parse_ABomOrBlankLinesBeforeTheFrontmatter_AreTakenInStride(string text)
+    {
+        var file = SkillFile.Parse(text, out var error);
+
+        await Assert.That(error).IsNull();
+        await Assert.That(file!.Description).IsEqualTo("d");
+        await Assert.That(file.Body).IsEqualTo("body");
     }
 
     [Test]
