@@ -1,13 +1,21 @@
 import { join } from "node:path";
-import { implement, sshSession } from "@olivervea/pipelines";
-import { betaTest } from "../pipeline";
-import { HOST } from "../vm-deploy";
-import { installMise, miseRun } from "./lib/mise";
+import { implement, sshSession, step, Source } from "@olivervea/pipelines";
+import { ARM_BETA_OIDC_CLIENT_SECRET } from "../shared";
+import * as M from "../models";
+import { HOST, SSH_PRIVATE_KEY } from "../vm-deploy";
+import { installMise, miseRun } from "../lib/mise";
 
 // The host relay to the beta VM (pods can't open connections into libvirt's NAT network).
 const API = "http://100.100.117.17:18792";
 
-export default implement(betaTest, async ({ source, release }, ctx) => {
+export const betaTest = implement(step({
+  name: "beta-test",
+  description: "Runs the remote API tests (`mise run api:remote`) against beta through the host relay, then the beta checks: real sessions, one Haiku turn.",
+  image: "mcr.microsoft.com/dotnet/sdk:10.0-noble",
+  input: { source: Source, release: M.VmRelease },
+  secrets: [ARM_BETA_OIDC_CLIENT_SECRET, SSH_PRIVATE_KEY],
+  timeoutSeconds: 1200,
+}), async ({ source, release }, ctx) => {
   const tree = await ctx.files.fetch(source.tree);
   await installMise(ctx, tree);
   await ctx.retry({ attempts: 30, delaySeconds: 2 }, () => ctx.http.expectOk(`${API}/health`));
