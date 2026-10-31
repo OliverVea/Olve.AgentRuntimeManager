@@ -49,6 +49,7 @@ for flag in $LOCKDOWN_FLAGS; do
 done
 
 mkdir -p "$OUT"
-cp "$WORK/claude" "$WORK/manifest.json" "$WORK/manifest.json.sig" "$OUT/"
+mv "$WORK/claude" "$WORK/manifest.json" "$WORK/manifest.json.sig" "$OUT/"
+rm -rf "$WORK"
 echo "$VERSION" > "$OUT/claude-version.txt"
 echo "Staged Claude Code $VERSION"
