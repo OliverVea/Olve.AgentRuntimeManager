@@ -104,8 +104,11 @@ public class ToolDispatcherTests
     [Test]
     public async Task Call_ThatStopsWithTheServer_StaysInterrupted()
     {
-        using var stopping = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        var stopped = await Dispatcher().CallAsync(ToolCatalog.Bash, JsonNode.Parse("""{ "command": "sleep 30" }""") as JsonObject, "toolu_1", CancellationToken.None, stopping.Token);
+        using var stopping = new CancellationTokenSource();
+        // The call is journaled before it first yields; a stop any earlier means it never started.
+        var call = Dispatcher().CallAsync(ToolCatalog.Bash, JsonNode.Parse("""{ "command": "sleep 30" }""") as JsonObject, "toolu_1", CancellationToken.None, stopping.Token);
+        await stopping.CancelAsync();
+        var stopped = await call;
 
         var later = await Call(Dispatcher(), ToolCatalog.Bash, Append, "toolu_1");
 
