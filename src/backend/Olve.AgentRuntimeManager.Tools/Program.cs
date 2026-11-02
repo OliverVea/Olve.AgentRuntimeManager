@@ -1,13 +1,16 @@
 using System.Runtime.InteropServices;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools;
 using Olve.AgentRuntimeManager.Tools.Calls;
+using Olve.AgentRuntimeManager.Tools.External;
 using Olve.AgentRuntimeManager.Tools.Journal;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 using Olve.AgentRuntimeManager.Tools.Server;
 using Olve.AgentRuntimeManager.Tools.Tools;
 
-// `olve-arm-tools --workplace <folder> --journal <file> --tool <name>… [--skill <name>=<folder>…]`:
-// ARM's tools (M10) for one session, and its skills (M10b, loaded with arm_skill_load), served to
-// the agent as a stdio MCP server (docs/MILESTONES.md M10). It ends when its
+// `olve-arm-tools --workplace <folder> --journal <file> --tool <name>… [--skill <name>=<folder>…] [--mcp-servers <file>]`:
+// ARM's tools (M10) for one session, its skills (M10b, loaded with arm_skill_load) and the tools of
+// its external MCP servers (M10c), served to the agent as a stdio MCP server (docs/MILESTONES.md M10). It ends when its
 // input does, on SIGTERM (Claude Code ends its MCP servers with a signal, even on a normal exit)
 // and when the agent dies (ParentDeath), stopping every running call with it.
 // Unix only: process groups and signals (ARM runs on Linux).
@@ -51,10 +54,12 @@ using (journal)
     var groups = new ProcessGroups(sweepOrphans: subreaper);
     // The skills' descriptions are read now, once: the tool's description lists them.
     var skills = new SessionSkills(options.Skills);
-    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups, skills), options.Tools, journal);
-    var server = new McpServer(options, dispatcher, groups, skills, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
+    var externals = new ExternalServers(options.McpServers, options.Workplace, groups, Console.Error);
+    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups, skills), options.Tools, journal, externals);
+    var server = new McpServer(options, dispatcher, groups, skills, externals, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
 
     var stop = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    string? startFailure = null;
     using var terminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);
     using var interrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, Stop);
     using var hangup = PosixSignalRegistration.Create(PosixSignal.SIGHUP, Stop);
@@ -64,17 +69,42 @@ using (journal)
     }
 
     await Console.Error.WriteLineAsync($"olve-arm-tools: serving {string.Join(", ", options.Tools)} for {options.Workplace}; skills: {skills.Names}.");
+    _ = StartExternalsAsync();
     var reading = server.ReadAsync();
     var ended = await Task.WhenAny(reading, stop.Task);
     var reason = ended == reading
         ? reading.IsFaulted ? $"input failed: {reading.Exception?.InnerException?.Message}" : "end of input"
         : await stop.Task;
     await server.StopAsync(reason);
-    return 0;
+    return startFailure is null ? 0 : 1;
 
     void Stop(PosixSignalContext context)
     {
         context.Cancel = true;
         stop.TrySetResult(context.Signal.ToString());
+    }
+
+    // The provider only says that its MCP server failed: the reason is left beside the definitions
+    // first, for ARM to read when the session fails.
+    async Task StartExternalsAsync()
+    {
+        if (await externals.StartAsync(ToolsLaunch.McpStartTimeout) is not { } failure)
+        {
+            return;
+        }
+
+        await Console.Error.WriteLineAsync($"olve-arm-tools: {failure}");
+        try
+        {
+            var path = Path.Combine(Path.GetDirectoryName(options.McpServers)!, SupervisorFiles.McpFailure);
+            SupervisorFiles.WriteAtomically(path, new McpStartFailure { Error = failure }, SupervisorJsonContext.Default.McpStartFailure);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            await Console.Error.WriteLineAsync($"olve-arm-tools: can't record that: {exception.Message}");
+        }
+
+        startFailure = failure;
+        stop.TrySetResult("its MCP servers didn't start");
     }
 }

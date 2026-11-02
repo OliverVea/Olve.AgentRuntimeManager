@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Win32.SafeHandles;
 using Olve.AgentRuntimeManager.Tools.Calls;
 
@@ -99,14 +100,18 @@ internal sealed class CallJournal : IDisposable
     /// </summary>
     public void Finish(string id, string tool, ToolResult result)
     {
-        var kept = result.Text.Length <= MaxText
-            ? result
-            : result with { Text = result.Text[..MaxText] + "\n[... cut: the journal keeps a result up to its cap ...]" };
+        var kept = result switch
+        {
+            { Text.Length: <= MaxText } => result,
+            // Half of a JSON document reads as nothing.
+            { Raw: not null } => ToolResult.Error($"This call (tool-use id {id}) finished, but its result was too large for the journal to keep. It isn't run again."),
+            _ => result with { Text = result.Text[..MaxText] + "\n[... cut: the journal keeps a result up to its cap ...]" },
+        };
         lock (_calls)
         {
             try
             {
-                Append(new JournalEntry(id, JournalEntry.Finished, tool, DateTimeOffset.UtcNow, kept.Text, kept.IsError));
+                Append(new JournalEntry(id, JournalEntry.Finished, tool, DateTimeOffset.UtcNow, kept.Text, kept.IsError, kept.Raw is null ? null : true));
                 _calls[id] = CallState.Finished;
             }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException or ArgumentException or InvalidOperationException)
@@ -146,7 +151,7 @@ internal sealed class CallJournal : IDisposable
         {
             if (entry is { Event: JournalEntry.Finished } && entry.Id == id)
             {
-                found = new ToolResult(entry.Text ?? "", entry.IsError ?? false);
+                found = new ToolResult(entry.Text ?? "", entry.IsError ?? false, entry.IsRaw == true ? JsonNode.Parse(entry.Text ?? "") as JsonObject : null);
             }
         }
 

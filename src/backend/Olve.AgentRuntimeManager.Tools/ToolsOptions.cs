@@ -4,14 +4,15 @@ namespace Olve.AgentRuntimeManager.Tools;
 
 /// <summary>
 /// What ARM started the server with (<see cref="ToolsLaunch"/>): the workplace, the journal, the
-/// tools to serve and the session's skills (M10b), in the order given.
+/// tools to serve and the session's skills (M10b), in the order given, and the file of its external
+/// MCP servers (M10c) if it has any.
 /// </summary>
-internal sealed record ToolsOptions(string Workplace, string Journal, IReadOnlyList<string> Tools, IReadOnlyList<ToolsSkill> Skills)
+internal sealed record ToolsOptions(string Workplace, string Journal, IReadOnlyList<string> Tools, IReadOnlyList<ToolsSkill> Skills, string? McpServers = null)
 {
     /// <summary>The options from the command line; null with what's wrong in <paramref name="error"/>.</summary>
     public static ToolsOptions? Parse(IReadOnlyList<string> args, out string? error)
     {
-        string? workplace = null, journal = null;
+        string? workplace = null, journal = null, mcpServers = null;
         var tools = new List<string>();
         var skills = new List<ToolsSkill>();
         for (var i = 0; i < args.Count; i++)
@@ -25,6 +26,10 @@ internal sealed record ToolsOptions(string Workplace, string Journal, IReadOnlyL
                     break;
                 case ToolsLaunch.Journal when value is not null:
                     journal = value;
+                    i++;
+                    break;
+                case ToolsLaunch.McpServers when value is not null:
+                    mcpServers = Path.GetFullPath(value);
                     i++;
                     break;
                 case ToolsLaunch.Tool when value is not null:
@@ -72,6 +77,6 @@ internal sealed record ToolsOptions(string Workplace, string Journal, IReadOnlyL
         }
 
         error = null;
-        return new ToolsOptions(Path.GetFullPath(workplace), Path.GetFullPath(journal), tools, skills);
+        return new ToolsOptions(Path.GetFullPath(workplace), Path.GetFullPath(journal), tools, skills, mcpServers);
     }
 }

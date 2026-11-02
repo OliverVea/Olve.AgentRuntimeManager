@@ -31,7 +31,10 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
     /// <summary>The running calls' groups (each its leader's pid).</summary>
     private readonly HashSet<int> _groups = [];
 
-    /// <summary>Every call leader ever started: .NET reaps those, so a sweep never does.</summary>
+    /// <summary>The running external MCP servers' groups (each its leader's pid).</summary>
+    private readonly HashSet<int> _services = [];
+
+    /// <summary>Every call and server leader still tracked: .NET reaps those, so a sweep never does.</summary>
     private readonly HashSet<int> _leaders = [];
 
     /// <summary>
@@ -46,6 +49,31 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
             _groups.Add(process.Id);
             _leaders.Add(process.Id);
             return process;
+        }
+    }
+
+    /// <summary>
+    /// Starts an external MCP server's leader (M10c), which runs on between calls: its group is
+    /// never an orphan, and doesn't count as a running call, or no sweep would ever run.
+    /// </summary>
+    public Process StartService(ProcessStartInfo info)
+    {
+        lock (_groups)
+        {
+            var process = Process.Start(info) ?? throw new InvalidOperationException($"'{info.FileName}' did not start.");
+            _services.Add(process.Id);
+            _leaders.Add(process.Id);
+            return process;
+        }
+    }
+
+    /// <summary>A server has ended, as <see cref="Remove"/> for a call.</summary>
+    public void RemoveService(int group)
+    {
+        lock (_groups)
+        {
+            _services.Remove(group);
+            _leaders.Remove(group);
         }
     }
 
@@ -80,7 +108,7 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
         int[] groups;
         lock (_groups)
         {
-            groups = [.. _groups];
+            groups = [.. _groups, .. _services];
         }
 
         foreach (var group in groups)
@@ -191,8 +219,9 @@ internal sealed class ProcessGroups(bool sweepOrphans = false)
         {
             foreach (var child in children[parent])
             {
-                // A running call's leader, its group and everything below it are that call's.
-                if (_groups.Contains(child.Pid) || _groups.Contains(child.Group))
+                // A running call's leader, its group and everything below it are that call's; a
+                // server's are the server's.
+                if (_groups.Contains(child.Pid) || _groups.Contains(child.Group) || _services.Contains(child.Pid) || _services.Contains(child.Group))
                 {
                     continue;
                 }

@@ -35,6 +35,8 @@ public static class SupervisorFiles
 
     public static McpStartFailure? ReadMcpFailure(string folder) => Read(Path.Combine(folder, McpFailure), SupervisorJsonContext.Default.McpStartFailure);
 
+    public static IReadOnlyList<McpServerDefinition>? ReadMcpServers(string path) => Read(path, SupervisorJsonContext.Default.IReadOnlyListMcpServerDefinition);
+
     /// <summary>Writes a whole file or nothing (temp file, then rename), so a reader never sees half of it.</summary>
     public static void WriteAtomically<T>(string path, T value, JsonTypeInfo<T> type)
     {

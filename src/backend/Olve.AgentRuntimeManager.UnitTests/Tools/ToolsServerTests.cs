@@ -40,7 +40,18 @@ public class ToolsServerTests
     private Process Start(params string[] tools) => Start(skills: [], tools);
 
     /// <summary>The server with <paramref name="skills"/> (<c>name=folder</c> each, M10b) and <paramref name="tools"/>.</summary>
-    private Process Start(IReadOnlyList<string> skills, params string[] tools)
+    private Process Start(IReadOnlyList<string> skills, params string[] tools) => Launch(skills, null, tools);
+
+    /// <summary>The server with <paramref name="stubs"/> as its external MCP servers (M10c), the agent's login in its environment.</summary>
+    private Process StartWith(IReadOnlyList<StubMcpServer> stubs, params string[] tools)
+    {
+        var file = _folder.PathOf(SupervisorFiles.McpServers);
+        IReadOnlyList<McpServerDefinition> definitions = [.. stubs.Select(stub => stub.Definition())];
+        SupervisorFiles.WriteAtomically(file, definitions, SupervisorJsonContext.Default.IReadOnlyListMcpServerDefinition);
+        return Launch([], file, tools);
+    }
+
+    private Process Launch(IReadOnlyList<string> skills, string? mcpServers, string[] tools)
     {
         var info = new ProcessStartInfo(Server)
         {
@@ -49,6 +60,13 @@ public class ToolsServerTests
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        if (mcpServers is not null)
+        {
+            info.ArgumentList.Add(ToolsLaunch.McpServers);
+            info.ArgumentList.Add(mcpServers);
+            info.Environment["CLAUDE_CODE_OAUTH_TOKEN"] = "the-agents-login";
+        }
+
         foreach (var argument in (string[])[ToolsLaunch.Workplace, _folder.Workplace, ToolsLaunch.Journal, _folder.PathOf(ToolsLaunch.JournalFileName)])
         {
             info.ArgumentList.Add(argument);
@@ -313,6 +331,80 @@ public class ToolsServerTests
             .IsEqualTo($"Skill 'pdf' (its files are in {pdf}: read them with arm_file_read, run its scripts with arm_bash):\n\n# PDF\n\nDo the thing.");
         await Assert.That(unknown["result"]!["isError"]!.GetValue<bool>()).IsTrue();
         await Assert.That(unknown["result"]!["content"]![0]!["text"]!.GetValue<string>()).IsEqualTo("There's no skill 'nope' in this session. Its skills: pdf, broken.");
+    }
+
+    [Test]
+    public async Task Server_WithAnExternalServer_ServesItsToolsBesideItsOwn_AsTheyCame_AndStopsIt()
+    {
+        var marker = ToolsTestFolder.Marker();
+        var dump = _folder.PathOf("login.txt");
+        var stub = new StubMcpServer(_folder) { Before = $$"""echo "${CLAUDE_CODE_OAUTH_TOKEN-unset}" > '{{dump}}'; (exec -a {{marker}} sleep 300) &""" };
+        var process = StartWith([stub], ToolCatalog.Bash);
+
+        await Initialize(process);
+        await Send(process, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var list = await Receive(process);
+        await Send(process, CallMessage(2, ToolCatalog.Bash, """{"command":"echo hello"}""", "toolu_1"));
+        var bash = await Receive(process);
+        // The sweep that ends every arm_bash call has run (this server is a subreaper, as in
+        // production; a test host's own processes aren't to be swept): the stub must have survived it.
+        await Send(process, CallMessage(3, "stub__create_entities", """{"entities":[]}""", "toolu_2"));
+        var call = await Receive(process);
+        process.StandardInput.Close();
+        await process.WaitForExitAsync().WaitAsync(Wait);
+
+        var tools = list["result"]!["tools"]!.AsArray().Select(tool => tool!["name"]!.GetValue<string>()).ToList();
+        await Assert.That(tools).IsEquivalentTo((string[])[ToolCatalog.Bash, "stub__create_entities", "stub__dotted_name"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(bash["result"]!["isError"]!.GetValue<bool>()).IsFalse();
+        await Assert.That(call["id"]!.GetValue<int>()).IsEqualTo(3);
+        await Assert.That(call["result"]!["content"]![1]!["type"]!.GetValue<string>()).IsEqualTo("image");
+        await Assert.That(call["result"]!["structuredContent"]!["made"]!.GetValue<int>()).IsEqualTo(1);
+        await Assert.That(File.ReadAllText(dump).Trim()).IsEqualTo("unset");
+        await Assert.That(process.ExitCode).IsEqualTo(0);
+        await Assert.That(await ToolsTestFolder.Gone(marker)).IsTrue();
+    }
+
+    [Test]
+    public async Task Server_AnExternalServerThatWontStart_LeavesTheReason_AndExits_LeavingInitializeUnanswered()
+    {
+        var failing = new StubMcpServer(_folder) { Before = "echo 'bad token' >&2; exit 3" };
+        var process = StartWith([failing]);
+
+        await Send(process, """{"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{}}""");
+        await Send(process, """{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}""");
+        await process.WaitForExitAsync().WaitAsync(Wait);
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        await Assert.That(process.ExitCode).IsEqualTo(1);
+        await Assert.That(output).DoesNotContain("\"result\"");
+        await Assert.That(SupervisorFiles.ReadMcpFailure(_folder.Workplace)?.Error).IsEqualTo("MCP server 'stub' did not start: it exited with code 3\nbad token");
+    }
+
+    [Test]
+    [Arguments("SIGTERM")]
+    [Arguments("end of input")]
+    public async Task Server_Stopped_WhileAnExternalServerStarts_StopsIt_WithoutAFailure(string how)
+    {
+        var marker = ToolsTestFolder.Marker();
+        var stub = new StubMcpServer(_folder) { Before = $"exec -a {marker} sleep 300" };
+        var process = StartWith([stub]);
+        await WaitFor(() => Support.TestProcesses.WithCommandLine(marker).Count > 0, marker);
+
+        if (how == "SIGTERM")
+        {
+            await Assert.That(Posix.Status(process.Id) is { IsProcess: true, IsRunning: true } status && status.Parent == Environment.ProcessId).IsTrue();
+            Posix.Kill(process.Id, Posix.SigTerm);
+        }
+        else
+        {
+            process.StandardInput.Close();
+        }
+
+        await process.WaitForExitAsync().WaitAsync(Wait);
+
+        await Assert.That(process.ExitCode).IsEqualTo(0);
+        await Assert.That(await ToolsTestFolder.Gone(marker)).IsTrue();
+        await Assert.That(File.Exists(_folder.PathOf(SupervisorFiles.McpFailure))).IsFalse();
     }
 
     [Test]

@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Text.Json.Nodes;
+using Olve.AgentRuntimeManager.Tools.External;
 using Olve.AgentRuntimeManager.Tools.Journal;
 using Olve.AgentRuntimeManager.Tools.Protocol;
 using Olve.AgentRuntimeManager.Tools.Tools;
@@ -11,7 +12,7 @@ namespace Olve.AgentRuntimeManager.Tools.Calls;
 /// <see cref="CallJournal"/>), and a failure of any kind as a result the agent reads.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<string> tools, CallJournal journal)
+internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<string> tools, CallJournal journal, ExternalServers? externals = null)
 {
     /// <summary>
     /// The call's result; null if the server's stop (<paramref name="stopping"/>) cut it short: it's
@@ -19,10 +20,11 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
     /// </summary>
     public async Task<ToolResult?> CallAsync(string name, JsonObject? arguments, string? toolUseId, CancellationToken cancelled, CancellationToken stopping)
     {
-        if (!tools.Contains(name))
+        var external = externals?.Find(name);
+        if (external is null && !tools.Contains(name))
         {
-            var served = tools.Count == 0 ? "none" : string.Join(", ", ToolCatalog.All.Where(tool => tools.Contains(tool.Name)).Select(tool => tool.Name));
-            return ToolResult.Error($"There's no tool '{name}' in this session. Its tools: {served}.");
+            string[] served = [.. ToolCatalog.All.Where(tool => tools.Contains(tool.Name)).Select(tool => tool.Name), .. externals?.Tools.Select(tool => tool.Name) ?? []];
+            return ToolResult.Error($"There's no tool '{name}' in this session. Its tools: {(served.Length == 0 ? "none" : string.Join(", ", served))}.");
         }
 
         // Nothing starts once the server stops: what it started would outlive the stop.
@@ -48,7 +50,9 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         ToolResult result;
         try
         {
-            result = await RunAsync(name, new ToolArguments(arguments), either.Token);
+            result = external is null
+                ? await RunAsync(name, new ToolArguments(arguments), either.Token)
+                : await RunExternalAsync(external, arguments, either.Token);
         }
         catch (Exception exception)
         {
@@ -57,8 +61,9 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
             result = ToolResult.Error($"{name} failed: {exception.Message}");
         }
 
-        // A command cut short by the stop has no result of its own (a file tool runs to its end, so it has).
-        if (stopping.IsCancellationRequested && name == ToolCatalog.Bash)
+        // A command or a server's tool cut short by the stop has no result of its own (a file tool
+        // runs to its end, so it has).
+        if (stopping.IsCancellationRequested && (name == ToolCatalog.Bash || external is not null))
         {
             if (toolUseId is not null)
             {
@@ -74,6 +79,22 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         }
 
         return result;
+    }
+
+    private static async Task<ToolResult> RunExternalAsync(ExternalTool tool, JsonObject? arguments, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return ToolResult.Passed(await tool.Server.CallAsync(tool.RealName, arguments, cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            return ToolResult.Error("Cancelled: the MCP server was told to stop, and may have done part of the call.");
+        }
+        catch (ExternalServerFailure failure)
+        {
+            return ToolResult.Error(failure.Message);
+        }
     }
 
     private Task<ToolResult> RunAsync(string name, ToolArguments arguments, CancellationToken cancellationToken) => name switch

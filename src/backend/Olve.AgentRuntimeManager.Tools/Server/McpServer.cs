@@ -2,11 +2,11 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools.Calls;
+using Olve.AgentRuntimeManager.Tools.External;
 using Olve.AgentRuntimeManager.Tools.Protocol;
 using Olve.AgentRuntimeManager.Tools.Tools;
 
@@ -18,7 +18,7 @@ namespace Olve.AgentRuntimeManager.Tools.Server;
 /// so a long <c>arm_bash</c> holds up nothing and can be cancelled.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher, ProcessGroups groups, SessionSkills skills, Stream input, Stream output, TextWriter log)
+internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher, ProcessGroups groups, SessionSkills skills, ExternalServers externals, Stream input, Stream output, TextWriter log)
 {
     /// <summary>The MCP versions spoken, newest first: a client's is answered with its own if it's here, else the newest.</summary>
     public static readonly string[] ProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -34,8 +34,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
 
     private static readonly byte[] NewLine = "\n"u8.ToArray();
 
-    /// <summary>Only what JSON needs escaped: the agent's text (quotes, backticks, non-ASCII) stays as it is, and shorter.</summary>
-    private static readonly JsonSerializerOptions Wire = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly JsonSerializerOptions Wire = ToolResult.Json;
 
     private readonly SemaphoreSlim _writing = new(1, 1);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancels = new();
@@ -79,7 +78,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
 
         await log.WriteLineAsync($"olve-arm-tools: stopping ({reason}), {calls.Length} call(s) running.");
         await _stopping.CancelAsync();
-        await Task.WhenAny(Task.WhenAll(calls), Task.Delay(StopWait));
+        await Task.WhenAny(Task.WhenAll([.. calls, externals.StopAsync()]), Task.Delay(StopWait));
         // Whatever didn't go in time, and anything left below the server.
         groups.KillAll(Posix.SigKill);
         await groups.StopOrphansAsync(TimeSpan.FromMilliseconds(500), stopping: true);
@@ -182,6 +181,11 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
         var parameters = message["params"] as JsonObject;
         switch (method)
         {
+            // Not ready till the session's MCP servers are; the input is read on meanwhile, so its
+            // end is seen. If they don't come up it's never answered: the server exits instead.
+            case "initialize" or "tools/list" when isRequest && !externals.IsReady:
+                _ = HandleOnceReadyAsync(line);
+                break;
             case "initialize" when isRequest:
                 await SendResultAsync(id, Initialize(parameters));
                 break;
@@ -189,7 +193,13 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                 await SendResultAsync(id, new JsonObject());
                 break;
             case "tools/list" when isRequest:
-                await SendResultAsync(id, new JsonObject { ["tools"] = ToolDefinitions.List(options.Tools, skills) });
+                var tools = ToolDefinitions.List(options.Tools, skills);
+                foreach (var tool in externals.Tools)
+                {
+                    tools.Add(tool.Definition.DeepClone());
+                }
+
+                await SendResultAsync(id, new JsonObject { ["tools"] = tools });
                 break;
             case "tools/call" when isRequest:
                 await StartCallAsync(id, parameters);
@@ -206,6 +216,14 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                 }
 
                 break;
+        }
+    }
+
+    private async Task HandleOnceReadyAsync(string line)
+    {
+        if (await externals.Ready)
+        {
+            await HandleSafelyAsync(line);
         }
     }
 
@@ -285,7 +303,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                 // Cancelled: the client wants no answer. Stopping: there's no one to answer.
                 if (result is not null && !cancel.IsCancellationRequested && !_stopping.IsCancellationRequested)
                 {
-                    await SendResultAsync(id, new JsonObject
+                    await SendResultAsync(id, result.Raw ?? new JsonObject
                     {
                         ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = result.Text }),
                         ["isError"] = result.IsError,
