@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -120,7 +121,7 @@ public class ClaudeProviderTests
         [
             "PWD", "SHLVL", "_", "OLDPWD",
             "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "CLAUDE_CODE_OAUTH_TOKEN",
-            "ENABLE_CLAUDEAI_MCP_SERVERS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "DISABLE_UPDATES",
+            "ENABLE_CLAUDEAI_MCP_SERVERS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "DISABLE_UPDATES", "MCP_TIMEOUT",
         ];
         await Assert.That(environment.Keys.Except(allowed)).IsEmpty();
     }
@@ -312,6 +313,58 @@ public class ClaudeProviderTests
         var init = ClaudeStreamJson.Parse(File.ReadLines(Path.Combine(Path.GetDirectoryName(Stub)!, recording)).First())!;
 
         await Assert.That(ClaudeStreamJson.McpServerStatus(init, "arm")).IsEqualTo(status);
+    }
+
+    private static readonly McpServerDefinition GitHub = new()
+    {
+        Name = "github", Command = "npx", Args = ["-y", "pkg@1.2.3"], Env = new Dictionary<string, string> { ["GITHUB_TOKEN"] = "t" },
+    };
+
+    [Test]
+    public async Task McpServers_AreWrittenByTheSupervisor_AndGivenToTheToolsServer_NotAsTools()
+    {
+        var launch = Launch("Say READY") with { Tools = ["arm_bash", "github"], McpServers = [GitHub] };
+
+        await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, environment) = await Invocation(launch);
+        var file = Path.Combine(_root, launch.SessionId.ToString(), SupervisorFiles.McpServers);
+        var args = JsonNode.Parse(McpServers(arguments))!["mcpServers"]!["arm"]!["args"]!.AsArray().Select(a => a!.GetValue<string>()).ToArray();
+        await Assert.That(args.Where(a => a == "arm_bash" || a == "github")).IsEquivalentTo(["arm_bash"]);
+        await Assert.That(args[^2..]).IsEquivalentTo(["--mcp-servers", file], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        var written = JsonSerializer.Deserialize(File.ReadAllText(file), SupervisorJsonContext.Default.IReadOnlyListMcpServerDefinition)!.Single();
+        await Assert.That((written.Name, written.Command, written.Env["GITHUB_TOKEN"])).IsEqualTo(("github", "npx", "t"));
+        await Assert.That(environment["MCP_TIMEOUT"]).IsEqualTo("130000");
+    }
+
+    [Test]
+    public async Task McpServers_AnEarlierRunsFailureIsCleared_SoItIsntTakenForThisRuns()
+    {
+        var launch = Launch("stub:tools-failed") with { Attempt = 2, ProviderSessionId = Guid.NewGuid(), Tools = ["github"], McpServers = [GitHub] };
+        var folder = Directory.CreateDirectory(Path.Combine(_root, launch.SessionId.ToString())).FullName;
+        File.WriteAllText(Path.Combine(folder, SupervisorFiles.McpFailure), """{"error":"From an earlier run."}""");
+
+        var outcome = await Provider().Start(launch).Completion.WaitAsync(Guard);
+
+        var (arguments, _) = await Invocation(launch);
+        await Assert.That(McpServers(arguments)).Contains("--mcp-servers");
+        await Assert.That(File.Exists(Path.Combine(folder, SupervisorFiles.McpServers))).IsTrue();
+        var failed = await Assert.That(outcome).IsTypeOf<AgentOutcome.Failed>();
+        await Assert.That(failed!.Error).StartsWith("ARM's tools server (olve-arm-tools, MCP server 'arm') did not start: Claude Code reports it as failed");
+    }
+
+    [Test]
+    [Arguments("connected", true, null, null)]
+    [Arguments("pending", false, null, null)]
+    [Arguments("pending", true, null, "ARM's tools server (olve-arm-tools, MCP server 'arm') did not start: Claude Code reports it as pending, so the agent would have no tools. Check the server's Tools:Command.")]
+    [Arguments("failed", false, null, "ARM's tools server (olve-arm-tools, MCP server 'arm') did not start: Claude Code reports it as failed, so the agent would have no tools. Check the server's Tools:Command.")]
+    [Arguments("failed", true, "MCP server 'github' did not start: bad token", "MCP server 'github' did not start: bad token")]
+    [Arguments("pending", true, "MCP server 'github' gave no answer in 120 s", "MCP server 'github' gave no answer in 120 s")]
+    public async Task ToolsServerFailure_ByStatus_WithTheToolsServersOwnReasonFirst(string status, bool hasMcpServers, string? reason, string? expected)
+    {
+        var init = ClaudeStreamJson.Parse($$"""{"type":"system","subtype":"init","mcp_servers":[{"name":"arm","status":"{{status}}"}]}""")!;
+
+        await Assert.That(ClaudeStreamJson.ToolsServerFailure(init, hasMcpServers, () => reason)).IsEqualTo(expected);
     }
 
     [Test]

@@ -417,6 +417,9 @@ public sealed class SupervisedAgent
 
     private SupervisorExit? ReadExit() => SupervisorFiles.ReadExit(_folder) is { } exit && exit.RunId == _runId ? exit : null;
 
+    /// <summary>Why the tools server couldn't give the agent its MCP servers (M10c), if it said; the supervisor clears this at every launch.</summary>
+    public string? McpFailure() => SupervisorFiles.ReadMcpFailure(_folder)?.Error;
+
     /// <summary>The supervisor has gone after the agent ended: the rest of the output from disk, then the exit.</summary>
     private void FinishFromFiles(SupervisorExit exit)
     {

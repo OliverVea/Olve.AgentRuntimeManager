@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
@@ -55,11 +56,11 @@ public sealed class ClaudeProvider(
             ? (["--resume", resume], resume)
             : (new[] { "--session-id", launch.ProviderSessionId.ToString() }, launch.ProviderSessionId.ToString());
         var input = launch.Input.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
-        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env, launch.Repos, launch.Tools, launch.Skills);
+        var agent = Launch(launch.SessionId, launch.RunId, launch.Model, session, input, launch.Env, launch.Repos, launch.Tools, launch.Skills, launch.McpServers);
         logger.LogInformation("Session {SessionId}: {Started} Claude Code (attempt {Attempt}, run {RunId}, {Messages} messages)",
             launch.SessionId, launch.Resume is null ? "started" : "resumed", launch.Attempt, launch.RunId, launch.Messages?.Count ?? 0);
         // The first is taken up before any turn can end: the run waits for the others.
-        return new ClaudeRun(agent, providerSessionId, options.Value.ExitGrace, input.Skip(1).Select(m => m.Id));
+        return new ClaudeRun(agent, providerSessionId, options.Value.ExitGrace, input.Skip(1).Select(m => m.Id), launch.McpServers is { Count: > 0 });
     }
 
     /// <summary>
@@ -71,12 +72,13 @@ public sealed class ClaudeProvider(
     {
         var settings = options.Value;
         var folder = Folder(settings, recovery.SessionId);
+        var hasMcpServers = recovery.McpServers is { Count: > 0 };
         var exit = SupervisorFiles.ReadExit(folder) is { } x && x.RunId == recovery.RunId ? x : null;
         if (exit is not null || supervisors.IsListening(recovery.SessionId, recovery.RunId))
         {
             logger.LogInformation("Session {SessionId}: re-attaching to run {RunId}", recovery.SessionId, recovery.RunId);
             var attached = supervisors.Attach(recovery.SessionId, recovery.RunId, folder, recovery.Repos?.Count ?? 0, repos.GitTimeout, repos.CheckoutTimeout);
-            return new RecoveredAgent(new ClaudeRun(attached, recovery.ProviderSessionId, settings.ExitGrace), Resumed: false);
+            return new RecoveredAgent(new ClaudeRun(attached, recovery.ProviderSessionId, settings.ExitGrace, hasMcpServers: hasMcpServers), Resumed: false);
         }
 
         if (SupervisorFiles.ReadInfo(folder) is { } info && info.RunId == recovery.RunId)
@@ -109,16 +111,16 @@ public sealed class ClaudeProvider(
                 ? (["--resume", resume], recovery.Messages ?? [])
                 : (new[] { "--session-id", recovery.ProviderSessionId }, (IReadOnlyList<string>)[recovery.Prompt, .. recovery.Messages ?? []]);
             var input = told.Select(text => (Id: Guid.NewGuid(), Text: text)).ToList();
-            var again = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, session, input, recovery.Env, recovery.Repos, recovery.Tools, recovery.Skills);
+            var again = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, session, input, recovery.Env, recovery.Repos, recovery.Tools, recovery.Skills, recovery.McpServers);
             // As at a start: the first is taken up before any turn can end, the run waits for the others.
-            return new RecoveredAgent(new ClaudeRun(again, recovery.ProviderSessionId, settings.ExitGrace, input.Skip(1).Select(m => m.Id)), Resumed: true);
+            return new RecoveredAgent(new ClaudeRun(again, recovery.ProviderSessionId, settings.ExitGrace, input.Skip(1).Select(m => m.Id), hasMcpServers), Resumed: true);
         }
 
         logger.LogWarning("Session {SessionId}: run {RunId}'s supervisor is gone; resuming Claude session {ProviderSessionId} as run {ResumeRunId}",
             recovery.SessionId, recovery.RunId, recovery.ProviderSessionId, recovery.ResumeRunId);
         var resumed = Launch(recovery.SessionId, recovery.ResumeRunId, recovery.Model, ["--resume", recovery.ProviderSessionId], [(Guid.NewGuid(), ResumePrompt)], recovery.Env, recovery.Repos,
-            recovery.Tools, recovery.Skills);
-        return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace), Resumed: true);
+            recovery.Tools, recovery.Skills, recovery.McpServers);
+        return new RecoveredAgent(new ClaudeRun(resumed, recovery.ProviderSessionId, settings.ExitGrace, hasMcpServers: hasMcpServers), Resumed: true);
     }
 
     /// <summary>Removes a deleted session's worktrees from the shared copies (M5e).</summary>
@@ -213,11 +215,14 @@ public sealed class ClaudeProvider(
     /// (none at all for an empty list); every launch of the session passes them (a start, a retry,
     /// a continuation, a resume). Its skills, <paramref name="sessionSkills"/> (M10b), the supervisor
     /// copies from the registry into the session's folder first (those already there are kept), and
-    /// the tools server is told each one's copy (only with tools: it's only started then).
+    /// the tools server is told each one's copy (only with tools: it's only started then). Its
+    /// external MCP servers, <paramref name="sessionMcpServers"/> (M10c), are among
+    /// <paramref name="sessionTools"/> by name: the supervisor writes their definitions into the
+    /// session's folder, and the tools server starts them from there.
     /// </summary>
     private SupervisedAgent Launch(Guid sessionId, Guid runId, string model, string[] session,
         IReadOnlyList<(Guid Id, string Text)> input, IReadOnlyDictionary<string, string>? env, IReadOnlyList<RepoRecord>? sessionRepos,
-        IReadOnlyList<string>? sessionTools, IReadOnlyList<string>? sessionSkills = null)
+        IReadOnlyList<string>? sessionTools, IReadOnlyList<string>? sessionSkills = null, IReadOnlyList<McpServerDefinition>? sessionMcpServers = null)
     {
         var settings = options.Value;
         var folder = Directory.CreateDirectory(Folder(settings, sessionId)).FullName;
@@ -227,12 +232,13 @@ public sealed class ClaudeProvider(
         // The tools server is the agent's child, so it runs as the agent user too: its journal is in
         // the session's folder, which that user writes.
         var mcpConfig = sessionTools is { Count: > 0 }
-            ? McpConfig((tools?.Value ?? new ToolsOptions()).Resolved(), workDirectory, Path.Combine(folder, ToolsLaunch.JournalFileName), sessionTools, sessionSkillCopies)
+            ? McpConfig((tools?.Value ?? new ToolsOptions()).Resolved(), workDirectory, Path.Combine(folder, ToolsLaunch.JournalFileName), sessionTools, sessionSkillCopies,
+                sessionMcpServers, Path.Combine(folder, SupervisorFiles.McpServers))
             : null;
         return supervisors.Launch(sessionId, runId, folder, workDirectory,
             ResolveCommand(settings.Command), Arguments(session, model, mcpConfig), AgentEnvironment(settings, env),
             [.. input.Select(m => ClaudeStreamJson.UserMessage(m.Text, m.Id))],
-            repos.Plan(sessionId, workDirectory, sessionRepos), repos.GitTimeout, repos.CheckoutTimeout, sessionSkillCopies);
+            repos.Plan(sessionId, workDirectory, sessionRepos), repos.GitTimeout, repos.CheckoutTimeout, sessionSkillCopies, sessionMcpServers);
     }
 
     /// <summary>
@@ -287,12 +293,16 @@ public sealed class ClaudeProvider(
     /// The MCP configuration that gives the agent ARM's tools (M10), as JSON: one stdio server,
     /// <see cref="ToolsLaunch.ServerName"/>, that the agent starts as <paramref name="command"/> with
     /// the session's workplace, its journal, the tools it named (each once, in order) and, after
-    /// them, its skills (M10b) as <c>--skill &lt;name&gt;=&lt;the session's copy&gt;</c>.
+    /// them, its skills (M10b) as <c>--skill &lt;name&gt;=&lt;the session's copy&gt;</c>. Its external MCP
+    /// servers (M10c) are named in <paramref name="sessionTools"/> but aren't <c>--tool</c>s: with any,
+    /// the tools server gets the file that defines them, <paramref name="mcpServersFile"/>.
     /// </summary>
-    internal static string McpConfig(string command, string workplace, string journal, IReadOnlyList<string> sessionTools, IReadOnlyList<SupervisorSkill>? sessionSkills = null)
+    internal static string McpConfig(string command, string workplace, string journal, IReadOnlyList<string> sessionTools, IReadOnlyList<SupervisorSkill>? sessionSkills = null,
+        IReadOnlyList<McpServerDefinition>? sessionMcpServers = null, string? mcpServersFile = null)
     {
+        var servers = (sessionMcpServers ?? []).Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
         var arguments = new JsonArray(ToolsLaunch.Workplace, workplace, ToolsLaunch.Journal, journal);
-        foreach (var tool in sessionTools.Distinct(StringComparer.Ordinal))
+        foreach (var tool in sessionTools.Distinct(StringComparer.Ordinal).Where(name => !servers.Contains(name)))
         {
             arguments.Add(ToolsLaunch.Tool);
             arguments.Add(tool);
@@ -302,6 +312,12 @@ public sealed class ClaudeProvider(
         {
             arguments.Add(ToolsLaunch.Skill);
             arguments.Add($"{skill.Name}={skill.Target}");
+        }
+
+        if (servers.Count > 0)
+        {
+            arguments.Add(ToolsLaunch.McpServers);
+            arguments.Add(mcpServersFile);
         }
 
         var server = new JsonObject { ["type"] = "stdio", ["command"] = command, ["args"] = arguments };
@@ -324,6 +340,8 @@ public sealed class ClaudeProvider(
         // The user's claude.ai connectors (Gmail, Calendar, …) load even with --strict-mcp-config.
         environment["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
         environment["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1";
+        // About 28 s by default, too little for an external MCP server's first download (M10c).
+        environment["MCP_TIMEOUT"] = ((long)ToolsLaunch.ReadyTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);
         // The deployment pins the version (vm-deploy.sh); an agent must not update it.
         environment["DISABLE_UPDATES"] = "1";
         if (settings.ConfigDirectory is { Length: > 0 } configDirectory)

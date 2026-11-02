@@ -2,7 +2,7 @@ namespace Olve.AgentRuntimeManager.Tools.Protocol;
 
 /// <summary>
 /// How ARM starts <c>olve-arm-tools</c> through the agent (the provider's MCP config):
-/// <c>olve-arm-tools --workplace &lt;folder&gt; --journal &lt;file&gt; --tool &lt;name&gt; [--tool …] [--skill &lt;name&gt;=&lt;folder&gt; …]</c>.
+/// <c>olve-arm-tools --workplace &lt;folder&gt; --journal &lt;file&gt; --tool &lt;name&gt; [--tool …] [--skill &lt;name&gt;=&lt;folder&gt; …] [--mcp-servers &lt;file&gt;]</c>.
 /// It lists only the tools named and refuses calls to any other.
 /// </summary>
 public static class ToolsLaunch
@@ -28,6 +28,24 @@ public static class ToolsLaunch
     /// session's own copy; repeated for each. The tool's description lists them.
     /// </summary>
     public const string Skill = "--skill";
+
+    /// <summary>
+    /// The session's external MCP servers (M10c), as a file of their definitions: the tools server
+    /// starts each and serves their tools as <c>&lt;server&gt;__&lt;tool&gt;</c>. Left out when it has none.
+    /// </summary>
+    public const string McpServers = "--mcp-servers";
+
+    /// <summary>What joins an external server's name and its tool's in what the agent sees.</summary>
+    public const string ServerToolSeparator = "__";
+
+    /// <summary>How long a session's MCP servers get to start, together; then the session fails.</summary>
+    public static readonly TimeSpan McpStartTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// How long a provider waits for the tools server to be ready: past <see cref="McpStartTimeout"/>,
+    /// so the tools server's own error, which says what went wrong, comes first.
+    /// </summary>
+    public static readonly TimeSpan ReadyTimeout = McpStartTimeout + TimeSpan.FromSeconds(10);
 
     /// <summary>The folder in the session's folder that holds its copies of its skills, one folder per skill, by name.</summary>
     public const string SkillsFolderName = "skills";

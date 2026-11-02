@@ -24,7 +24,7 @@ public static class SessionErrors
         ArmError.Create("UNKNOWN_MODEL", $"Provider '{provider}' has no model '{model}'. Its models: {string.Join(", ", known)}.");
 
     public static ArmError UnknownTool(IReadOnlyList<string> unknown, IReadOnlyList<string> known) =>
-        ArmError.Create("UNKNOWN_TOOL", $"No tool {string.Join(", ", unknown.Select(name => $"'{name}'"))}. ARM's tools: {string.Join(", ", known)}.");
+        ArmError.Create("UNKNOWN_TOOL", $"No tool {string.Join(", ", unknown.Select(name => $"'{name}'"))}. Tools: {string.Join(", ", known)}.");
 
     public static ArmError UnknownSkill(IReadOnlyList<string> unknown, IReadOnlyList<string> known) =>
         ArmError.Create("UNKNOWN_SKILL", $"No skill {string.Join(", ", unknown.Select(name => $"'{name}'"))}. "

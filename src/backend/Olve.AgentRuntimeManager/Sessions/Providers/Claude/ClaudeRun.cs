@@ -27,6 +27,7 @@ internal sealed class ClaudeRun : IAgentRun
 
     private readonly SupervisedAgent _agent;
     private readonly TimeSpan _exitGrace;
+    private readonly bool _hasMcpServers;
     private readonly Lock _gate = new();
     private readonly TaskCompletionSource _answered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -46,9 +47,11 @@ internal sealed class ClaudeRun : IAgentRun
     /// The uuids of the messages in its first input after the first, which is taken up before any
     /// turn can end (none for a re-attached run: it can't know them).
     /// </param>
-    public ClaudeRun(SupervisedAgent agent, string providerSessionId, TimeSpan exitGrace, IEnumerable<Guid>? given = null)
+    /// <param name="hasMcpServers">Whether the session has external MCP servers (M10c).</param>
+    public ClaudeRun(SupervisedAgent agent, string providerSessionId, TimeSpan exitGrace, IEnumerable<Guid>? given = null, bool hasMcpServers = false)
     {
         _agent = agent;
+        _hasMcpServers = hasMcpServers;
         _exitGrace = exitGrace;
         _unread = [.. given ?? []];
         ProviderSessionId = providerSessionId;
@@ -111,7 +114,7 @@ internal sealed class ClaudeRun : IAgentRun
                     continue;
                 }
 
-                if (ToolsServerFailure(e) is { } failure && _toolsFailure is null)
+                if (ClaudeStreamJson.ToolsServerFailure(e, _hasMcpServers, _agent.McpFailure) is { } failure && _toolsFailure is null)
                 {
                     // Without its tools the agent can do nothing it was meant to: stopped now, not after a turn.
                     _toolsFailure = failure;
@@ -245,20 +248,6 @@ internal sealed class ClaudeRun : IAgentRun
             }
         }
     }
-
-    /// <summary>
-    /// Why the agent has none of ARM's tools (M10), if <paramref name="e"/> is Claude Code's
-    /// <c>system</c>/<c>init</c> and reports their MCP server (<see cref="ToolsLaunch.ServerName"/>)
-    /// as neither <c>connected</c> nor <c>pending</c>: e.g. <c>failed</c>, when <c>olve-arm-tools</c>
-    /// is missing or exits at once. Claude Code goes on without it (its built-ins are off: no tools at
-    /// all), so the run fails instead, as the session's own failure (not the provider's, so not
-    /// retried). Only a session that names tools has that server (<c>--strict-mcp-config</c>).
-    /// </summary>
-    internal static string? ToolsServerFailure(JsonObject e) =>
-        ClaudeStreamJson.McpServerStatus(e, ToolsLaunch.ServerName) is { } status && status is not ("connected" or "pending")
-            ? $"ARM's tools server (olve-arm-tools, MCP server '{ToolsLaunch.ServerName}') did not start: Claude Code reports it as {status}, "
-              + "so the agent would have no tools. Check the server's Tools:Command."
-            : null;
 
     internal static AgentOutcome Outcome(ClaudeResult? result, int exitCode, string stderrTail, ClaudeSignals signals = default) => result switch
     {

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Olve.AgentRuntimeManager.Api;
+using Olve.AgentRuntimeManager.McpServers;
 using Olve.AgentRuntimeManager.Sessions.Repos;
 using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Tools.Protocol;
@@ -15,10 +16,12 @@ namespace Olve.AgentRuntimeManager.Sessions;
 /// the server's default tools (<see cref="ToolsOptions.Default"/>), resolved here and stored with
 /// it, so a later change of the configuration changes neither it nor its resumes. Its <c>skills</c>
 /// the same way (M10b): every one must be registered, and one that leaves them out gets the
-/// registered skills flagged default.
+/// registered skills flagged default. A name in <c>tools</c> can be a registered MCP server too
+/// (M10c), whose definition is taken here.
 /// </summary>
 public sealed class CreateSessionHandler(
-    SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env, IOptions<ToolsOptions> tools, ISkillStore skills)
+    SessionManager sessions, IdempotencyStore<SessionsCreateResponse> idempotency, IEnvStore env, IOptions<ToolsOptions> tools, ISkillStore skills,
+    IMcpServerStore mcpServers)
     : ISessionsCreateHandler
 {
     public Task<SessionsCreateResponse> HandleAsync(SessionsCreateRequest request, CancellationToken cancellationToken)
@@ -42,9 +45,11 @@ public sealed class CreateSessionHandler(
             return new SessionsCreateResponse.BadRequest(repoProblem);
         }
 
-        if (body.Tools?.Where(name => ToolCatalog.Find(name) is null).Distinct().ToList() is { Count: > 0 } unknownTools)
+        var (sessionMcpServers, unknownTools) = SessionMcpServers.Resolve(body.Tools, mcpServers);
+        if (unknownTools.Count > 0)
         {
-            return new SessionsCreateResponse.BadRequest(SessionErrors.UnknownTool(unknownTools, [.. ToolCatalog.All.Select(t => t.Name)]));
+            return new SessionsCreateResponse.BadRequest(SessionErrors.UnknownTool(unknownTools,
+                [.. ToolCatalog.All.Select(t => t.Name), .. mcpServers.List().Select(s => s.Name)]));
         }
 
         var (sessionSkills, skillProblem) = SessionSkills.Resolve(body.Skills, skills);
@@ -59,7 +64,7 @@ public sealed class CreateSessionHandler(
             return new SessionsCreateResponse.BadRequest(problem);
         }
 
-        return sessions.Create(body with { Tools = tools.Value.For(body.Tools), Skills = sessionSkills }, agentEnv) switch
+        return sessions.Create(body with { Tools = tools.Value.For(body.Tools), Skills = sessionSkills }, agentEnv, sessionMcpServers) switch
         {
             CreateOutcome.Started started => new SessionsCreateResponse.Created(new CreatedSession { Id = started.Session.Id }),
             CreateOutcome.Queued queued => new SessionsCreateResponse.Accepted(new CreatedSession { Id = queued.Session.Id }),

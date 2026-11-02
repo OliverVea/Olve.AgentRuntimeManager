@@ -72,7 +72,10 @@ public class ClaudeArmToolsConversationTests
     [Arguments("Bash", "Bash")]
     [Arguments("mcp__other__arm_bash", "mcp__other__arm_bash")]
     [Arguments("mcp__arm__", "mcp__arm__")]
-    public async Task OnlyArmsServersPrefix_IsStripped(string name, string shown) =>
+    [Arguments("mcp__arm__github__create_issue", "github/create_issue")]
+    [Arguments("mcp__arm__github__a__b", "github/a__b")]
+    [Arguments("mcp__other__github__create_issue", "mcp__other__github__create_issue")]
+    public async Task OnlyArmsServersPrefix_IsStripped_AndAnExternalToolShowsAsServerSlashTool(string name, string shown) =>
         await Assert.That(ClaudeConversation.ToolName(name)).IsEqualTo(shown);
 
     private static string[] Recorded(string name) =>

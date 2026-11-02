@@ -35,12 +35,13 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     /// <paramref name="repos"/> in the workplace first (M5e), each git command bounded by
     /// <paramref name="gitTimeout"/> and the whole of it by <paramref name="checkoutTimeout"/>; the agent
     /// starts in the workplace, whatever the number of repositories (each in its own folder there).
-    /// Then it copies the session's <paramref name="skills"/> into its folder (M10b; those already there are kept).
+    /// Then it copies the session's <paramref name="skills"/> into its folder (M10b; those already there are kept)
+    /// and writes its <paramref name="mcpServers"/> there (M10c).
     /// </summary>
     public SupervisedAgent Launch(Guid sessionId, Guid runId, string folder, string workingDirectory,
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> input,
         IReadOnlyList<SupervisorRepo>? repos = null, TimeSpan? gitTimeout = null, TimeSpan? checkoutTimeout = null,
-        IReadOnlyList<SupervisorSkill>? skills = null)
+        IReadOnlyList<SupervisorSkill>? skills = null, IReadOnlyList<McpServerDefinition>? mcpServers = null)
     {
         var settings = options.Value;
         var socketPath = SupervisorSockets.Run(SocketRoot(settings), sessionId, runId);
@@ -80,6 +81,7 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
             Workplace = workingDirectory,
             Repos = repos ?? [],
             Skills = skills ?? [],
+            McpServers = mcpServers ?? [],
             GitTimeout = gitTimeout ?? SupervisorLaunch.DefaultGitTimeout,
             CheckoutTimeout = checkoutTimeout,
             Input = input,

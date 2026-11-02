@@ -256,7 +256,8 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
 
     /// <summary>
     /// The session's repositories, checked out in its workplace (M5e), then its skills, copied into
-    /// its folder (M10b); the first error, if one failed (the run then ends without an agent).
+    /// its folder (M10b), then its MCP servers written there (M10c); the first error, if one failed
+    /// (the run then ends without an agent).
     /// </summary>
     private async Task<string?> CheckoutAsync()
     {
@@ -278,7 +279,28 @@ internal sealed class AgentSupervisor(SupervisorLaunch launch)
             }
         }
 
-        return CopySkills();
+        return CopySkills() ?? WriteMcpServers();
+    }
+
+    /// <summary>The session's MCP servers for its tools server, and no failure left from an earlier run; the error, if that failed.</summary>
+    private string? WriteMcpServers()
+    {
+        if (launch.McpServers.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            File.Delete(Path.Combine(launch.Folder, SupervisorFiles.McpFailure));
+            SupervisorFiles.WriteAtomically(Path.Combine(launch.Folder, SupervisorFiles.McpServers), launch.McpServers,
+                SupervisorJsonContext.Default.IReadOnlyListMcpServerDefinition);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"Writing the session's MCP servers failed: {exception.Message}";
+        }
     }
 
     /// <summary>The session's skills, copied into its folder (M10b); the first error, if one failed.</summary>

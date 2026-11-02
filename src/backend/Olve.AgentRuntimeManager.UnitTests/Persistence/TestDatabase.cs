@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Olve.AgentRuntimeManager.McpServers;
 using Olve.AgentRuntimeManager.Persistence;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
@@ -38,6 +39,9 @@ public sealed class TestDatabase : IDisposable
 
     /// <summary>The skills registry (M10b), on this database.</summary>
     public ISkillStore Skills() => new EfSkillStore(new PooledDbContextFactory<ArmDbContext>(_options));
+
+    /// <summary>The MCP servers registry (M10c), on this database.</summary>
+    public IMcpServerStore McpServers() => new EfMcpServerStore(new PooledDbContextFactory<ArmDbContext>(_options));
 
     public void Dispose() => Directory.Delete(_folder, recursive: true);
 }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Persistence;
 
@@ -27,6 +28,7 @@ public sealed class SessionRecordConfiguration : IEntityTypeConfiguration<Sessio
         // Never null either (M10b: a session always states its skills).
         session.Property<IReadOnlyList<string>?>(nameof(SessionRecord.Skills)).HasConversion(JsonColumn.Converter<IReadOnlyList<string>>(), JsonColumn.Comparer<IReadOnlyList<string>>()).IsRequired();
         session.Property(s => s.AgentEnv).HasConversion(JsonColumn.Converter<IReadOnlyDictionary<string, string>>(), JsonColumn.Comparer<IReadOnlyDictionary<string, string>>());
+        session.Property(s => s.McpServers).HasConversion(JsonColumn.Converter<IReadOnlyList<McpServerDefinition>>(), JsonColumn.Comparer<IReadOnlyList<McpServerDefinition>>());
         session.HasIndex(s => s.CreatedAt);
         session.HasIndex(s => s.Status);
     }

@@ -38,6 +38,13 @@ public sealed record SupervisorLaunch
     /// </summary>
     public IReadOnlyList<SupervisorSkill> Skills { get; init; } = [];
 
+    /// <summary>
+    /// The session's external MCP servers (M10c), written to <see cref="SupervisorFiles.McpServers"/>
+    /// before the agent starts, as the agent's user (the folder is that user's to write, so ARM
+    /// writes nothing in it). A write that fails ends the run without an agent.
+    /// </summary>
+    public IReadOnlyList<McpServerDefinition> McpServers { get; init; } = [];
+
     /// <summary>The longest any one git command of a checkout may take; then it's killed and the checkout fails.</summary>
     public TimeSpan GitTimeout { get; init; } = DefaultGitTimeout;
 

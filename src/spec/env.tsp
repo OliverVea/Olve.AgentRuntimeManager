@@ -13,8 +13,8 @@ namespace Arm;
  *
  * Names ARM sets for its agents itself are reserved (a 400 `RESERVED_ENV_NAME`, here and in a
  * session's `env`): `PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`,
- * `DISABLE_UPDATES`, `ENABLE_CLAUDEAI_MCP_SERVERS`, and every name starting with `CLAUDE_` or
- * `ARM_`.
+ * `DISABLE_UPDATES`, `ENABLE_CLAUDEAI_MCP_SERVERS`, `MCP_TIMEOUT`, and every name starting with
+ * `CLAUDE_` or `ARM_`.
  *
  * Values aren't secret: anyone who can call the API reads them back.
  */

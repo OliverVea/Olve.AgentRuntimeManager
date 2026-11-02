@@ -16,6 +16,12 @@ public static class SupervisorFiles
     public const string Exit = "exit.json";
     public const string Log = "supervisor.log";
 
+    /// <summary>The session's external MCP servers (M10c), for <c>olve-arm-tools</c>; written at every launch of a session with any.</summary>
+    public const string McpServers = "mcp-servers.json";
+
+    /// <summary>Why the session's MCP servers couldn't be given to the agent (<see cref="McpStartFailure"/>), if they couldn't; cleared at every launch.</summary>
+    public const string McpFailure = "mcp-failure.json";
+
     /// <summary>
     /// The mark ARM leaves when it kills a run (M5e): checked by the supervisor before it starts the
     /// agent and while it checks out, so a kill given before the agent started stops it even when
@@ -26,6 +32,8 @@ public static class SupervisorFiles
     public static SupervisorInfo? ReadInfo(string folder) => Read(Path.Combine(folder, Info), SupervisorJsonContext.Default.SupervisorInfo);
 
     public static SupervisorExit? ReadExit(string folder) => Read(Path.Combine(folder, Exit), SupervisorJsonContext.Default.SupervisorExit);
+
+    public static McpStartFailure? ReadMcpFailure(string folder) => Read(Path.Combine(folder, McpFailure), SupervisorJsonContext.Default.McpStartFailure);
 
     /// <summary>Writes a whole file or nothing (temp file, then rename), so a reader never sees half of it.</summary>
     public static void WriteAtomically<T>(string path, T value, JsonTypeInfo<T> type)

@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
@@ -13,7 +14,9 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// if its agent never started. <paramref name="Tools"/>: ARM's tools its agent gets (M10, its only
 /// tools; empty or null: none at all), on a run launched again or resumed as at its start.
 /// <paramref name="Skills"/>: the skills it can load (M10b; empty or null: none), the same way.
+/// <paramref name="McpServers"/>: the external MCP servers among <paramref name="Tools"/> (M10c; empty or null: none), the same way.
 /// </summary>
 public sealed record AgentRecovery(Guid SessionId, string Prompt, string Model, string ProviderSessionId, Guid RunId, Guid ResumeRunId,
     IReadOnlyDictionary<string, string>? Env = null, IReadOnlyList<RepoRecord>? Repos = null,
-    string? Resume = null, IReadOnlyList<string>? Messages = null, IReadOnlyList<string>? Tools = null, IReadOnlyList<string>? Skills = null);
+    string? Resume = null, IReadOnlyList<string>? Messages = null, IReadOnlyList<string>? Tools = null, IReadOnlyList<string>? Skills = null,
+    IReadOnlyList<McpServerDefinition>? McpServers = null);

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.McpServers;
 using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Variables;
 
@@ -23,6 +24,7 @@ public static class PersistenceServices
         services.AddSingleton<IEnvStore, EfEnvStore>();
         services.AddSingleton<IWorktreeRemovalStore, EfWorktreeRemovalStore>();
         services.AddSingleton<ISkillStore, EfSkillStore>();
+        services.AddSingleton<IMcpServerStore, EfMcpServerStore>();
     }
 
     /// <summary>Brings the schema and stored data up to date; run before the app serves requests.</summary>

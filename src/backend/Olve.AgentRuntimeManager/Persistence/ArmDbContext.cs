@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Olve.AgentRuntimeManager.Sessions;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.McpServers;
 using Olve.AgentRuntimeManager.Sessions.Skills;
 using Olve.AgentRuntimeManager.Variables;
 
@@ -16,6 +17,7 @@ public sealed class ArmDbContext(DbContextOptions<ArmDbContext> options) : DbCon
     public DbSet<WorktreeRemovalRecord> WorktreeRemovals => Set<WorktreeRemovalRecord>();
 
     public DbSet<SkillRecord> Skills => Set<SkillRecord>();
+    public DbSet<McpServerRecord> McpServers => Set<McpServerRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -23,6 +25,7 @@ public sealed class ArmDbContext(DbContextOptions<ArmDbContext> options) : DbCon
         modelBuilder.ApplyConfiguration(new EnvVariableRecordConfiguration());
         modelBuilder.ApplyConfiguration(new WorktreeRemovalRecordConfiguration());
         modelBuilder.ApplyConfiguration(new SkillRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new McpServerRecordConfiguration());
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

@@ -84,7 +84,10 @@ never on. A session can also name registered skills (M10b, `skills`; unset: the 
 `default`): folders with a `SKILL.md`, installed from a git repository with `PUT /api/skills/{name}`
 into `Skills:Root` by the supervisor as the agents' user, copied into the session's folder
 (`skills/<name>`) when its agent first starts and named to the tools server (`--skill`), so the
-agent loads them on demand with `arm_skill_load`. It's locked down otherwise too (none of the machine's
+agent loads them on demand with `arm_skill_load`. It can name registered MCP servers in `tools` too
+(M10c, `PUT /api/mcp-servers/{name}`, never a default): the session keeps the definition, the
+supervisor writes it to the session's folder (`mcp-servers.json`) and `olve-arm-tools` starts the
+server and serves its tools as `<server>__<tool>`. It's locked down otherwise too (none of the machine's
 settings, plugins, MCP servers, connectors, skills or memory, and only an allowlist of environment
 variables), with the ARM session id as Claude's session id (a retry gets a new one). It answers its
 prompt and each message after it with a turn, and ends once its last turn is over; its

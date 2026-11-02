@@ -1,5 +1,6 @@
 using Olve.AgentRuntimeManager.Api;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -40,6 +41,12 @@ public sealed record SessionRecord
     /// empty: no tools at all. Every launch, retry, resume and continuation uses it.
     /// </summary>
     public required IReadOnlyList<string> Tools { get; init; }
+
+    /// <summary>
+    /// The registered MCP servers among <see cref="Tools"/> (M10c), as they were when it was created.
+    /// Every launch, retry, resume and continuation uses these, not the registry. Null: none.
+    /// </summary>
+    public IReadOnlyList<McpServerDefinition>? McpServers { get; init; }
 
     /// <summary>
     /// The skills its agent can load (M10b): as given, or the registered defaults when it gave none

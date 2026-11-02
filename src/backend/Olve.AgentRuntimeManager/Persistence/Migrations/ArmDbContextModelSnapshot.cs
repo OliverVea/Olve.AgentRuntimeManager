@@ -17,6 +17,35 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
 
+            modelBuilder.Entity("Olve.AgentRuntimeManager.McpServers.McpServerRecord", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Args")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Command")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Env")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("McpServers", (string)null);
+                });
+
             modelBuilder.Entity("Olve.AgentRuntimeManager.Sessions.Repos.WorktreeRemovalRecord", b =>
                 {
                     b.Property<Guid>("SessionId")
@@ -88,6 +117,9 @@ namespace Olve.AgentRuntimeManager.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("KillSource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("McpServers")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Messages")

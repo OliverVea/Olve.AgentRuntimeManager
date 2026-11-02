@@ -10,7 +10,7 @@ public static partial class EnvNames
 {
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
     {
-        "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "DISABLE_UPDATES", "ENABLE_CLAUDEAI_MCP_SERVERS",
+        "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "DISABLE_UPDATES", "ENABLE_CLAUDEAI_MCP_SERVERS", "MCP_TIMEOUT",
     };
 
     private static readonly string[] ReservedPrefixes = ["CLAUDE_", "ARM_"];

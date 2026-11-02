@@ -4,6 +4,7 @@ using Olve.AgentRuntimeManager.Events;
 using Olve.AgentRuntimeManager.Sessions.Conversations;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions;
 
@@ -178,7 +179,8 @@ public sealed class SessionManager : IDisposable
     /// can't start) or <c>session.queued</c>.
     /// </summary>
     /// <param name="agentEnv">The environment the agent gets, resolved from the registered variables and the request's own.</param>
-    public CreateOutcome Create(CreateSession request, IReadOnlyDictionary<string, string>? agentEnv = null)
+    /// <param name="mcpServers">The definitions of the registered MCP servers it names in <c>tools</c> (M10c), resolved by the handler.</param>
+    public CreateOutcome Create(CreateSession request, IReadOnlyDictionary<string, string>? agentEnv = null, IReadOnlyList<McpServerDefinition>? mcpServers = null)
     {
         if (!_providers.TryGetValue(request.Provider, out var provider))
         {
@@ -216,6 +218,7 @@ public sealed class SessionManager : IDisposable
                 Repos = request.Repos?.Select(r => RepoNames.Record(id, r.Url, r.Ref)).ToList(),
                 // Both resolved by the handler (the server's defaults when the request names none).
                 Tools = request.Tools ?? [],
+                McpServers = mcpServers is { Count: > 0 } ? mcpServers : null,
                 Skills = request.Skills ?? [],
                 CreatedAt = _time.GetUtcNow(),
             };
@@ -584,7 +587,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             return provider.Recover(new AgentRecovery(session.Id, session.Prompt, session.Model, providerSessionId, runId, resumeRunId, session.AgentEnv, session.Repos,
-                session.RunResume, session.RunMessages, session.Tools, session.Skills)) is { } agent
+                session.RunResume, session.RunMessages, session.Tools, session.Skills, session.McpServers)) is { } agent
                 ? (agent, agent.Resumed ? resumeRunId : runId)
                 : null;
         }
@@ -630,7 +633,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             run = _providers[session.Provider].Start(new AgentLaunch(
-                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos, session.Tools, session.Skills));
+                session.Id, session.Prompt, session.Model, attempt, providerSessionId, runId, session.AgentEnv, messages, resume, session.Repos, session.Tools, session.Skills, session.McpServers));
         }
         catch (Exception exception)
         {

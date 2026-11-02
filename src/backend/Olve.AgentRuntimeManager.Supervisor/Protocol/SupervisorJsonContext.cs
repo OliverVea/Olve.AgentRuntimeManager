@@ -11,4 +11,6 @@ namespace Olve.AgentRuntimeManager.Supervisor.Protocol;
 [JsonSerializable(typeof(SupervisorInfo))]
 [JsonSerializable(typeof(SupervisorExit))]
 [JsonSerializable(typeof(SupervisorMessage))]
+[JsonSerializable(typeof(IReadOnlyList<McpServerDefinition>))]
+[JsonSerializable(typeof(McpStartFailure))]
 public sealed partial class SupervisorJsonContext : JsonSerializerContext;

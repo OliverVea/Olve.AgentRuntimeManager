@@ -1,4 +1,5 @@
 using Olve.AgentRuntimeManager.Sessions.Repos;
+using Olve.AgentRuntimeManager.Supervisor.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers;
 
@@ -15,10 +16,12 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers;
 /// <paramref name="Repos"/>: the git repositories to check out in its workplace before it starts (M5e; null: none).
 /// <paramref name="Tools"/>: ARM's tools it gets, its only tools (M10; empty or null: none at all).
 /// <paramref name="Skills"/>: the skills it can load (M10b; empty or null: none), copied for the session when its agent first starts.
+/// <paramref name="McpServers"/>: the external MCP servers among <paramref name="Tools"/> (M10c; empty or null: none).
 /// </summary>
 public sealed record AgentLaunch(Guid SessionId, string Prompt, string Model, int Attempt, Guid ProviderSessionId, Guid RunId,
     IReadOnlyDictionary<string, string>? Env = null, IReadOnlyList<string>? Messages = null, string? Resume = null,
-    IReadOnlyList<RepoRecord>? Repos = null, IReadOnlyList<string>? Tools = null, IReadOnlyList<string>? Skills = null)
+    IReadOnlyList<RepoRecord>? Repos = null, IReadOnlyList<string>? Tools = null, IReadOnlyList<string>? Skills = null,
+    IReadOnlyList<McpServerDefinition>? McpServers = null)
 {
     /// <summary>What the agent is told first, in order: the prompt and its messages, or (resuming) just the messages.</summary>
     public IReadOnlyList<string> Input => Resume is null ? [Prompt, .. Messages ?? []] : [.. Messages ?? []];

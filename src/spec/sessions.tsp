@@ -91,8 +91,9 @@ model CreateSession {
 
   /**
    * The tools the agent gets, by name (`GET /api/tools`); an unknown one is a 400 `UNKNOWN_TOOL`.
-   * It gets exactly these and nothing else (its provider's own tools are always off). Empty: no
-   * tools at all. Unset: the server's default tools (`default` in `GET /api/tools`).
+   * It gets exactly these and nothing else (its provider's own tools are always off). An MCP
+   * server's name gives it all of that server's tools. Empty: no tools at all. Unset: the server's
+   * default tools (`default` in `GET /api/tools`), never an MCP server.
    */
   tools?: string[];
 
@@ -129,7 +130,10 @@ model Session {
   /** The git repositories it was created with, as given. */
   repos?: SessionRepo[];
 
-  /** Exactly the tools the agent has: as given, or the server's defaults when it gave none. Empty: no tools at all. */
+  /**
+   * Exactly the tools the agent has, an MCP server by its name: as given, or the server's defaults
+   * when it gave none. Empty: no tools at all.
+   */
   tools: string[];
 
   /** Exactly the skills the agent can load: as given, or the registered defaults when it gave none. Empty: no skills. */

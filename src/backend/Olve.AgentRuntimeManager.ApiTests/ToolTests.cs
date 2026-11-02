@@ -48,13 +48,14 @@ public class ToolTests(ApiTarget target)
     }
 
     [Test]
-    public async Task ByDefault_EveryToolIsADefault()
+    public async Task ByDefault_EveryOneOfArmsToolsIsADefault()
     {
         Skip.When(Environment.GetEnvironmentVariable(ApiTarget.BaseUrlVariable) is { Length: > 0 }, "In-process only: a deployment may configure its own.");
 
         var tools = (await target.CreateAuthenticatedClient().GetFromJsonAsync<ToolBody[]>("/api/tools", Wire.JsonOptions))!;
 
-        await Assert.That(tools.All(t => t.Default)).IsTrue();
+        // Not the MCP servers other tests register on this shared target: those never are.
+        await Assert.That(tools.Where(t => t.Name.StartsWith("arm_", StringComparison.Ordinal)).All(t => t.Default)).IsTrue();
     }
 
     [Test]
@@ -74,7 +75,7 @@ public class ToolTests(ApiTarget target)
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         var error = await response.ErrorAsync();
         await Assert.That(error.Code).IsEqualTo("UNKNOWN_TOOL");
-        await Assert.That(error.Message).StartsWith("No tool 'Bash', 'nope'. ARM's tools: ");
+        await Assert.That(error.Message).StartsWith("No tool 'Bash', 'nope'. Tools: ");
         await Assert.That(error.Message).Contains("arm_bash");
     }
 }

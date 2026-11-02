@@ -146,12 +146,21 @@ public static class ClaudeConversation
 
     /// <summary>
     /// A tool's name as ARM calls it: Claude Code names ARM's tools after their MCP server
-    /// (<c>mcp__arm__arm_bash</c>), which is stripped (<c>arm_bash</c>, M10); any other is kept.
+    /// (<c>mcp__arm__arm_bash</c>), which is stripped (<c>arm_bash</c>, M10), and an external server's
+    /// tool, which it serves as <c>server__tool</c>, shows as <c>server/tool</c> (M10c: a server's name
+    /// has no <c>_</c>, so the first <c>__</c> is what splits them); any other is kept.
     /// </summary>
-    public static string? ToolName(string? name) =>
-        name is not null && name.StartsWith(ArmToolPrefix, StringComparison.Ordinal) && name.Length > ArmToolPrefix.Length
-            ? name[ArmToolPrefix.Length..]
-            : name;
+    public static string? ToolName(string? name)
+    {
+        if (name is null || !name.StartsWith(ArmToolPrefix, StringComparison.Ordinal) || name.Length == ArmToolPrefix.Length)
+        {
+            return name;
+        }
+
+        var tool = name[ArmToolPrefix.Length..];
+        var split = tool.IndexOf(ToolsLaunch.ServerToolSeparator, StringComparison.Ordinal);
+        return split > 0 ? $"{tool[..split]}/{tool[(split + ToolsLaunch.ServerToolSeparator.Length)..]}" : tool;
+    }
 
     private const string ArmToolPrefix = $"mcp__{ToolsLaunch.ServerName}__";
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Olve.AgentRuntimeManager.Tools.Protocol;
 
 namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 
@@ -144,6 +145,23 @@ public static class ClaudeStreamJson
     public static string? McpServerStatus(JsonObject e, string server) =>
         Text(e["type"]) == "system" && Text(e["subtype"]) == "init" && e["mcp_servers"] is JsonArray servers
             ? servers.OfType<JsonObject>().Where(s => Text(s["name"]) == server).Select(s => Text(s["status"]) ?? "unknown").FirstOrDefault()
+            : null;
+
+    /// <summary>
+    /// Why the agent has none of ARM's tools (M10), if <paramref name="e"/> is Claude Code's
+    /// <c>system</c>/<c>init</c> and reports their MCP server (<see cref="ToolsLaunch.ServerName"/>)
+    /// as neither <c>connected</c> nor <c>pending</c>: e.g. <c>failed</c>, when <c>olve-arm-tools</c>
+    /// is missing or exits at once. Claude Code goes on without it (its built-ins are off: no tools at
+    /// all), so the run fails instead, as the session's own failure (not the provider's, so not
+    /// retried). Only a session that names tools has that server (<c>--strict-mcp-config</c>).
+    /// With external MCP servers (M10c, <paramref name="hasMcpServers"/>) the tools server's start
+    /// waits for them, and still <c>pending</c> means Claude Code gave up on it (also no tools), so
+    /// that fails too; the tools server says why it failed, <paramref name="reason"/>, if it could.
+    /// </summary>
+    public static string? ToolsServerFailure(JsonObject e, bool hasMcpServers = false, Func<string?>? reason = null) =>
+        McpServerStatus(e, ToolsLaunch.ServerName) is { } status && status != "connected" && (hasMcpServers || status != "pending")
+            ? reason?.Invoke() ?? $"ARM's tools server (olve-arm-tools, MCP server '{ToolsLaunch.ServerName}') did not start: Claude Code reports it as {status}, "
+              + "so the agent would have no tools. Check the server's Tools:Command."
             : null;
 
     private static int? Number(JsonNode? node) =>

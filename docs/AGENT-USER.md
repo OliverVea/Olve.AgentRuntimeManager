@@ -71,8 +71,10 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   opened `O_NOFOLLOW|O_DIRECTORY` (`fchmod`), so a link the agent put in its place fails the
   launch instead of sharing the link's target.
 - **Reading the session's files:** the supervisor's files (`output.jsonl`, `stderr.log`,
-  `supervisor.json`, `exit.json`) are `arm-agent`'s, mode `0640`, in a folder the agent can
-  write; ARM (a member of the group) opens them `O_NOFOLLOW|O_NONBLOCK` and reads them only if
+  `supervisor.json`, `exit.json`, and the tools server's `mcp-failure.json`) are `arm-agent`'s,
+  mode `0640`, in a folder the agent can write; for the same reason ARM writes nothing there, so
+  the supervisor writes `mcp-servers.json` (M10c), whose `env` values aren't secret from the
+  agent; ARM (a member of the group) opens them `O_NOFOLLOW|O_NONBLOCK` and reads them only if
   they are regular files: a link can't make ARM read another file into the API, a FIFO can't
   block it. (A hard link to ARM's own files is what `fs.protected_hardlinks`, on by default,
   refuses.) The agent can still forge their contents: a made-up `output.jsonl` or `exit.json`
