@@ -33,6 +33,9 @@ internal static class BashTool
     /// <summary>How long the output may still arrive after bash has exited (it's read on its own).</summary>
     private static readonly TimeSpan Drain = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>How long the rest of the output may take once nothing of the command's group is left.</summary>
+    private static readonly TimeSpan ReadersWait = TimeSpan.FromSeconds(5);
+
     public static async Task<ToolResult> RunAsync(ToolArguments arguments, ToolContext context, CancellationToken cancellationToken, string? toolUseId = null)
     {
         var command = arguments.RequiredString("command");
@@ -111,9 +114,16 @@ internal static class BashTool
                     await Task.WhenAny(readers, Task.Delay(Drain, CancellationToken.None));
                 }
 
+                // Nothing of the group is left, so the pipes are closing: a loaded machine may take
+                // a while to read the rest. Only an escaped process holding them waits this out.
+                if (!readers.IsCompleted)
+                {
+                    await Task.WhenAny(readers, Task.Delay(ReadersWait, CancellationToken.None));
+                }
+
                 var exitCode = process.ExitCode;
                 var cut = output.Total > ToolOutputs.MaxText;
-                file.Close(keep: cut);
+                file.Close(keep: cut, complete: readers.IsCompleted);
                 var text = output.Total == 0 ? "(no output)" : output.ToString(file.Note()).TrimEnd('\n');
                 if (!stopped)
                 {
@@ -144,9 +154,10 @@ internal static class BashTool
             int read;
             while ((read = await stream.ReadAsync(bytes)) > 0)
             {
-                file.Write(bytes.AsSpan(0, read));
+                // The result first: a slow disk mustn't hold up what the agent is sent.
                 var count = decoder.GetChars(bytes, 0, read, chars, 0, flush: false);
                 output.Append(chars.AsSpan(0, count));
+                file.Write(bytes.AsSpan(0, read));
             }
 
             output.Append(chars.AsSpan(0, decoder.GetChars([], 0, 0, chars, 0, flush: true)));
