@@ -63,7 +63,9 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   `getent passwd`; a missing user fails the launch, it never falls back to ARM's user). So Claude
   Code keeps its state, mise its toolchains and ssh its keys in `/home/arm-agent`. Its
   `~/.local/bin` comes first on `PATH`, as in a login shell, so the tools there (`gh`, `arm`,
-  `pl`, `mise`) are found.
+  `pl`, `mise`) are found. Pinned Node and uv (`toolchain.sh`, M10c, for `npx`/`uvx` MCP
+  servers) are root's, under `/opt/olve-arm/toolchain`, linked into `/usr/local/bin`; what they
+  download (npm's and uv's caches, uv's Pythons) lands in the agent's home.
 - **Session folders:** ARM makes each session's folder group-writable and setgid (`2770`); the
   group, `arm-agent`, comes from `sessions/` being setgid `arm-agent`. A new `work/` is made by
   the supervisor, so it's the agent's own (git trusts a repository right in it); one from before

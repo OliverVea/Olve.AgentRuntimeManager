@@ -14,6 +14,7 @@
 #    autostart (libvirt `default` NAT network)
 # 2. extract /app from the image tarball (the same self-contained publish the container ships)
 # 3. ensure that Claude Code version in the VM (/opt/olve-arm/claude/<version>, uploaded once)
+# 3b. ensure the pinned Node and uv the agents' MCP servers run with (toolchain.sh, M10c)
 # 4. ensure the agent user (arm-agent): agents run as their own unprivileged user, not as `arm`
 #    (docs/AGENT-USER.md); the first run also moves what agents had as `arm` over to it
 # 5. install the app as /opt/olve-arm/releases/<version> with `claude` linked to that Claude
@@ -113,6 +114,11 @@ ensure_claude() {
   $SSH_VM "set -e
     mkdir -p $dir && install -m 0755 $stage/claude $dir/claude && rm -rf $stage
     $dir/claude --version"
+}
+
+ensure_toolchain() {
+  log "ensuring Node and uv"
+  $SSH_VM "sudo bash -s" < "$HERE/toolchain.sh"
 }
 
 ensure_agent_user() {
@@ -229,6 +235,7 @@ EOF
 ensure_vm
 wait_for_vm
 ensure_claude
+ensure_toolchain
 ensure_agent_user
 extract_app
 write_env
