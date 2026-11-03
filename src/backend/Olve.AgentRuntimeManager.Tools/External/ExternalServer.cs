@@ -38,6 +38,9 @@ internal sealed class ExternalServer(McpServerDefinition definition, string work
     /// <summary>How long its last output may still arrive after it has exited.</summary>
     private static readonly TimeSpan Drain = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>How long the rest of its output may take once it has exited (as <c>arm_bash</c>'s).</summary>
+    private static readonly TimeSpan ReadersWait = TimeSpan.FromSeconds(5);
+
     private static readonly byte[] NewLine = "\n"u8.ToArray();
 
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonObject>> _waiting = new();
@@ -299,7 +302,16 @@ internal sealed class ExternalServer(McpServerDefinition definition, string work
             var exiting = process.WaitForExitAsync();
             await Task.WhenAny(reading, exiting);
             // Its output closing and its exit come together, in either order; the reason needs both.
-            await Task.WhenAny(Task.WhenAll(reading, errors, exiting), Task.Delay(Drain));
+            var all = Task.WhenAll(reading, errors, exiting);
+            await Task.WhenAny(all, Task.Delay(Drain));
+            // It has exited, so its pipes are closing: a loaded machine may take a while to read the
+            // rest of what it said (its stderr is the reason a start failed). Only a process it left
+            // running that holds them waits this out.
+            if (process.HasExited && !all.IsCompleted)
+            {
+                await Task.WhenAny(all, Task.Delay(ReadersWait));
+            }
+
             var reason = process.HasExited
                 ? string.Create(CultureInfo.InvariantCulture, $"it exited with code {process.ExitCode}")
                 : "it closed its output";
