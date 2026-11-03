@@ -72,6 +72,27 @@ public sealed class ControlledProvider(string name = "controlled") : IAgentProvi
         return RemovalFails ? repos : [];
     }
 
+    /// <summary>The sessions whose folders <see cref="RemoveFolder"/> was asked to remove, in order.</summary>
+    public List<Guid> RemovedFolders { get; } = [];
+
+    /// <summary>What a test does while a folder is being removed.</summary>
+    public Action<Guid>? RemovingFolder { get; set; }
+
+    /// <summary>How many times <see cref="RemoveLeftovers"/> was called.</summary>
+    public int LeftoverPasses { get; private set; }
+
+    /// <summary>What <see cref="RemoveFolder"/> answers: null (done), its trouble, or "throw" to throw.</summary>
+    public string? FolderRemoval { get; set; }
+
+    public string? RemoveFolder(Guid sessionId)
+    {
+        RemovingFolder?.Invoke(sessionId);
+        RemovedFolders.Add(sessionId);
+        return FolderRemoval is "throw" ? throw new IOException("The disk refused.") : FolderRemoval;
+    }
+
+    public void RemoveLeftovers() => LeftoverPasses++;
+
     public ControlledRun RunOf(Guid sessionId) => Runs.Single(r => r.Launch.SessionId == sessionId);
 
     public IAgentRun Start(AgentLaunch launch)

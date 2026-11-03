@@ -294,6 +294,14 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     public string? RemoveSkill(string root, string name) => RunRemoval(["skill-remove", root, name]);
 
     /// <summary>
+    /// Empties a deleted session's retired folder (<see cref="RetiredFolders"/>, #22) as the user whose
+    /// files are in it: the supervisor's <c>remove-folder</c> (fine with one already gone). ARM
+    /// never goes into the folder itself, so a link an agent left there can't lead ARM into its own
+    /// files. The error if it couldn't (bounded; what's left is finished by a later pass).
+    /// </summary>
+    public string? EmptyRetiredFolder(string sessions, Guid sessionId) => RunRemoval(["remove-folder", sessions, sessionId.ToString("D")]);
+
+    /// <summary>
     /// Runs one of the supervisor's removals (<paramref name="arguments"/>, the subcommand first) to
     /// its end: null when it exited 0, else its error (stderr, or the exit code), or that it took more
     /// than <see cref="RemoveTimeout"/> (then it's killed, as far as ARM may).

@@ -408,15 +408,18 @@ public sealed class SessionManager : IDisposable
     }
 
     /// <summary>
-    /// Deletes a session that has ended, and then its worktrees (M5e; through its provider, not under
-    /// the lock: that runs git).
+    /// Deletes a session that has ended: its worktrees (M5e), its record, then its folder (#22), all
+    /// through its provider, not under the lock (that runs git and the supervisor).
     /// </summary>
     /// <remarks>
     /// The worktrees first (bounded), then the record: a crash in between leaves the session, to be
     /// deleted again. Worktrees that couldn't be removed (their repository busy past the wait, git
     /// failing) don't stop the delete: they're kept (<see cref="IWorktreeRemovalStore"/>, before the
-    /// record goes) and tried again by <see cref="RetryWorktreeRemovals"/>. Meanwhile the session
-    /// can't be continued (a message finds no session).
+    /// record goes) and tried again by <see cref="RetryWorktreeRemovals"/>, which removes the folder
+    /// once they're gone. Meanwhile the session can't be continued (a message finds no session). The
+    /// folder goes only after the record (a session whose files are gone is never shown): here it's
+    /// taken out of use, and the retries' passes remove it (<see cref="IAgentProvider.RemoveLeftovers"/>).
+    /// A folder that can't be taken out of use doesn't fail the delete: it's logged, and stays.
     /// </remarks>
     public DeleteOutcome Delete(Guid id)
     {
@@ -443,9 +446,10 @@ public sealed class SessionManager : IDisposable
         }
 
         IReadOnlyList<RepoRecord> left = [];
+        _providers.TryGetValue(ended.Provider, out var provider);
         try
         {
-            if (ended.Repos is { Count: > 0 } repos && _providers.TryGetValue(ended.Provider, out var provider))
+            if (ended.Repos is { Count: > 0 } repos && provider is not null)
             {
                 left = RemoveWorktrees(provider, id, repos);
             }
@@ -477,17 +481,44 @@ public sealed class SessionManager : IDisposable
             }
         }
 
+        // The record is gone: then its folder, unless worktrees in it wait to be removed through git
+        // (the retries remove the folder after them).
+        if (left.Count == 0 && provider is not null)
+        {
+            RemoveFolder(provider, id);
+        }
+
         return new DeleteOutcome.Deleted();
     }
 
     /// <summary>
     /// Tries again to remove deleted sessions' worktrees that are due (<see cref="IWorktreeRemovalStore"/>):
-    /// what's removed is forgotten, what isn't waits twice as long (up to an hour), and after
-    /// <see cref="WorktreeRemovalAttempts"/> it's given up, logged as an error. Not under the lock: it runs git.
+    /// what's removed is forgotten and its session's folder removed after it (#22), what isn't waits
+    /// twice as long (up to an hour), and after <see cref="WorktreeRemovalAttempts"/> it's given up,
+    /// logged as an error (the folder stays with it). First, every provider finishes the folders whose
+    /// removal was cut short (<see cref="IAgentProvider.RemoveLeftovers"/>). Not under the lock: it runs git.
     /// </summary>
     /// <param name="cancellationToken">Stops the pass between entries (the server stopping); one in progress finishes.</param>
     public void RetryWorktreeRemovals(CancellationToken cancellationToken = default)
     {
+        // Folders whose removal was cut short (#22), whether or not any worktrees wait.
+        foreach (var provider in _providers.Values)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                provider.RemoveLeftovers();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Provider {Provider}: could not remove deleted sessions' folders", provider.Name);
+            }
+        }
+
         if (_removals is null)
         {
             return;
@@ -512,6 +543,9 @@ public sealed class SessionManager : IDisposable
             if (left.Count == 0)
             {
                 _logger.LogInformation("Deleted session {SessionId}: its worktrees are removed (attempt {Attempt})", removal.SessionId, removal.Attempts + 1);
+                // The folder first: it's only taken out of use, and a crash before the entry goes
+                // tries the worktrees (gone: fine) and the folder again.
+                RemoveFolder(provider, removal.SessionId);
                 _removals.Delete(removal.SessionId);
                 continue;
             }
@@ -519,7 +553,7 @@ public sealed class SessionManager : IDisposable
             var attempts = removal.Attempts + 1;
             if (attempts >= WorktreeRemovalAttempts)
             {
-                _logger.LogError("Deleted session {SessionId}: gave up removing its worktrees of {Repos} after {Attempts} attempts; they stay",
+                _logger.LogError("Deleted session {SessionId}: gave up removing its worktrees of {Repos} after {Attempts} attempts; they stay, and so does its folder",
                     removal.SessionId, string.Join(", ", left.Select(r => r.Url)), attempts);
                 _removals.Delete(removal.SessionId);
                 continue;
@@ -541,6 +575,22 @@ public sealed class SessionManager : IDisposable
         {
             _logger.LogWarning(exception, "Session {SessionId}: could not remove its worktrees", id);
             return repos;
+        }
+    }
+
+    /// <summary>Removes a deleted session's folder through its provider; trouble is logged, never thrown.</summary>
+    private void RemoveFolder(IAgentProvider provider, Guid id)
+    {
+        try
+        {
+            if (provider.RemoveFolder(id) is { } error)
+            {
+                _logger.LogWarning("Deleted session {SessionId}: its folder couldn't be removed yet: {Error}", id, error);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Deleted session {SessionId}: could not remove its folder", id);
         }
     }
 

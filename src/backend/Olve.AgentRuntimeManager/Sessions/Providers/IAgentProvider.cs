@@ -59,4 +59,22 @@ public interface IAgentProvider
     /// workplace, so nothing to remove.
     /// </summary>
     IReadOnlyList<RepoRecord> RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> repos) => [];
+
+    /// <summary>
+    /// A session was deleted and its worktrees are gone (#22): take what's left of it on disk out
+    /// of use, its folder whole (outputs, skill copies, the supervisor's files), quickly (it's in the
+    /// delete request); <see cref="RemoveLeftovers"/> then removes it. Never for a session still
+    /// running, nor one whose worktrees are still there. Null when that's done (or there was no
+    /// folder), else why not: the folder then stays. The default keeps nothing on disk.
+    /// </summary>
+    string? RemoveFolder(Guid sessionId) => null;
+
+    /// <summary>
+    /// Removes deleted sessions' folders taken out of use (<see cref="RemoveFolder"/>), retrying
+    /// what couldn't be removed with a growing wait: called every pass of the retries, so it must be
+    /// cheap when there are none.
+    /// </summary>
+    void RemoveLeftovers()
+    {
+    }
 }

@@ -18,6 +18,9 @@ using Olve.AgentRuntimeManager.Supervisor.Protocol;
 // failed (git's error on stderr), 2 a request it can't act on, 3 no valid SKILL.md at the path.
 // `olve-arm-supervisor skill-remove <root> <name>`: removes the skill `<root>/<name>` from the
 // registry (fine if it's gone already). Exit code 1: it couldn't.
+// `olve-arm-supervisor remove-folder <sessions folder> <session id>`: empties a deleted session's
+// retired folder `<sessions folder>/.deleted-<id>` (#22), links removed, not followed; ARM then
+// removes the empty folder (fine if it's gone already). Exit code 1: something is left in it.
 // Unix only: sockets and file modes, setsid, process groups (ARM runs on Linux).
 if (OperatingSystem.IsWindows())
 {
@@ -127,6 +130,26 @@ if (args is ["skill-remove", ..])
     if (error is not null)
     {
         await Console.Error.WriteLineAsync(error);
+        return 1;
+    }
+
+    return 0;
+}
+
+if (args is ["remove-folder", ..])
+{
+    // Only a retired folder in the given folder: never the sessions folder itself, nor a live session's.
+    if (args is not [_, var sessions, var id] || !Path.IsPathFullyQualified(sessions)
+        || !Guid.TryParseExact(id, "D", out var sessionId) || sessionId == Guid.Empty)
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: remove-folder <sessions folder> <session id>, the folder an absolute path and the id a GUID.");
+        return 2;
+    }
+
+    var error = FolderEmptier.Empty(Path.Combine(sessions, RetiredFolders.Name(sessionId)));
+    if (error is not null)
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: {error}");
         return 1;
     }
 

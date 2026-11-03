@@ -72,6 +72,20 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
   the agent user is ARM's and shared the same way. ARM changes a folder's mode through a handle
   opened `O_NOFOLLOW|O_DIRECTORY` (`fchmod`), so a link the agent put in its place fails the
   launch instead of sharing the link's target.
+- **Deleting a session's folder** (#22), once its record and worktrees are gone: ARM renames it to
+  `sessions/.deleted-<id>` in the delete request (only ARM may change `sessions/`' entries; not
+  while the session's last agent still runs, an orphan that couldn't be killed: then it stays).
+  The worktree retries' pass, every 30 s, then has the supervisor's `remove-folder` empty it as
+  the agent user, removing links without following them and stopping itself after 20 s, and ARM
+  removes the then empty folder (`rmdir`, never recursive). ARM never goes into the folder
+  itself: any agent can write into any session's folder, so a link swapped in mid-delete could
+  otherwise lead ARM into its own files; as the agent user it reaches only what that user may
+  delete anyway. What isn't removed waits twice as long each pass (up to an hour), and is given up
+  after 10 tries until a restart: something the agent user can't remove (files of ARM's from
+  before the agent user) stays; a folder of its own it made read-only (Go's module cache) it
+  makes writable first. A crash after the record goes
+  and before the rename leaves the folder under its own name for good, as do the folders of
+  sessions deleted before #22.
 - **Reading the session's files:** the supervisor's files (`output.jsonl`, `stderr.log`,
   `supervisor.json`, `exit.json`, and the tools server's `mcp-failure.json`) are `arm-agent`'s,
   mode `0640`, in a folder the agent can write; for the same reason ARM writes nothing there, so

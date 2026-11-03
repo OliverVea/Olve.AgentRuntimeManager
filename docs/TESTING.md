@@ -114,7 +114,7 @@ emitter's conformance suite (`tests/Olve.TypeSpec.Conformance` in Olve.Utilities
   tree of its own (not a plain folder, not inside another) and a worktree of a shared copy (its git
   folder apart from the common one), and is on the API's branch. The check
   never works the names out itself. Then the session is deleted (204, then 404), which removes its
-  worktree; what is left of it on disk isn't visible through the API, so that part is proved per
+  worktree and its folder; what is left of it on disk isn't visible through the API, so that part is proved per
   push only (locally, the shared copy lists no worktree afterwards). A run that fails deletes it
   too, and a later run deletes any an earlier one left.
   **Everything else on the `fake` provider** (enabled on beta, never on prod; no model): `/health`,

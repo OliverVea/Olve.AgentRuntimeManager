@@ -459,6 +459,53 @@ public class SessionManagerTests : IDisposable
     }
 
     [Test]
+    public async Task Delete_RemovesTheSessionsFolder_AfterItsWorktreesAndRecord_WithOrWithoutRepos()
+    {
+        // #22: what it left on disk goes too, and only once no session can show it.
+        var withRepos = Record(_sessions.Create(Request() with { Repos = [new CreateSessionRepo { Url = "https://x/b" }] }));
+        var without = Create();
+        _sessions.Kill(withRepos.Id, null, KillSource.User);
+        _sessions.Kill(without.Id, null, KillSource.User);
+        var order = new List<string>();
+        _provider.Removing = id => order.Add($"worktrees {id}");
+        _provider.RemovingFolder = id => order.Add($"folder {id}, record {(_database.Store().Get(id) is null ? "gone" : "there")}");
+
+        _sessions.Delete(withRepos.Id);
+        _sessions.Delete(without.Id);
+        var again = _sessions.Delete(without.Id);
+
+        await Assert.That(order).IsEquivalentTo(
+            [$"worktrees {withRepos.Id}", $"folder {withRepos.Id}, record gone", $"folder {without.Id}, record gone"],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(again).IsTypeOf<DeleteOutcome.NotFound>();
+    }
+
+    [Test]
+    [Arguments("its agent is still running")]
+    [Arguments("throw")]
+    public async Task Delete_AFolderThatCantBeRemoved_StillDeletesTheSession(string trouble)
+    {
+        var session = Create();
+        _sessions.Kill(session.Id, null, KillSource.User);
+        _provider.FolderRemoval = trouble;
+
+        var deleted = _sessions.Delete(session.Id);
+
+        await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
+        await Assert.That(_database.Store().Get(session.Id)).IsNull();
+        await Assert.That(_provider.RemovedFolders).IsEquivalentTo([session.Id]);
+    }
+
+    [Test]
+    public async Task Delete_ASessionStillWorking_LeavesItsFolder()
+    {
+        var session = Create();
+
+        await Assert.That(_sessions.Delete(session.Id)).IsTypeOf<DeleteOutcome.NotEnded>();
+        await Assert.That(_provider.RemovedFolders).IsEmpty();
+    }
+
+    [Test]
     public async Task AnAgentThatNeverStarted_LeavesNothingToResume_AndAMessageStartsItAfresh()
     {
         var session = Create("the task");
@@ -546,6 +593,7 @@ public class SessionManagerTests : IDisposable
         _time.Advance(SessionManager.WorktreeRemovalBackoff);
         _sessions.RetryWorktreeRemovals();
         var keptAfterAFailure = _database.Removals().Due(_time.GetUtcNow().AddDays(1)).Single();
+        var foldersWhileTheyStay = _provider.RemovedFolders.Count;
         _provider.RemovalFails = false;
         _time.Advance(TimeSpan.FromMinutes(1));
         _sessions.RetryWorktreeRemovals();
@@ -556,6 +604,11 @@ public class SessionManagerTests : IDisposable
         await Assert.That(keptAfterAFailure.Repos).IsEquivalentTo([RepoNames.Record(session.Id, "https://x/b")]);
         await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(3);
         await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+        // The folder holds the worktrees: it goes once they're removed, not before.
+        await Assert.That(foldersWhileTheyStay).IsEqualTo(0);
+        await Assert.That(_provider.RemovedFolders).IsEquivalentTo([session.Id]);
+        // Every pass finishes folders whose removal was cut short.
+        await Assert.That(_provider.LeftoverPasses).IsEqualTo(3);
     }
 
     [Test]
@@ -590,6 +643,7 @@ public class SessionManagerTests : IDisposable
         await Assert.That(deleted).IsTypeOf<DeleteOutcome.Deleted>();
         await Assert.That(_database.Store().Get(session.Id)).IsNull();
         await Assert.That(_database.Removals().Due(DateTimeOffset.MaxValue).Select(r => r.SessionId)).IsEquivalentTo([session.Id]);
+        await Assert.That(provider.RemovedFolders).IsEmpty();
     }
 
     [Test]
@@ -662,6 +716,7 @@ public class SessionManagerTests : IDisposable
 
         await Assert.That(_provider.RemovedRepos.Count).IsEqualTo(SessionManager.WorktreeRemovalAttempts);
         await Assert.That(_database.Removals().Due(_time.GetUtcNow().AddDays(1))).IsEmpty();
+        await Assert.That(_provider.RemovedFolders).IsEmpty(); // it stays with them
     }
 
     [Test]

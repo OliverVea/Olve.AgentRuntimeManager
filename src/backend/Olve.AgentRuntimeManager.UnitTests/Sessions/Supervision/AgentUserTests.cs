@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Olve.AgentRuntimeManager.Sessions.Providers;
 using Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 using Olve.AgentRuntimeManager.Sessions.Repos;
@@ -156,6 +157,110 @@ public class AgentUserTests
         var shared = Directory.GetDirectories(Path.Combine(_root, "repos"), "alpha-*.git").Single();
         await Assert.That(SudoCalls()).IsEquivalentTo(
             [$"-n -u {account.Name} -- {Supervisor}", $"-n -u {account.Name} -- {Supervisor} remove-worktree {shared} {worktree}"]);
+    }
+
+    [Test]
+    public async Task Delete_RemovesTheSessionsFolder_EmptiedAsTheAgentUser_LinksNotFollowed()
+    {
+        // #22: what a session leaves (large outputs, its skill copies, the supervisor's files) goes
+        // with it; a link the agent left there leads nowhere: what it points at stays.
+        var account = OwnAccount();
+        var (_, provider) = Server(account);
+        var launch = Launch("Say READY");
+        await provider.Start(launch).Completion.WaitAsync(Guard);
+        var folder = Folder(launch);
+        var outside = Path.Combine(_root, "another-session", "work");
+        Directory.CreateDirectory(outside);
+        await File.WriteAllTextAsync(Path.Combine(outside, "keep.txt"), "not this session's");
+        Directory.CreateDirectory(Path.Combine(folder, "outputs"));
+        File.WriteAllText(Path.Combine(folder, "outputs", "toolu_1.txt"), "a large output");
+        File.SetUnixFileMode(Path.Combine(folder, "outputs", "toolu_1.txt"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Directory.CreateDirectory(Path.Combine(folder, "skills", "pdf"));
+        File.WriteAllText(Path.Combine(folder, "skills", "pdf", "SKILL.md"), "# PDF");
+        // Go's module cache is read-only, and its owner may still remove it.
+        var readOnly = Path.Combine(folder, "work", "go", "pkg@v1");
+        Directory.CreateDirectory(readOnly);
+        File.WriteAllText(Path.Combine(readOnly, "go.mod"), "module x");
+        File.SetUnixFileMode(readOnly, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        Directory.CreateSymbolicLink(Path.Combine(folder, "elsewhere"), outside);
+        Directory.CreateSymbolicLink(Path.Combine(folder, "skills", "pdf", "deeper"), outside);
+        File.CreateSymbolicLink(Path.Combine(folder, "a-file"), Path.Combine(outside, "keep.txt"));
+
+        var retired = provider.RemoveFolder(launch.SessionId);
+        var sessions = Directory.GetFileSystemEntries(Path.Combine(_root, "sessions")).Select(entry => Path.GetFileName(entry)!).ToArray();
+        provider.RemoveLeftovers();
+
+        await Assert.That(retired).IsNull();
+        // Out of use at once (no session folder by its id), removed by the next pass.
+        await Assert.That(sessions).IsEquivalentTo([$".deleted-{launch.SessionId:D}"]);
+        await Assert.That(Directory.GetFileSystemEntries(Path.Combine(_root, "sessions"))).IsEmpty();
+        await Assert.That(File.ReadAllText(Path.Combine(outside, "keep.txt"))).IsEqualTo("not this session's");
+        await Assert.That(SudoCalls().Last()).IsEqualTo(
+            $"-n -u {account.Name} -- {Supervisor} remove-folder {Path.Combine(_root, "sessions")} {launch.SessionId:D}");
+        await Assert.That(provider.RemoveFolder(launch.SessionId)).IsNull(); // gone already: fine
+    }
+
+    [Test]
+    public async Task Delete_WhileTheSessionsAgentStillRuns_LeavesItsFolder()
+    {
+        // An orphan that couldn't be killed (ClaudeProvider.OrphanAlive) ends its session as failed,
+        // but works on in the folder: it isn't pulled out from under it.
+        var (_, provider) = Server(OwnAccount());
+        var id = Guid.NewGuid();
+        var folder = Path.Combine(_root, "sessions", id.ToString());
+        Directory.CreateDirectory(folder);
+        var self = System.Environment.ProcessId;
+        SupervisorFiles.WriteAtomically(Path.Combine(folder, SupervisorFiles.Info), new SupervisorInfo
+        {
+            Version = SupervisorProtocol.Version, RunId = Guid.NewGuid(), SupervisorPid = self, AgentPid = self,
+            AgentStartTime = Posix.StartTime(self), OutputStart = 0, StderrStart = 0, StartedAt = DateTimeOffset.UnixEpoch,
+        }, SupervisorJsonContext.Default.SupervisorInfo);
+
+        var error = provider.RemoveFolder(id);
+
+        await Assert.That(error).IsEqualTo($"its agent (pid {self}) is still running, so {folder} is left as it is");
+        await Assert.That(Directory.Exists(folder)).IsTrue();
+    }
+
+    [Test]
+    public async Task Delete_AFolderThatCantBeRemoved_IsTriedLessOften_ThenGivenUp_OthersLeftAlone()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-03T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var (_, provider) = Server(OwnAccount(), time: time);
+        var sessions = Path.Combine(_root, "sessions");
+        var id = Guid.NewGuid();
+        // A link at the retired name can't be emptied: the supervisor refuses it every time.
+        Directory.CreateDirectory(Path.Combine(_root, "target"));
+        Directory.CreateDirectory(sessions);
+        Directory.CreateSymbolicLink(Path.Combine(sessions, $".deleted-{id:D}"), Path.Combine(_root, "target"));
+        var live = Path.Combine(sessions, Guid.NewGuid().ToString());
+        var odd = Path.Combine(sessions, ".deleted-not-a-session");
+        Directory.CreateDirectory(live);
+        Directory.CreateDirectory(odd);
+        int Tries() => SudoCalls().Count(call => call.Contains(" remove-folder ", StringComparison.Ordinal));
+
+        provider.RemoveLeftovers();
+        provider.RemoveLeftovers(); // not due yet
+        var early = Tries();
+        for (var i = 0; i < ClaudeProvider.LeftoverAttempts + 5; i++)
+        {
+            time.Advance(TimeSpan.FromHours(1));
+            provider.RemoveLeftovers();
+        }
+
+        await Assert.That(early).IsEqualTo(1);
+        await Assert.That(Tries()).IsEqualTo(ClaudeProvider.LeftoverAttempts);
+        await Assert.That(Directory.Exists(Path.Combine(_root, "target"))).IsTrue();
+        await Assert.That(Directory.Exists(live)).IsTrue();
+        await Assert.That(Directory.Exists(odd)).IsTrue();
+    }
+
+    [Test]
+    public async Task Delete_ASessionWithoutAFolder_IsFine()
+    {
+        var (_, provider) = Server(OwnAccount());
+
+        await Assert.That(provider.RemoveFolder(Guid.NewGuid())).IsNull();
     }
 
     [NotInParallel("signals")]
@@ -663,7 +768,8 @@ public class AgentUserTests
     }
 
     /// <summary>A server whose agents run as <paramref name="account"/>, through the sudo stub.</summary>
-    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account, string? sudo = null, ILogger<Supervisors>? log = null)
+    private (Supervisors Supervisors, ClaudeProvider Provider) Server(AgentAccount account, string? sudo = null, ILogger<Supervisors>? log = null,
+        TimeProvider? time = null)
     {
         var supervisors = new Supervisors(Options.Create(new SupervisorOptions
         {
@@ -671,7 +777,7 @@ public class AgentUserTests
         }), log is null ? _started : _started.Passing(log));
         _servers.Add(supervisors);
         var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
-        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance));
+        return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance, time: time));
     }
 
     /// <summary>A copy of the sudo stub in the test's folder, so its log (<c>sudo.log</c>) is this test's.</summary>

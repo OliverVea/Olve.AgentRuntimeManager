@@ -23,7 +23,7 @@ namespace Olve.AgentRuntimeManager.Sessions.Providers.Claude;
 /// </summary>
 public sealed class ClaudeProvider(
     IOptions<ClaudeProviderOptions> options, Supervisors supervisors, RepoCheckouts repos, ILogger<ClaudeProvider> logger, IOptions<ToolsOptions>? tools = null,
-    IOptions<SkillsOptions>? skills = null)
+    IOptions<SkillsOptions>? skills = null, TimeProvider? time = null)
     : IAgentProvider
 {
     public const string ProviderName = "claude";
@@ -126,6 +126,138 @@ public sealed class ClaudeProvider(
     /// <summary>Removes a deleted session's worktrees from the shared copies (M5e).</summary>
     public IReadOnlyList<RepoRecord> RemoveRepos(Guid sessionId, IReadOnlyList<RepoRecord> sessionRepos) =>
         repos.Remove(sessionId, Workplace(options.Value, sessionId), sessionRepos);
+
+    /// <summary>
+    /// Takes a deleted session's folder out of use (#22): ARM renames it to its retired name (only
+    /// ARM may change the sessions folder's entries), at once; <see cref="RemoveLeftovers"/> empties
+    /// it as the agent user (ARM never goes into it: an agent may have left links there) and removes
+    /// the empty folder. Not while the session's last agent still runs (an orphan that couldn't be
+    /// killed, <see cref="OrphanAlive"/>): its folder is left as it is.
+    /// </summary>
+    public string? RemoveFolder(Guid sessionId)
+    {
+        var root = Path.GetFullPath(WorkRoot(options.Value));
+        var folder = Path.Combine(root, sessionId.ToString());
+        var retired = Path.Combine(root, RetiredFolders.Name(sessionId));
+        try
+        {
+            if (!Posix.ExistsNoFollow(folder) || Posix.ExistsNoFollow(retired))
+            {
+                return null;
+            }
+
+            if (SupervisorFiles.ReadInfo(folder) is { } info
+                && Posix.Status(info.AgentPid) is { IsProcess: true, IsRunning: true } status && status.StartTime == info.AgentStartTime)
+            {
+                return $"its agent (pid {info.AgentPid}) is still running, so {folder} is left as it is";
+            }
+
+            Directory.Move(folder, retired);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"Retiring {folder} failed: {exception.Message}";
+        }
+    }
+
+    /// <summary>How long a retired folder that couldn't be removed waits before the next try, at first (doubling, up to an hour).</summary>
+    public static readonly TimeSpan LeftoverBackoff = TimeSpan.FromSeconds(30);
+
+    /// <summary>How many times a retired folder is tried before it's given up (until a restart).</summary>
+    public const int LeftoverAttempts = 10;
+
+    /// <summary>
+    /// Removes the retired folders in the sessions folder, each due one in turn: one that can't be
+    /// removed waits twice as long each time (from <see cref="LeftoverBackoff"/>, up to an hour), and
+    /// after <see cref="LeftoverAttempts"/> it's given up, logged as an error. Kept in memory: a
+    /// restart tries them all again.
+    /// </summary>
+    public void RemoveLeftovers()
+    {
+        var root = Path.GetFullPath(WorkRoot(options.Value));
+        IEnumerable<string> names;
+        try
+        {
+            names = Directory.Exists(root)
+                ? [.. Directory.EnumerateDirectories(root, RetiredFolders.Prefix + "*").Select(path => Path.GetFileName(path))]
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Could not list the deleted sessions' folders left in {Root}", root);
+            return;
+        }
+
+        var now = _time.GetUtcNow();
+        foreach (var name in names)
+        {
+            if (RetiredFolders.SessionOf(name) is not { } sessionId)
+            {
+                continue;
+            }
+
+            var tried = _leftovers.GetValueOrDefault(sessionId);
+            if (tried.Attempts >= LeftoverAttempts || tried.NextAt > now)
+            {
+                continue;
+            }
+
+            if (RemoveRetired(root, sessionId) is not { } error)
+            {
+                _leftovers.Remove(sessionId);
+                logger.LogInformation("Deleted session {SessionId}: its folder is removed", sessionId);
+                continue;
+            }
+
+            var attempts = tried.Attempts + 1;
+            var wait = TimeSpan.FromTicks(Math.Min(LeftoverBackoff.Ticks << Math.Min(attempts - 1, 20), TimeSpan.FromHours(1).Ticks));
+            _leftovers[sessionId] = (attempts, now + wait);
+            if (attempts >= LeftoverAttempts)
+            {
+                logger.LogError("Deleted session {SessionId}: gave up removing its folder after {Attempts} attempts; it stays: {Error}", sessionId, attempts, error);
+            }
+            else if (attempts == 1)
+            {
+                logger.LogWarning("Deleted session {SessionId}: its folder couldn't be removed yet: {Error}", sessionId, error);
+            }
+        }
+    }
+
+    /// <summary>The retired folders that couldn't be removed: how often they were tried, and when next. Only the retries' pass uses it.</summary>
+    private readonly Dictionary<Guid, (int Attempts, DateTimeOffset NextAt)> _leftovers = [];
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
+    /// <summary>Empties a retired folder as the agent user, then removes it; null when it's gone.</summary>
+    private string? RemoveRetired(string root, Guid sessionId)
+    {
+        var retired = Path.Combine(root, RetiredFolders.Name(sessionId));
+        if (!Posix.ExistsNoFollow(retired))
+        {
+            return null;
+        }
+
+        if (supervisors.EmptyRetiredFolder(root, sessionId) is { } error)
+        {
+            return error;
+        }
+
+        try
+        {
+            // Not recursive: only an empty folder goes (anything that turned up since stays, for a later pass).
+            Directory.Delete(retired);
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"Removing {retired} failed: {exception.Message}";
+        }
+    }
 
     /// <summary>What Claude Code's output held that the conversation doesn't know, each logged once.</summary>
     private readonly HashSet<string> _unknownSeen = [];
