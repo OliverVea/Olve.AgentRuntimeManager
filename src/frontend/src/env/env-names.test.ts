@@ -33,6 +33,7 @@ describe("env names (as the server's EnvNames)", () => {
     "TMPDIR",
     "DISABLE_UPDATES",
     "ENABLE_CLAUDEAI_MCP_SERVERS",
+    "MCP_TIMEOUT",
     "CLAUDE_",
     "CLAUDE_CONFIG_DIR",
     "ARM_",

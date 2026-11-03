@@ -18,6 +18,8 @@ import { SessionPage } from "./components/session-page.js";
 import { EnvDialog } from "./env/env-dialog.js";
 import { EnvPanel } from "./env/env-panel.js";
 import { EnvRegistry } from "./env/env-registry.js";
+import { McpDialog } from "./mcp/mcp-dialog.js";
+import { McpRegistry } from "./mcp/mcp-registry.js";
 import { loadPrefs, type Prefs, savePrefs, type Theme } from "./prefs.js";
 import { RepoPanel } from "./repos/repo-panel.js";
 import { ActivityStore } from "./sessions/activity-store.js";
@@ -48,6 +50,7 @@ const envRegistry = new EnvRegistry(client);
 const models = new ModelCatalog(client);
 const tools = new ToolCatalog(client);
 const skillRegistry = new SkillRegistry(client);
+const mcpRegistry = new McpRegistry(client);
 let prefs: Prefs = loadPrefs();
 
 const $ = <E extends HTMLElement = HTMLElement>(selector: string) => {
@@ -241,6 +244,7 @@ function renderAuthState(): void {
     models.clear();
     tools.clear();
     skillRegistry.clear();
+    mcpRegistry.clear();
     $("#env").innerHTML = "";
     closeProviders();
   }
@@ -279,6 +283,11 @@ const repoPanel = new RepoPanel($<HTMLButtonElement>("#repos-toggle"), $("#repos
 // ARM's tools (M10): a checkbox each in their own panel, the server's defaults ticked to start with.
 const toolPanel = new ToolPanel($<HTMLButtonElement>("#tools-toggle"), $("#tools-panel"));
 tools.addEventListener("change", () => toolPanel.setTools(tools.loaded ? tools.tools : undefined));
+// The registered MCP servers (M10c), managed in their own dialog from Options: each is one entry
+// in the tools list, so every change fetches that again.
+const mcpDialog = new McpDialog($<HTMLDialogElement>("#mcp-dialog"), mcpRegistry);
+$("#manage-mcp").addEventListener("click", () => mcpDialog.open());
+mcpRegistry.addEventListener("written", () => void tools.load());
 // The skills the agent can load (M10b): a checkbox each in their own panel, the registered
 // defaults ticked to start with; the registry is managed in its own dialog, from Options.
 const skillDialog = new SkillDialog($<HTMLDialogElement>("#skills-dialog"), skillRegistry);

@@ -2,6 +2,7 @@ import type {
   ActivityLine,
   ArmEventData,
   EnvVariable,
+  McpServer,
   Provider,
   ProviderHealth,
   Session,
@@ -93,7 +94,9 @@ export type Call = { method: string; path: string; search: string; body: unknown
  * call to `/api/env` answer with the given error envelope instead; `holdEnvWrites` makes PUTs and
  * DELETEs wait for `releaseEnvWrites`. `skills` is the registered skills `/api/skills` lists,
  * installs (a PUT keeps the description of one that exists) and deletes, with `failSkills` and
- * `holdSkillWrites` / `releaseSkillWrites` alike. `activity` is what `GET /api/sessions/{id}/activity`
+ * `holdSkillWrites` / `releaseSkillWrites` alike. `mcpServers` is the registered MCP servers
+ * `/api/mcp-servers` lists, sets and deletes, with `failMcp` and `holdMcpWrites` /
+ * `releaseMcpWrites` alike. `activity` is what `GET /api/sessions/{id}/activity`
  * answers for a session (its lines; 404 when it gives none; `"hang"`: no answer until the request
  * is aborted, counted by `aborted()`), read when asked.
  */
@@ -106,6 +109,7 @@ export function fakeApi(
     tools?: Tool[] | number;
     env?: EnvVariable[];
     skills?: Skill[];
+    mcpServers?: McpServer[];
     activity?: (id: string) => ActivityLine[] | undefined | "hang";
   } = {},
 ) {
@@ -117,6 +121,9 @@ export function fakeApi(
   let heldWrites: Array<() => void> | undefined;
   let skillFailure: Response | undefined;
   let heldSkillWrites: Array<() => void> | undefined;
+  const mcpServers = options.mcpServers ?? [];
+  let mcpFailure: Response | undefined;
+  let heldMcpWrites: Array<() => void> | undefined;
   const encoder = new TextEncoder();
   let events: ReadableStreamDefaultController<Uint8Array> | undefined;
   let nextId = 1;
@@ -261,6 +268,43 @@ export function fakeApi(
         { status: 404 },
       );
     }
+    if (url.pathname === "/api/mcp-servers" || url.pathname.startsWith("/api/mcp-servers/")) {
+      if (heldMcpWrites && request.method !== "GET") {
+        await new Promise<void>((resolve) => heldMcpWrites?.push(resolve));
+      }
+      const failure = mcpFailure;
+      mcpFailure = undefined;
+      if (failure) return failure;
+      const name = decodeURIComponent(url.pathname.slice("/api/mcp-servers/".length));
+      const at = mcpServers.findIndex((s) => s.name === name);
+      if (request.method === "GET") return Response.json(mcpServers);
+      if (request.method === "PUT") {
+        const server: McpServer = {
+          name,
+          description: body.description,
+          command: body.command,
+          args: body.args ?? [],
+          env: body.env ?? {},
+          updatedAt: "2026-11-03T12:00:00Z",
+        };
+        if (at >= 0) mcpServers[at] = server;
+        else mcpServers.push(server);
+        return Response.json(server);
+      }
+      if (request.method === "DELETE" && at >= 0) {
+        mcpServers.splice(at, 1);
+        return new Response(null, { status: 204 });
+      }
+      return Response.json(
+        {
+          error: {
+            code: "MCP_SERVER_NOT_FOUND",
+            message: `No MCP server '${name}' is registered.`,
+          },
+        },
+        { status: 404 },
+      );
+    }
     if (request.method === "GET" && url.pathname === "/api/events") {
       const stream = new ReadableStream<Uint8Array>({
         start: (controller) => {
@@ -300,6 +344,19 @@ export function fakeApi(
     releaseSkillWrites() {
       const waiting = heldSkillWrites ?? [];
       heldSkillWrites = undefined;
+      for (const resolve of waiting) resolve();
+    },
+    mcpServers,
+    mcpCalls: () => calls.filter((c) => c.path.startsWith("/api/mcp-servers")),
+    failMcp(status: number, code: string, message: string) {
+      mcpFailure = Response.json({ error: { code, message, details: {} } }, { status });
+    },
+    holdMcpWrites() {
+      heldMcpWrites = [];
+    },
+    releaseMcpWrites() {
+      const waiting = heldMcpWrites ?? [];
+      heldMcpWrites = undefined;
       for (const resolve of waiting) resolve();
     },
     streams: () => calls.filter((c) => c.path === "/api/events").length,

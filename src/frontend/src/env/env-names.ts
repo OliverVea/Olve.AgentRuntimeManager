@@ -18,6 +18,7 @@ export const reservedEnvNames: readonly string[] = [
   "TMPDIR",
   "DISABLE_UPDATES",
   "ENABLE_CLAUDEAI_MCP_SERVERS",
+  "MCP_TIMEOUT",
 ];
 
 /** Every name starting with one of these is reserved too. */

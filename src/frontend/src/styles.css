@@ -1196,3 +1196,65 @@ dialog.env-dialog {
     grid-template-columns: 1fr;
   }
 }
+
+/* The MCP servers dialog (M10c): the Skills dialog's rows; the env dialog's in-row edit, with two text boxes. */
+.mcp-dialog .env-item {
+  grid-template-columns: minmax(0, 10em) minmax(0, 1fr) auto auto;
+}
+.mcp-dialog .env-item .desc {
+  font:
+    12.5px system-ui,
+    sans-serif;
+}
+.mcp-dialog .env-item .src {
+  grid-column: 1 / -1;
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -3px;
+}
+.mcp-dialog .env-item.confirming .src {
+  display: none;
+}
+.mcp-dialog .env-form .fields,
+.mcp-dialog .env-item.editing .edit-fields {
+  grid-template-columns: minmax(0, 10em) minmax(0, 1fr);
+}
+.mcp-dialog .field.wide {
+  grid-column: 1 / -1;
+}
+.mcp-dialog .field textarea {
+  font: 12.5px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--field);
+  color: var(--text);
+  resize: vertical;
+  min-height: 52px;
+  width: 100%;
+}
+.mcp-dialog .field textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.mcp-dialog .field textarea.bad {
+  border-color: var(--danger);
+}
+@media (max-width: 720px) {
+  .mcp-dialog .env-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .mcp-dialog .env-item .desc {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    white-space: normal;
+  }
+  .mcp-dialog .env-form .fields,
+  .mcp-dialog .env-item.editing .edit-fields {
+    grid-template-columns: 1fr;
+  }
+}
