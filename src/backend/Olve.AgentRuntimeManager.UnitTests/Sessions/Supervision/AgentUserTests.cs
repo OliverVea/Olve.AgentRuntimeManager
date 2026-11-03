@@ -185,6 +185,14 @@ public class AgentUserTests
         Directory.CreateSymbolicLink(Path.Combine(folder, "elsewhere"), outside);
         Directory.CreateSymbolicLink(Path.Combine(folder, "skills", "pdf", "deeper"), outside);
         File.CreateSymbolicLink(Path.Combine(folder, "a-file"), Path.Combine(outside, "keep.txt"));
+        // Claude Code's transcripts of it, by its workplace, and another session's.
+        var projects = Path.Combine(_root, "claude", "projects");
+        var transcripts = Path.Combine(projects, ClaudeProjects.FolderName(Path.Combine(folder, "work")));
+        var others = Path.Combine(projects, ClaudeProjects.FolderName(Path.Combine(_root, "sessions", Guid.NewGuid().ToString(), "work")));
+        Directory.CreateDirectory(Path.Combine(transcripts, "subagents"));
+        File.WriteAllText(Path.Combine(transcripts, $"{launch.SessionId}.jsonl"), "{}");
+        Directory.CreateDirectory(others);
+        File.WriteAllText(Path.Combine(others, "other.jsonl"), "{}");
 
         var retired = provider.RemoveFolder(launch.SessionId);
         var sessions = Directory.GetFileSystemEntries(Path.Combine(_root, "sessions")).Select(entry => Path.GetFileName(entry)!).ToArray();
@@ -195,8 +203,13 @@ public class AgentUserTests
         await Assert.That(sessions).IsEquivalentTo([$".deleted-{launch.SessionId:D}"]);
         await Assert.That(Directory.GetFileSystemEntries(Path.Combine(_root, "sessions"))).IsEmpty();
         await Assert.That(File.ReadAllText(Path.Combine(outside, "keep.txt"))).IsEqualTo("not this session's");
-        await Assert.That(SudoCalls().Last()).IsEqualTo(
-            $"-n -u {account.Name} -- {Supervisor} remove-folder {Path.Combine(_root, "sessions")} {launch.SessionId:D}");
+        await Assert.That(Directory.Exists(transcripts)).IsFalse();
+        await Assert.That(File.Exists(Path.Combine(others, "other.jsonl"))).IsTrue();
+        await Assert.That(SudoCalls().TakeLast(2)).IsEquivalentTo(
+        [
+            $"-n -u {account.Name} -- {Supervisor} remove-transcripts {projects} {Path.Combine(folder, "work")}",
+            $"-n -u {account.Name} -- {Supervisor} remove-folder {Path.Combine(_root, "sessions")} {launch.SessionId:D}",
+        ], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(provider.RemoveFolder(launch.SessionId)).IsNull(); // gone already: fine
     }
 
@@ -776,7 +789,10 @@ public class AgentUserTests
             SocketRoot = Path.Combine(_root, "sockets"), User = account.Name, Sudo = sudo ?? SudoStub(),
         }), log is null ? _started : _started.Passing(log));
         _servers.Add(supervisors);
-        var options = new ClaudeProviderOptions { Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions") };
+        var options = new ClaudeProviderOptions
+        {
+            Command = ClaudeProviderTests.Stub, WorkRoot = Path.Combine(_root, "sessions"), ConfigDirectory = Path.Combine(_root, "claude"),
+        };
         return (supervisors, new ClaudeProvider(Options.Create(options), supervisors, Repos(supervisors), NullLogger<ClaudeProvider>.Instance, time: time));
     }
 

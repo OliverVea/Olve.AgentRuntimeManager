@@ -38,6 +38,48 @@ internal static class FolderEmptier
         return clock.Elapsed > limit && error is null ? $"Emptying {folder} took more than {limit.TotalSeconds:0} s; the rest is left for later." : error;
     }
 
+    /// <summary>
+    /// <c>remove-transcripts</c> (#22): removes the folder of a deleted session's Claude Code
+    /// transcripts, <c>&lt;projects&gt;/&lt;name&gt;</c> (<see cref="ClaudeProjects.FolderName"/>), in the
+    /// agent user's own home: emptied as <see cref="Empty"/> does, then the folder itself (a link
+    /// there is removed, not followed). Null when it's gone (or there was none), else why not.
+    /// </summary>
+    public static string? RemoveFolder(string projects, string name)
+    {
+        var folder = Path.Combine(projects, name);
+        if (!Posix.ExistsNoFollow(folder))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (new DirectoryInfo(folder) is { LinkTarget: null, Exists: true } directory)
+            {
+                if (Empty(folder) is { } error)
+                {
+                    return error;
+                }
+
+                directory.Delete();
+            }
+            else
+            {
+                File.Delete(folder);
+            }
+
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"Removing {folder} failed: {exception.Message}";
+        }
+    }
+
     /// <summary>Removes what's in <paramref name="directory"/>, deepest first, until <paramref name="late"/>.</summary>
     private static void EmptyInto(DirectoryInfo directory, Func<bool> late, ref string? error)
     {

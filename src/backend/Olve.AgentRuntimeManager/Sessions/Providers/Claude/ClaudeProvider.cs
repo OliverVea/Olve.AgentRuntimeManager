@@ -229,13 +229,24 @@ public sealed class ClaudeProvider(
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
-    /// <summary>Empties a retired folder as the agent user, then removes it; null when it's gone.</summary>
+    /// <summary>
+    /// Removes Claude Code's transcripts of the session (in the agent user's home, where only that
+    /// user may go), then empties its retired folder as that user and removes the folder; null when
+    /// both are gone. The transcripts first: the retired folder is what has a later pass try again.
+    /// </summary>
     private string? RemoveRetired(string root, Guid sessionId)
     {
         var retired = Path.Combine(root, RetiredFolders.Name(sessionId));
         if (!Posix.ExistsNoFollow(retired))
         {
             return null;
+        }
+
+        // The workplace the agent ran in, under the session's own name: what Claude Code named the folder by.
+        var workplace = Path.Combine(root, sessionId.ToString(), "work");
+        if (supervisors.RemoveTranscripts(ClaudeProjectsFolder(options.Value), workplace) is { } transcripts)
+        {
+            return transcripts;
         }
 
         if (supervisors.EmptyRetiredFolder(root, sessionId) is { } error)
@@ -506,6 +517,10 @@ public sealed class ClaudeProvider(
 
         throw new FileNotFoundException($"'{command}' is not on the PATH.", command);
     }
+
+    /// <summary>Where Claude Code keeps its transcripts: <c>projects</c> in its configuration folder (<c>~/.claude</c> of the agent's user by default).</summary>
+    private string ClaudeProjectsFolder(ClaudeProviderOptions settings) =>
+        Path.Combine(settings.ConfigDirectory is { Length: > 0 } configured ? configured : Path.Combine(supervisors.AgentHome, ".claude"), "projects");
 
     private static string Folder(ClaudeProviderOptions settings, Guid sessionId) => Path.Combine(WorkRoot(settings), sessionId.ToString());
 

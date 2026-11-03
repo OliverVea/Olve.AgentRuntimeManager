@@ -69,6 +69,55 @@ public class RemoveFolderTests
         await Assert.That(File.ReadAllText(Path.Combine(target, "keep.txt"))).IsEqualTo("keep");
     }
 
+    [Test]
+    [Arguments("relative/projects", "/s/6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/work")]
+    [Arguments("/abs/projects", "relative/6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/work")]
+    [Arguments("/abs/projects", "/s/6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b")]
+    [Arguments("/abs/projects", "/s/6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/work/x")]
+    [Arguments("/abs/projects", "/s/not-a-session/work")]
+    [Arguments("/abs/projects", "/s/00000000-0000-0000-0000-000000000000/work")]
+    [Arguments("/abs/projects", "/work")]
+    public async Task RemoveTranscripts_BadArguments_Exit2(string projects, string workplace)
+    {
+        var (exitCode, error) = await Run("remove-transcripts", projects, workplace);
+
+        await Assert.That(exitCode).IsEqualTo(2);
+        await Assert.That(error).Contains("remove-transcripts <claude projects folder> <workplace>");
+    }
+
+    [Test]
+    public async Task RemoveTranscripts_RemovesOnlyThatWorkplacesFolder_LinksNotFollowed()
+    {
+        var projects = Path.Combine(_root, "projects");
+        var workplace = $"/var/lib/olve-arm/sessions/{Guid.NewGuid():D}/work";
+        var folder = Path.Combine(projects, ClaudeProjectsName(workplace));
+        var other = Path.Combine(projects, ClaudeProjectsName($"/var/lib/olve-arm/sessions/{Guid.NewGuid():D}/work"));
+        var target = Path.Combine(_root, "target");
+        Directory.CreateDirectory(Path.Combine(folder, "subagents"));
+        File.WriteAllText(Path.Combine(folder, "subagents", "a.jsonl"), "{}");
+        Directory.CreateDirectory(other);
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "keep.txt"), "keep");
+        Directory.CreateSymbolicLink(Path.Combine(folder, "link"), target);
+
+        var (exitCode, _) = await Run("remove-transcripts", projects, workplace);
+        var (again, _) = await Run("remove-transcripts", projects, workplace);
+
+        await Assert.That(exitCode).IsEqualTo(0);
+        await Assert.That(again).IsEqualTo(0);
+        await Assert.That(Directory.Exists(folder)).IsFalse();
+        await Assert.That(Directory.Exists(other)).IsTrue();
+        await Assert.That(File.ReadAllText(Path.Combine(target, "keep.txt"))).IsEqualTo("keep");
+    }
+
+    [Test]
+    public async Task ClaudeProjects_NamesAFolderAsClaudeCodeDoes() =>
+        // As found on beta's VM (Claude Code 2.1.316): ~/.claude/projects/-var-lib-olve-arm-sessions-<id>-work.
+        await Assert.That(ClaudeProjectsName("/var/lib/olve-arm/sessions/f3254bf4-799e-4409-a6a1-a64e349b38d8/work"))
+            .IsEqualTo("-var-lib-olve-arm-sessions-f3254bf4-799e-4409-a6a1-a64e349b38d8-work");
+
+    private static string ClaudeProjectsName(string workplace) => Olve.AgentRuntimeManager.Supervisor.Protocol.ClaudeProjects.FolderName(workplace);
+
     private static async Task<(int ExitCode, string Error)> Run(params string[] arguments)
     {
         var info = new ProcessStartInfo(Supervisor) { RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false };

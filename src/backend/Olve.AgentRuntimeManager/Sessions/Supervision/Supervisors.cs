@@ -302,6 +302,18 @@ public sealed class Supervisors(IOptions<SupervisorOptions> options, ILogger<Sup
     public string? EmptyRetiredFolder(string sessions, Guid sessionId) => RunRemoval(["remove-folder", sessions, sessionId.ToString("D")]);
 
     /// <summary>
+    /// Removes the folder of Claude Code's transcripts of a deleted session that ran in
+    /// <paramref name="workplace"/>, from <paramref name="projects"/> in the agent user's home (#22),
+    /// as that user: the supervisor's <c>remove-transcripts</c> (fine with one already gone). The
+    /// error if it couldn't (bounded).
+    /// </summary>
+    public string? RemoveTranscripts(string projects, string workplace) => RunRemoval(["remove-transcripts", projects, workplace]);
+
+    /// <summary>The home of the user agents run as: the agent user's, or ARM's own without one.</summary>
+    public string AgentHome =>
+        _account.Value?.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>
     /// Runs one of the supervisor's removals (<paramref name="arguments"/>, the subcommand first) to
     /// its end: null when it exited 0, else its error (stderr, or the exit code), or that it took more
     /// than <see cref="RemoveTimeout"/> (then it's killed, as far as ARM may).

@@ -75,7 +75,9 @@ as in local dev and the tests: supervisors run as ARM's own user, as before. Set
 - **Deleting a session's folder** (#22), once its record and worktrees are gone: ARM renames it to
   `sessions/.deleted-<id>` in the delete request (only ARM may change `sessions/`' entries; not
   while the session's last agent still runs, an orphan that couldn't be killed: then it stays).
-  The worktree retries' pass, every 30 s, then has the supervisor's `remove-folder` empty it as
+  The worktree retries' pass, every 30 s, then has the supervisor's `remove-transcripts` remove
+  Claude Code's transcripts of it (`~/.claude/projects/-var-lib-olve-arm-sessions-<id>-work`, in
+  the agent user's home, where ARM can't go), and its `remove-folder` empty the folder as
   the agent user, removing links without following them and stopping itself after 20 s, and ARM
   removes the then empty folder (`rmdir`, never recursive). ARM never goes into the folder
   itself: any agent can write into any session's folder, so a link swapped in mid-delete could

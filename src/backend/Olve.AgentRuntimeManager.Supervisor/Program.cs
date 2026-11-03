@@ -21,6 +21,10 @@ using Olve.AgentRuntimeManager.Supervisor.Protocol;
 // `olve-arm-supervisor remove-folder <sessions folder> <session id>`: empties a deleted session's
 // retired folder `<sessions folder>/.deleted-<id>` (#22), links removed, not followed; ARM then
 // removes the empty folder (fine if it's gone already). Exit code 1: something is left in it.
+// `olve-arm-supervisor remove-transcripts <claude projects folder> <workplace>`: removes the
+// folder of Claude Code's transcripts of a deleted session that ran in `<workplace>`
+// (`<sessions folder>/<id>/work`), in the agent user's home (#22; fine if it's gone already).
+// Exit code 1: it couldn't.
 // Unix only: sockets and file modes, setsid, process groups (ARM runs on Linux).
 if (OperatingSystem.IsWindows())
 {
@@ -147,6 +151,28 @@ if (args is ["remove-folder", ..])
     }
 
     var error = FolderEmptier.Empty(Path.Combine(sessions, RetiredFolders.Name(sessionId)));
+    if (error is not null)
+    {
+        await Console.Error.WriteLineAsync($"olve-arm-supervisor: {error}");
+        return 1;
+    }
+
+    return 0;
+}
+
+if (args is ["remove-transcripts", ..])
+{
+    // Only a session's workplace names a folder: `<…>/<session id>/work`, so the name is that
+    // session's alone (it's letters, digits and `-`: it can't lead out of the projects folder).
+    if (args is not [_, var projects, var workplace] || !Path.IsPathFullyQualified(projects) || !Path.IsPathFullyQualified(workplace)
+        || Path.GetFileName(workplace) != "work" || !Guid.TryParseExact(Path.GetFileName(Path.GetDirectoryName(workplace)), "D", out var owner)
+        || owner == Guid.Empty)
+    {
+        await Console.Error.WriteLineAsync("olve-arm-supervisor: remove-transcripts <claude projects folder> <workplace>, both absolute paths, the workplace <sessions folder>/<session id>/work.");
+        return 2;
+    }
+
+    var error = FolderEmptier.RemoveFolder(projects, ClaudeProjects.FolderName(workplace));
     if (error is not null)
     {
         await Console.Error.WriteLineAsync($"olve-arm-supervisor: {error}");
