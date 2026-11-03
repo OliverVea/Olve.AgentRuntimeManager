@@ -144,7 +144,7 @@ export async function run(
     return usage(new UsageError((error as Error).message, hint));
   }
 
-  if (positionals.length !== command.args.length) {
+  if (positionals.length < command.args.length || (positionals.length > command.args.length && !command.rest)) {
     const expected = command.args.map((a) => `<${a.name}>`).join(" ") || "no arguments";
     const problem =
       positionals.length < command.args.length
@@ -197,6 +197,7 @@ export async function run(
   try {
     const output = await command.run({
       args,
+      rest: positionals.slice(command.args.length),
       options,
       client,
       url,

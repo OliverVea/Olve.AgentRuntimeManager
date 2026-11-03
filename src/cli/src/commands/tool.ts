@@ -15,7 +15,7 @@ export function formatTools(tools: readonly Tool[]): string {
 
 export const toolGroup: CommandGroup = {
   name: "tool",
-  summary: "ARM's tools, which sessions name to get them instead of the provider's own",
+  summary: "What sessions name to give their agent tools: ARM's own and registered MCP servers, instead of the provider's",
   defaultCommand: "list",
   commands: [
     {

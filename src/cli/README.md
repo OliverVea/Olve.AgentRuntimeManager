@@ -27,6 +27,7 @@ arm events [--event X,Y] [--exclude-event X,Y] [--last-event-id ID]
 arm provider list | arm provider [health]
 arm tool [list]
 arm skill [list] | arm skill get <name> | arm skill install <name> <url>[#ref] [--path FOLDER] [--default] | arm skill remove <name>
+arm mcp [list] | arm mcp get <name> | arm mcp set <name> <description> [--env NAME=VALUE]... [--] <command> [<args>...] | arm mcp delete <name>
 
 arm server [info]
 
@@ -158,6 +159,26 @@ description), `arm skill get NAME` one in full, `arm skill remove NAME` removes 
 skills' folders when its agent first starts, so installing, replacing or removing a skill later
 doesn't touch sessions that exist. `arm session get` always shows them (`skills  pipelines, pdf`, or
 `skills  none`); a name ARM doesn't have is the server's 400 `UNKNOWN_SKILL` (exit 1).
+
+## MCP servers
+
+`arm mcp set NAME DESCRIPTION [--env NAME=VALUE]... -- COMMAND [ARGS...]` registers an external MCP
+server, a program ARM starts over stdio, or replaces it whole; the `--` keeps the command's own flags
+apart from `arm`'s, so global options go before it:
+`arm mcp set memory 'A knowledge graph' -- npx -y @modelcontextprotocol/server-memory@2.0.1`.
+`NAME` is what sessions call it (lower-case letters, digits and dashes, at most 32; `arm` and `arm-*`
+are reserved). `--env` values aren't secret: anyone with API access reads them back. Registering
+doesn't start the server, so a command that can't run shows when a session uses it. `arm mcp list`
+shows them (name, command, description), `arm mcp get NAME` one in full, with its env,
+`arm mcp delete NAME` unregisters one.
+
+`arm session create --tool NAME` gives the agent all of a server's tools; `arm tool list` shows the
+servers beside ARM's own tools, never as defaults, so `--tool` lists what the agent gets:
+`--tool arm_bash --tool memory`. The agent calls them `memory__create_entities`, and conversations
+and activity show `memory/create_entities`. A session takes the definition when it's created, so
+changing or deleting a server later doesn't touch sessions that exist. A server that doesn't start
+within 120 s, or has a tool ARM can't give the agent, fails the session with the reason; one that
+dies later has its calls return errors.
 
 ## Environment variables
 

@@ -192,7 +192,7 @@ export const sessionGroup: CommandGroup = {
         tool: {
           type: "string",
           description:
-            "One of ARM's tools to give the agent (see `arm tool list`); the agent gets exactly these (default: the server's default tools)",
+            "One of ARM's tools or a registered MCP server to give the agent (see `arm tool list`); the agent gets exactly these (default: the server's default tools)",
           valueName: "NAME",
           multiple: true,
         },

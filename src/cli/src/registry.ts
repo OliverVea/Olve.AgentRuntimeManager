@@ -22,6 +22,8 @@ export type OptionValues = Record<string, string | string[] | boolean | undefine
 export type CommandContext = {
   /** Positional arguments by name (all required). */
   args: Record<string, string>;
+  /** The positional arguments after `args`, for a command with {@link Command.rest}. */
+  rest: string[];
   /** Command-specific option values (global options are handled by the runner). */
   options: OptionValues;
   /** Generated Hey API client, configured with base URL, token and fetch. */
@@ -64,6 +66,8 @@ export type Command = {
   name: string;
   summary: string;
   args: ArgSpec[];
+  /** Any number of further positional arguments (`[<rest>...]`), after `args`. */
+  rest?: ArgSpec;
   options: Record<string, OptionSpec>;
   /** Streams until interrupted: Ctrl+C then aborts `ctx.signal` (exit 0) instead of killing the process. */
   streaming?: boolean;

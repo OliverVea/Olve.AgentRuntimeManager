@@ -3,6 +3,7 @@ import { configGroup } from "./config";
 import { envGroup } from "./env";
 import { eventsGroup } from "./events";
 import { loginGroup, logoutGroup } from "./login";
+import { mcpGroup } from "./mcp";
 import { providerGroup } from "./provider";
 import { serverGroup } from "./server";
 import { sessionGroup } from "./session";
@@ -19,6 +20,7 @@ export const groups: readonly CommandGroup[] = [
   providerGroup,
   toolGroup,
   skillGroup,
+  mcpGroup,
   serverGroup,
   configGroup,
 ];

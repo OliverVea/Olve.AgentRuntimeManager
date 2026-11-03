@@ -44,7 +44,7 @@ Run 'arm <group> --help' for a group's commands.`;
 }
 
 function usageLine(group: CommandGroup, command: Command): string {
-  const args = command.args.map((a) => `<${a.name}>`).join(" ");
+  const args = [...command.args.map((a) => `<${a.name}>`), ...(command.rest ? [`[<${command.rest.name}>...]`] : [])].join(" ");
   const name = group.defaultCommand === command.name ? "" : command.name;
   return ["arm", group.name, name, args, "[options]"].filter(Boolean).join(" ");
 }
@@ -63,10 +63,9 @@ Run 'arm ${group.name} <command> --help' for details; 'arm --help' for global op
 
 export function commandHelp(group: CommandGroup, command: Command): string {
   const sections = [`${command.summary}\n\nUsage:\n  ${usageLine(group, command)}`];
-  if (command.args.length) {
-    sections.push(
-      `Arguments:\n${indent(formatKeyValue(command.args.map((a) => [`<${a.name}>`, a.description] as const)))}`,
-    );
+  const args = [...command.args, ...(command.rest ? [command.rest] : [])];
+  if (args.length) {
+    sections.push(`Arguments:\n${indent(formatKeyValue(args.map((a) => [`<${a.name}>`, a.description] as const)))}`);
   }
   if (Object.keys(command.options).length) {
     sections.push(`Options:\n${optionLines(command.options)}`);
