@@ -11,8 +11,8 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 /// </summary>
 internal sealed class CappedOutput(int headLength = CappedOutput.DefaultHead, int tailLength = CappedOutput.DefaultTail)
 {
-    public const int DefaultHead = 15_000;
-    public const int DefaultTail = 15_000;
+    public const int DefaultHead = 5_000;
+    public const int DefaultTail = 5_000;
 
     private readonly StringBuilder _head = new();
     private readonly char[] _tail = new char[tailLength];
@@ -77,7 +77,10 @@ internal sealed class CappedOutput(int headLength = CappedOutput.DefaultHead, in
         }
     }
 
-    public override string ToString()
+    public override string ToString() => ToString("only the head and the tail are kept");
+
+    /// <param name="note">What the mark in a cut output ends with: where the rest went.</param>
+    public string ToString(string note)
     {
         lock (_head)
         {
@@ -96,7 +99,7 @@ internal sealed class CappedOutput(int headLength = CappedOutput.DefaultHead, in
             // A tail that starts on the second half of a pair drops it.
             var tailText = tail.Length > 0 && char.IsLowSurrogate(tail[0]) ? tail.ToString(1, tail.Length - 1) : tail.ToString();
             return string.Create(CultureInfo.InvariantCulture,
-                $"{_head}\n\n[... {cut + _tailCount - tailText.Length} characters of output cut here, of {_total}: only the head and the tail are kept ...]\n\n{tailText}");
+                $"{_head}\n\n[... {cut + _tailCount - tailText.Length} characters of output cut here, of {_total}: {note} ...]\n\n{tailText}");
         }
     }
 }

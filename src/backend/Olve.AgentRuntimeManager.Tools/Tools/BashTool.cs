@@ -10,7 +10,8 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 /// <c>arm_bash</c>: one command in a fresh <c>bash -c</c>, nothing carried over between calls. It
 /// runs in a session of its own (so its group can be stopped whole), with stdin from /dev/null
 /// and stdout and stderr captured together (never the server's own stdio, which is the MCP
-/// channel), capped (<see cref="CappedOutput"/>). Whatever is left of the group when the command
+/// channel), capped (<see cref="CappedOutput"/>) with all of it in a file as it arrives
+/// (<see cref="ToolOutputs"/>), kept if it was cut. Whatever is left of the group when the command
 /// ends, on its timeout or when the call is cancelled is stopped, and so is what left the group
 /// (setsid, a daemon), which the server inherits as a subreaper (<see cref="ProcessGroups"/>):
 /// nothing a call starts outlives it, but for a server killed with SIGKILL. Background jobs that
@@ -19,8 +20,8 @@ namespace Olve.AgentRuntimeManager.Tools.Tools;
 [UnsupportedOSPlatform("windows")]
 internal static class BashTool
 {
-    public const int DefaultTimeoutSeconds = 120;
     public const int MaxTimeoutSeconds = 600;
+    public const int DefaultTimeoutSeconds = MaxTimeoutSeconds;
 
     /// <summary>
     /// The command as bash's <c>$1</c>, run by a bash that first points stdin at /dev/null and
@@ -32,7 +33,7 @@ internal static class BashTool
     /// <summary>How long the output may still arrive after bash has exited (it's read on its own).</summary>
     private static readonly TimeSpan Drain = TimeSpan.FromMilliseconds(500);
 
-    public static async Task<ToolResult> RunAsync(ToolArguments arguments, ToolContext context, CancellationToken cancellationToken)
+    public static async Task<ToolResult> RunAsync(ToolArguments arguments, ToolContext context, CancellationToken cancellationToken, string? toolUseId = null)
     {
         var command = arguments.RequiredString("command");
         _ = arguments.OptionalString("description");
@@ -84,7 +85,8 @@ internal static class BashTool
             {
                 process.StandardInput.Close();
                 var output = new CappedOutput();
-                var readers = Task.WhenAll(ReadAsync(process.StandardOutput.BaseStream, output), ReadAsync(process.StandardError.BaseStream, output));
+                using var file = context.Outputs.Open(toolUseId);
+                var readers = Task.WhenAll(ReadAsync(process.StandardOutput.BaseStream, output, file), ReadAsync(process.StandardError.BaseStream, output, file));
 
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
                 using var stop = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken);
@@ -110,7 +112,9 @@ internal static class BashTool
                 }
 
                 var exitCode = process.ExitCode;
-                var text = output.Total == 0 ? "(no output)" : output.ToString().TrimEnd('\n');
+                var cut = output.Total > ToolOutputs.MaxText;
+                file.Close(keep: cut);
+                var text = output.Total == 0 ? "(no output)" : output.ToString(file.Note()).TrimEnd('\n');
                 if (!stopped)
                 {
                     return ToolResult.Ok(string.Create(CultureInfo.InvariantCulture, $"{text}\n\nExit code: {exitCode}"));
@@ -130,7 +134,7 @@ internal static class BashTool
         }
     }
 
-    private static async Task ReadAsync(Stream stream, CappedOutput output)
+    private static async Task ReadAsync(Stream stream, CappedOutput output, OutputFile file)
     {
         var decoder = new UTF8Encoding(false).GetDecoder();
         var bytes = new byte[8192];
@@ -140,6 +144,7 @@ internal static class BashTool
             int read;
             while ((read = await stream.ReadAsync(bytes)) > 0)
             {
+                file.Write(bytes.AsSpan(0, read));
                 var count = decoder.GetChars(bytes, 0, read, chars, 0, flush: false);
                 output.Append(chars.AsSpan(0, count));
             }

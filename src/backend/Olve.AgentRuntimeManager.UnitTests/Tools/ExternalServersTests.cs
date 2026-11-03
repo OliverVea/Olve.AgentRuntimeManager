@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Time.Testing;
 using Olve.AgentRuntimeManager.Supervisor.Protocol;
 using Olve.AgentRuntimeManager.Tools.Calls;
 using Olve.AgentRuntimeManager.Tools.External;
@@ -62,6 +63,7 @@ public class ExternalServersTests
         await Assert.That(servers.Tools[1].RealName).IsEqualTo("dotted.name");
         await Assert.That(servers.Tools[0].Definition["title"]!.GetValue<string>()).IsEqualTo("Create Entities");
         await Assert.That(servers.Tools[0].Definition["inputSchema"]!["required"]![0]!.GetValue<string>()).IsEqualTo("entities");
+        await Assert.That(servers.Tools[0].Definition.ContainsKey("outputSchema")).IsFalse();
     }
 
     [Test]
@@ -269,20 +271,79 @@ public class ExternalServersTests
         await Assert.That(again!.Raw!.ToJsonString()).IsEqualTo(first!.Raw!.ToJsonString());
     }
 
-    [Test]
-    public async Task AResultTooLargeForTheJournal_ReachesTheAgent_AndReadsAsTooLargeAfter()
+    /// <summary>A server whose call answers with <paramref name="result"/>, however large (it's too long for a command line).</summary>
+    private StubMcpServer Answering(string result)
     {
-        var huge = new string('x', CallJournal.MaxText + 1);
-        var hugeFile = _folder.Write("huge.json", $$"""{"result":{"content":[{"type":"text","text":"{{huge}}"}]},"jsonrpc":"2.0","id":ID}""");
-        var servers = Servers(new StubMcpServer(_folder) { Call = $"sed \"s/ID/$id/\" '{hugeFile}'; echo" });
+        var file = _folder.Write("answer.json", $$"""{"result":{{result}},"jsonrpc":"2.0","id":ID}""");
+        return new StubMcpServer(_folder) { Call = $"sed \"s/ID/$id/\" '{file}'; echo" };
+    }
+
+    [Test]
+    public async Task ALargeResult_IsCut_WithItsImagesKept_AndTheWholeOfItInAFile()
+    {
+        var text = "FIRST" + new string('x', ToolOutputs.MaxText) + "LAST";
+        var servers = Servers(Answering($$$"""{"content":[{"type":"text","text":"{{{text}}}"},{"type":"image","data":"aGk=","mimeType":"image/png"}],"structuredContent":{"made":1}}"""));
+        await servers.StartAsync(Plenty);
+
+        var result = await Call(Dispatcher(servers), "stub__create_entities", "toolu_1");
+
+        var saved = _folder.PathOf("session/outputs/toolu_1.json");
+        var sent = result!.Raw!["content"]![0]!["text"]!.GetValue<string>();
+        await Assert.That(sent).StartsWith("FIRST");
+        await Assert.That(sent).Contains($"the whole of it is in {saved}; read it in parts");
+        await Assert.That(sent.Length).IsLessThan(ToolOutputs.MaxText + 500);
+        await Assert.That(result.Raw!["content"]![1]!["data"]!.GetValue<string>()).IsEqualTo("aGk=");
+        await Assert.That(result.Raw!.ContainsKey("structuredContent")).IsFalse();
+        await Assert.That(JsonNode.Parse(File.ReadAllText(saved))!["content"]![0]!["text"]!.GetValue<string>()).IsEqualTo(text);
+    }
+
+    [Test]
+    public async Task ImagesAlone_AreNotCut()
+    {
+        var image = new string('i', ToolOutputs.MaxText * 2);
+        var servers = Servers(Answering($$"""{"content":[{"type":"text","text":"a chart"},{"type":"image","data":"{{image}}","mimeType":"image/png"}]}"""));
+        await servers.StartAsync(Plenty);
+
+        var result = await Call(Dispatcher(servers), "stub__create_entities", "toolu_1");
+
+        await Assert.That(result!.Raw!["content"]![1]!["data"]!.GetValue<string>()).IsEqualTo(image);
+    }
+
+    [Test]
+    public async Task AResultTooLargeForTheJournal_IsAnsweredWhole_ToARepeatedId()
+    {
+        var image = new string('i', CallJournal.MaxText + 1);
+        var stub = Answering($$"""{"content":[{"type":"image","data":"{{image}}","mimeType":"image/png"}]}""");
+        var servers = Servers(stub);
         await servers.StartAsync(Plenty);
 
         var first = await Call(Dispatcher(servers), "stub__create_entities", "toolu_1");
+        var calls = stub.ReceivedLines().Length;
         var again = await Call(Dispatcher(servers), "stub__create_entities", "toolu_1");
 
-        await Assert.That(first!.Raw!["content"]![0]!["text"]!.GetValue<string>().Length).IsEqualTo(huge.Length);
-        await Assert.That(again!.IsError).IsTrue();
-        await Assert.That(again.Text).Contains("too large for the journal to keep. It isn't run again.");
+        await Assert.That(stub.ReceivedLines().Length).IsEqualTo(calls);
+        await Assert.That(again!.Raw!.ToJsonString()).IsEqualTo(first!.Raw!.ToJsonString());
+    }
+
+    [Test]
+    public async Task AHungCall_TimesOut_TellsTheServer_AndIsAnError()
+    {
+        var stub = new StubMcpServer(_folder) { Call = ":" };
+        var servers = Servers(stub);
+        await servers.StartAsync(Plenty);
+        var time = new FakeTimeProvider();
+        var journal = new CallJournal(_folder.PathOf("session/tools.jsonl"));
+        _journals.Add(journal);
+        var dispatcher = new ToolDispatcher(_folder.Context, [], journal, servers, time);
+
+        var call = Call(dispatcher, "stub__create_entities", "toolu_1");
+        await Eventually(() => stub.ReceivedLines().Any(line => line.Contains("tools/call", StringComparison.Ordinal)));
+        time.Advance(ToolDispatcher.ExternalTimeout);
+        var result = await call;
+
+        await Assert.That(result).IsEqualTo(ToolResult.Error("Timed out after 600 s: the MCP server was told to stop, and may have done part of the call."));
+        await Eventually(() => stub.ReceivedLines().Any(line => line.Contains("notifications/cancelled", StringComparison.Ordinal)));
+        await Assert.That(File.ReadAllLines(_folder.PathOf("session/tools.jsonl"))[^1]).Contains("\"durationMs\":600000");
     }
 
     [Test]

@@ -50,6 +50,9 @@ public static class ToolsLaunch
     /// <summary>The folder in the session's folder that holds its copies of its skills, one folder per skill, by name.</summary>
     public const string SkillsFolderName = "skills";
 
+    /// <summary>The folder beside the journal that holds the whole of the calls' large outputs, by tool-use id.</summary>
+    public const string OutputsFolderName = "outputs";
+
     /// <summary>The journal's file name in the session's folder.</summary>
     public const string JournalFileName = "tools.jsonl";
 }

@@ -9,11 +9,20 @@ namespace Olve.AgentRuntimeManager.Tools.Calls;
 
 /// <summary>
 /// Runs a <c>tools/call</c>: only the tools the session named, each id at most once (the
-/// <see cref="CallJournal"/>), and a failure of any kind as a result the agent reads.
+/// <see cref="CallJournal"/>), a failure of any kind as a result the agent reads, and a large result
+/// cut, with the whole of it in a file (<see cref="ToolOutputs"/>).
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<string> tools, CallJournal journal, ExternalServers? externals = null)
+internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<string> tools, CallJournal journal, ExternalServers? externals = null, TimeProvider? time = null)
 {
+    /// <summary>
+    /// How long an external MCP server's call may take. <c>arm_bash</c> has the same default and
+    /// its own <c>timeout_seconds</c>; the file tools can't be cut short, so they have none.
+    /// </summary>
+    public static readonly TimeSpan ExternalTimeout = TimeSpan.FromSeconds(BashTool.DefaultTimeoutSeconds);
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
     /// <summary>
     /// The call's result; null if the server's stop (<paramref name="stopping"/>) cut it short: it's
     /// then left as started in the journal, interrupted, and nothing is answered.
@@ -47,11 +56,12 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         }
 
         using var either = CancellationTokenSource.CreateLinkedTokenSource(cancelled, stopping);
+        var started = _time.GetTimestamp();
         ToolResult result;
         try
         {
             result = external is null
-                ? await RunAsync(name, new ToolArguments(arguments), either.Token)
+                ? await RunAsync(name, new ToolArguments(arguments), toolUseId, either.Token)
                 : await RunExternalAsync(external, arguments, either.Token);
         }
         catch (Exception exception)
@@ -73,19 +83,28 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
             return null;
         }
 
+        // arm_bash saves its own as it runs; a skill's instructions are only any use whole.
+        var sent = name is ToolCatalog.Bash or ToolCatalog.SkillLoad ? result : context.Outputs.Bound(toolUseId, result);
         if (toolUseId is not null)
         {
-            journal.Finish(toolUseId, name, result);
+            var file = sent is { Raw: not null, Text.Length: > CallJournal.MaxText } ? context.Outputs.SaveSent(toolUseId, sent) : null;
+            journal.Finish(toolUseId, name, sent, (long)_time.GetElapsedTime(started).TotalMilliseconds, file);
         }
 
-        return result;
+        return sent;
     }
 
-    private static async Task<ToolResult> RunExternalAsync(ExternalTool tool, JsonObject? arguments, CancellationToken cancellationToken)
+    private async Task<ToolResult> RunExternalAsync(ExternalTool tool, JsonObject? arguments, CancellationToken cancellationToken)
     {
+        using var deadline = new CancellationTokenSource(ExternalTimeout, _time);
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
         try
         {
-            return ToolResult.Passed(await tool.Server.CallAsync(tool.RealName, arguments, cancellationToken));
+            return ToolResult.Passed(await tool.Server.CallAsync(tool.RealName, arguments, either.Token));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return ToolResult.Error($"Timed out after {ExternalTimeout.TotalSeconds:0} s: the MCP server was told to stop, and may have done part of the call.");
         }
         catch (OperationCanceledException)
         {
@@ -97,9 +116,9 @@ internal sealed class ToolDispatcher(ToolContext context, IReadOnlyCollection<st
         }
     }
 
-    private Task<ToolResult> RunAsync(string name, ToolArguments arguments, CancellationToken cancellationToken) => name switch
+    private Task<ToolResult> RunAsync(string name, ToolArguments arguments, string? toolUseId, CancellationToken cancellationToken) => name switch
     {
-        ToolCatalog.Bash => BashTool.RunAsync(arguments, context, cancellationToken),
+        ToolCatalog.Bash => BashTool.RunAsync(arguments, context, cancellationToken, toolUseId),
         // The file tools are quick and can't be cut short: off the reading thread, run to the end.
         ToolCatalog.FileRead => Task.Run(() => FileReadTool.Run(arguments, context), CancellationToken.None),
         ToolCatalog.FileEdit => Task.Run(() => FileEditTool.Run(arguments, context), CancellationToken.None),

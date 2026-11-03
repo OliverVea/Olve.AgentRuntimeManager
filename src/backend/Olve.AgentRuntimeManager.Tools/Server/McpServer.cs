@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Text;
@@ -299,6 +300,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
             try
             {
                 await log.WriteLineAsync($"olve-arm-tools: {name} ({toolUseId ?? "no tool-use id"}) started.");
+                var watch = Stopwatch.StartNew();
                 var result = await dispatcher.CallAsync(name, arguments, toolUseId, cancel.Token, _stopping.Token);
                 // Cancelled: the client wants no answer. Stopping: there's no one to answer.
                 if (result is not null && !cancel.IsCancellationRequested && !_stopping.IsCancellationRequested)
@@ -310,7 +312,7 @@ internal sealed class McpServer(ToolsOptions options, ToolDispatcher dispatcher,
                     });
                 }
 
-                await log.WriteLineAsync($"olve-arm-tools: {name} ({toolUseId ?? "no tool-use id"}) {(result is null ? "stopped" : result.IsError ? "failed" : "done")}.");
+                await log.WriteLineAsync($"olve-arm-tools: {name} ({toolUseId ?? "no tool-use id"}) {(result is null ? "stopped" : result.IsError ? "failed" : "done")} after {watch.ElapsedMilliseconds} ms.");
             }
             catch (Exception exception)
             {

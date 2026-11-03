@@ -145,4 +145,29 @@ public class BashToolTests
         await Assert.That(result.Text).Contains("characters of output cut here");
         await Assert.That(result.Text.Length).IsLessThan(CappedOutput.DefaultHead + CappedOutput.DefaultTail + 500);
     }
+
+    [Test]
+    public async Task Run_LongOutput_IsSavedWhole_ShortOutputIsNot()
+    {
+        var saved = _folder.PathOf("session/outputs/toolu_1.txt");
+
+        var result = await BashTool.RunAsync(ToolsTestFolder.Arguments("""{ "command": "seq 1 10000" }"""), _folder.Context, CancellationToken.None, "toolu_1");
+        await BashTool.RunAsync(ToolsTestFolder.Arguments("""{ "command": "echo short" }"""), _folder.Context, CancellationToken.None, "toolu_2");
+
+        await Assert.That(result.Text).Contains($"the whole of it is in {saved}; read it in parts");
+        await Assert.That(File.ReadAllLines(saved).Length).IsEqualTo(10000);
+        await Assert.That(File.Exists(_folder.PathOf("session/outputs/toolu_2.txt"))).IsFalse();
+    }
+
+    [Test]
+    public async Task Run_OutputPastTheFilesCap_KeepsItsStart_AndSaysSo()
+    {
+        var saved = _folder.PathOf("session/outputs/toolu_1.txt");
+        _folder.MaxOutputFileBytes = 2_000_000;
+
+        var result = await BashTool.RunAsync(ToolsTestFolder.Arguments("""{ "command": "yes | head -c 3000000" }"""), _folder.Context, CancellationToken.None, "toolu_1");
+
+        await Assert.That(result.Text).Contains($"the first 2 MB of it are in {saved}; read it in parts");
+        await Assert.That(new FileInfo(saved).Length).IsEqualTo(2_000_000);
+    }
 }

@@ -20,7 +20,10 @@ public sealed class ToolsTestFolder : IDisposable
     /// <summary>The session's skills (M10b): none unless a test sets some.</summary>
     internal SessionSkills Skills { get; set; } = SessionSkills.None;
 
-    internal ToolContext Context => new(Workplace, Groups, Skills);
+    internal ToolContext Context => new(Workplace, Groups, Skills, new ToolOutputs(PathOf("session/outputs"), MaxOutputFileBytes));
+
+    /// <summary>How much of one output a file holds.</summary>
+    internal long MaxOutputFileBytes { get; set; } = ToolOutputs.DefaultMaxFileBytes;
 
     public string PathOf(string relative) => Path.Combine(Workplace, relative);
 

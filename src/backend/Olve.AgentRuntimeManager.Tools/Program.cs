@@ -55,7 +55,8 @@ using (journal)
     // The skills' descriptions are read now, once: the tool's description lists them.
     var skills = new SessionSkills(options.Skills);
     var externals = new ExternalServers(options.McpServers, options.Workplace, groups, Console.Error);
-    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups, skills), options.Tools, journal, externals);
+    var outputs = new ToolOutputs(Path.Combine(Path.GetDirectoryName(options.Journal)!, ToolsLaunch.OutputsFolderName));
+    var dispatcher = new ToolDispatcher(new ToolContext(options.Workplace, groups, skills, outputs), options.Tools, journal, externals);
     var server = new McpServer(options, dispatcher, groups, skills, externals, Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error);
 
     var stop = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);

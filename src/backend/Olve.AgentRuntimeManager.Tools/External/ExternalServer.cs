@@ -201,6 +201,9 @@ internal sealed class ExternalServer(McpServerDefinition definition, string work
 
         var shown = definition.DeepClone().AsObject();
         shown["name"] = exported;
+        // A large result loses its structuredContent (ToolOutputs), and a client refuses a result
+        // that a tool's output schema promised structured.
+        shown.Remove("outputSchema");
         return new ExternalTool(exported, name, this, shown);
     }
 

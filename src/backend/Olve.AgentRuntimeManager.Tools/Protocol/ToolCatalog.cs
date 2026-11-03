@@ -8,7 +8,7 @@ namespace Olve.AgentRuntimeManager.Tools.Protocol;
 /// </summary>
 public static class ToolCatalog
 {
-    /// <summary><c>command</c>, <c>description</c>?, <c>working_dir</c>?, <c>timeout_seconds</c>? (default 120, max 600).</summary>
+    /// <summary><c>command</c>, <c>description</c>?, <c>working_dir</c>?, <c>timeout_seconds</c>? (default and max 600).</summary>
     public const string Bash = "arm_bash";
 
     /// <summary><c>file_path</c>, <c>offset</c>?, <c>limit</c>?.</summary>

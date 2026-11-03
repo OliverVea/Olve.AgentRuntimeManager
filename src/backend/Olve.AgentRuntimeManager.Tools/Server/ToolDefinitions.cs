@@ -19,8 +19,8 @@ internal static class ToolDefinitions
         [ToolCatalog.Bash] = (
             """
             Each call is a fresh `bash -c`: nothing carries over between calls (no `cd`, variables or functions), so chain steps with `&&` in one command or use `working_dir`. It runs in the workplace, or in `working_dir`.
-            stdin is /dev/null: nothing interactive. stdout and stderr come back together, with the exit code. Long output keeps its head and tail, with a note of how much was cut between.
-            `timeout_seconds` is 120 by default, at most 600; at the timeout the command and everything it started are stopped. Anything still running when the command ends (started with `&`, say) is stopped too: start nothing meant to outlive the call.
+            stdin is /dev/null: nothing interactive. stdout and stderr come back together, with the exit code. Output over 10,000 characters comes back as its first and last 5,000, with a note of the file that holds the rest.
+            `timeout_seconds` is 600 by default, and at most that; at the timeout the command and everything it started are stopped. Anything still running when the command ends (started with `&`, say) is stopped too: start nothing meant to outlive the call.
             For files, prefer arm_file_read, arm_file_edit and arm_file_create over cat, sed or echo.
             """,
             """
@@ -30,14 +30,14 @@ internal static class ToolDefinitions
                 "command": { "type": "string", "description": "The command, run with bash -c." },
                 "description": { "type": "string", "description": "What the command does, in a few words, for whoever follows the session." },
                 "working_dir": { "type": "string", "description": "The folder to run it in: relative to the workplace, or an absolute path. The workplace by default." },
-                "timeout_seconds": { "type": "integer", "description": "Seconds before the command is stopped: 120 by default, at most 600." }
+                "timeout_seconds": { "type": "integer", "description": "Seconds before the command is stopped: 600 by default, and at most that." }
               },
               "required": ["command"]
             }
             """),
         [ToolCatalog.FileRead] = (
             """
-            Lines are numbered from 1, as `cat -n` shows them (the number and a tab come before each line; they aren't part of the file). From line `offset`, at most `limit` lines (2000 by default). Very long lines are cut, and so is a read past the output cap: it says which offset to read on from.
+            Lines are numbered from 1, as `cat -n` shows them (the number and a tab come before each line; they aren't part of the file). From line `offset`, at most `limit` lines (2000 by default). Very long lines are cut, and so is a read past the output cap: it says which offset to read on from. A read over 10,000 characters comes back as its first and last 5,000, with a note of the file that holds the rest: use a smaller `limit` to see all of what you ask for.
             Folders and binary files are refused: use arm_bash for those (ls, file, xxd).
             """,
             $$"""

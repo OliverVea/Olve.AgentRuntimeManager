@@ -38,6 +38,40 @@ public class ToolDispatcherTests
     private int Runs() => File.Exists(_folder.PathOf("runs.txt")) ? File.ReadAllLines(_folder.PathOf("runs.txt")).Length : 0;
 
     [Test]
+    public async Task Call_ALargeFileRead_IsCutToItsHeadAndTail_WithTheWholeOfItInAFile()
+    {
+        var file = _folder.Write("long.txt", string.Join("\n", Enumerable.Range(1, 2000)) + "\n");
+
+        var result = await Call(Dispatcher(), ToolCatalog.FileRead, $$"""{ "file_path": "{{file}}" }""", "toolu_1");
+
+        var saved = _folder.PathOf("session/outputs/toolu_1.txt");
+        await Assert.That(result!.Text).Contains($"the whole of it is in {saved}; read it in parts");
+        await Assert.That(result.Text.Length).IsLessThan(ToolOutputs.MaxText + 500);
+        await Assert.That(File.ReadAllText(saved)).Contains("2000");
+    }
+
+    [Test]
+    public async Task Call_AnIdThatIsntPlain_StaysInTheOutputsFolder()
+    {
+        var file = _folder.Write("long.txt", new string('x', ToolOutputs.MaxText + 1).Replace("xxxxx", "xxxx\n", StringComparison.Ordinal));
+
+        await Call(Dispatcher(), ToolCatalog.FileRead, $$"""{ "file_path": "{{file}}" }""", "../../escaped");
+
+        await Assert.That(File.Exists(_folder.PathOf("escaped.txt"))).IsFalse();
+        await Assert.That(Directory.GetFiles(_folder.PathOf("session/outputs")).Length).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Call_RecordsHowLongItTook()
+    {
+        await Call(Dispatcher(), ToolCatalog.Bash, Append, "toolu_1");
+
+        var finished = JsonNode.Parse(File.ReadAllLines(JournalPath)[^1])!;
+        await Assert.That(finished["event"]!.GetValue<string>()).IsEqualTo("finished");
+        await Assert.That(finished["durationMs"]!.GetValue<long>()).IsGreaterThanOrEqualTo(0);
+    }
+
+    [Test]
     public async Task Call_AToolTheSessionDidNotName_IsRefused()
     {
         var dispatcher = Dispatcher(ToolCatalog.FileRead);

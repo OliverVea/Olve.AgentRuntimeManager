@@ -21,7 +21,7 @@ namespace Olve.AgentRuntimeManager.Tools.Journal;
 /// </remarks>
 internal sealed class CallJournal : IDisposable
 {
-    /// <summary>A result is kept up to this many characters (the tools cap theirs well below it).</summary>
+    /// <summary>A result is kept in a line up to this many characters (only images pass it; those go to a file).</summary>
     public const int MaxText = 100_000;
 
     private readonly string _path;
@@ -98,10 +98,16 @@ internal sealed class CallJournal : IDisposable
     /// Writes down the result of a call <see cref="Begin"/> let run. A write that fails is logged,
     /// not thrown: the call ran, and the agent gets its result (the id then reads as interrupted).
     /// </summary>
-    public void Finish(string id, string tool, ToolResult result)
+    /// <param name="id">The tool-use id.</param>
+    /// <param name="tool">The tool's name.</param>
+    /// <param name="result">What the agent was sent, which a repeated id gets too.</param>
+    /// <param name="durationMs">How long the call took.</param>
+    /// <param name="file">Where <paramref name="result"/> was saved as JSON, if it's too large for a line.</param>
+    public void Finish(string id, string tool, ToolResult result, long? durationMs = null, string? file = null)
     {
         var kept = result switch
         {
+            _ when file is not null => result with { Text = "" },
             { Text.Length: <= MaxText } => result,
             // Half of a JSON document reads as nothing.
             { Raw: not null } => ToolResult.Error($"This call (tool-use id {id}) finished, but its result was too large for the journal to keep. It isn't run again."),
@@ -111,7 +117,7 @@ internal sealed class CallJournal : IDisposable
         {
             try
             {
-                Append(new JournalEntry(id, JournalEntry.Finished, tool, DateTimeOffset.UtcNow, kept.Text, kept.IsError, kept.Raw is null ? null : true));
+                Append(new JournalEntry(id, JournalEntry.Finished, tool, DateTimeOffset.UtcNow, file is null ? kept.Text : null, kept.IsError, kept.Raw is null ? null : true, durationMs, file));
                 _calls[id] = CallState.Finished;
             }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException or ArgumentException or InvalidOperationException)
@@ -151,11 +157,25 @@ internal sealed class CallJournal : IDisposable
         {
             if (entry is { Event: JournalEntry.Finished } && entry.Id == id)
             {
-                found = new ToolResult(entry.Text ?? "", entry.IsError ?? false, entry.IsRaw == true ? JsonNode.Parse(entry.Text ?? "") as JsonObject : null);
+                found = Restored(entry);
             }
         }
 
         return found;
+    }
+
+    /// <summary>A finished entry's result; null if the file it points to can't be read.</summary>
+    private static ToolResult? Restored(JournalEntry entry)
+    {
+        try
+        {
+            var text = entry.File is { } file ? File.ReadAllText(file) : entry.Text ?? "";
+            return new ToolResult(text, entry.IsError ?? false, entry.IsRaw == true ? JsonNode.Parse(text) as JsonObject : null);
+        }
+        catch (Exception exception) when (entry.File is not null && exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
