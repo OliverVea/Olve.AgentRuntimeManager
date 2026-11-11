@@ -2,7 +2,7 @@
 # everywhere. Each task delegates to the project's native build (npm / dotnet).
 [tools]
 node = "24.14.0"
-dotnet = "10.0.200"
+dotnet = "10.0.404"
 # The beta checks (.pipelines/scripts/beta-check.py) run with this python, in the beta-test step's job and in their tests.
 python = "3.12.15"
 
