@@ -49,6 +49,12 @@ Follow [`docs/STANDARDS.md`](docs/STANDARDS.md) (MUST/SHOULD rules for API behav
 Use them to orient when in doubt, but before relying on one that predates the current work,
 confirm with Oliver that it still holds. When a leaning changes, rewrite the entry and its date.
 
+## Publishing
+
+- Agents land their own changes without review: push to `main` (pushing redeploys, see below).
+  Subagents each work in their own git worktree.
+- **A spec change needs Oliver's approval of the spec alone** before the code behind it is built: leave the `src/spec/` change uncommitted for him to read in his editor (or show its diff in the session), and wait for his go-ahead. Nothing else rides along with it.
+
 ## Deployment (GitOps)
 
 This repo deploys via **Olve.Pipelines** — `.pipelines/pipeline.ts` is the live deploy config
